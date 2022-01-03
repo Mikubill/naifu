@@ -336,7 +336,6 @@ class StableDiffusionModel(pl.LightningModule):
             loss = loss.mean([1, 2, 3])
 
             if min_snr_gamma:
-                assert is_v, "min_snr_gamma is only for v_prediction"
                 loss = apply_snr_weight(loss, timesteps, self.noise_scheduler, min_snr_gamma, is_v)
             if scale_pred:
                 assert is_v, "scale_v_pred_loss_like_noise_pred is only for v_prediction"
