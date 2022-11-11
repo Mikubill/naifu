@@ -23,7 +23,7 @@ pip install -r requirements.txt
 Start training
 
 ```bash
-torchrun trainer.py --model_path=/tmp/model --config test-run.yaml
+torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 ```
 
 ## BibTeX

@@ -2,6 +2,7 @@ accelerate
 numpy
 opencv-python
 imageio
+torch-ema
 pytorch-lightning
 omegaconf==2.1.1
 einops==0.3.0

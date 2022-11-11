@@ -1,27 +1,25 @@
 name: test-run
-peers: []
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  output_path: checkpoint
   resolution: 512
   center_crop: false
   seed: 1138
-  gradient_accumulation_steps: 1
   gradient_checkpointing: true
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: false
+  use_ema: true
   use_hivemind: false
-  max_train_epoch: 10
 
-hivemind:
-  target_batch_size: 10000
-  offload_optimizer: true
-  delay_state_averaging: true
-  delay_grad_averaging: true
-  delay_optimizer_step: true
-  reuse_grad_buffers: true
+lightning:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  limit_train_batches: 100
+  max_epochs: 20
+  gradient_clip_val: 0
 
 arb:
    debug: false

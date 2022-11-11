@@ -1,8 +1,8 @@
 name: test-run
-peers: []
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  output_path: checkpoint
   resolution: 512
   center_crop: false
   seed: 1138
@@ -11,12 +11,23 @@ trainer:
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: false
+  use_ema: true
   use_hivemind: true
-  max_train_epoch: 40
 
 hivemind:
   target_batch_size: 10000
+  verbose: true
+  initial_peers: ['/ip4/10.42.38.211/tcp/35127/p2p/QmZvNUwUpdpDBajsgb69SbEGE6fFLF8AheVego11rnK6HX']
+  run_id: "test-run-1112b"
+
+lightning:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  limit_train_batches: 100
+  max_epochs: 20
+  gradient_clip_val: 0
+  precision: 16
 
 arb:
    debug: false

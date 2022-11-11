@@ -16,6 +16,7 @@ dependencies:
     - imageio
     - pytorch-lightning
     - hivemind==1.1.2
+    - torch-ema
     - omegaconf==2.1.1
     - einops==0.3.0
     - torch-fidelity==0.3.0

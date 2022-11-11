@@ -13,6 +13,7 @@ from lib.utils import get_world_size
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import HivemindStrategy
+from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
 from hivemind import Float16Compression
 
 torch.backends.cudnn.benchmark = True
@@ -34,6 +35,16 @@ def main(args):
         bsz=args.train_batch_size,
         seed=config.trainer.seed,
         **config.dataset
+    )
+    
+    checkpoint_callback = ModelCheckpoint(
+        monitor='train_loss',
+        dirpath=config.trainer.output_path,
+        filename='sample-mnist-epoch{epoch:02d}-val_loss{val/loss:.2f}',
+        auto_insert_metric_name=False,
+        every_n_epochs=3,
+        save_top_k=5,
+        save_last=True
     )
     
     train_dataloader = torch.utils.data.DataLoader(
@@ -65,13 +76,19 @@ def main(args):
     )
     
     trainer = pl.Trainer(
-        limit_train_batches=100,
-        max_epochs=config.trainer.max_train_epoch,
-        accelerator="gpu",
-        logger=logger,
-        strategy=hivemind,
+        logger=logger, 
+        strategy=hivemind, 
+        callbacks=[
+            checkpoint_callback,
+            StochasticWeightAveraging(swa_lrs=1e-2)
+        ],
+        **config.lightning
     )
-    trainer.fit(model=model, train_dataloaders=train_dataloader)
+    
+    trainer.fit(
+        model=model, 
+        train_dataloaders=train_dataloader, 
+    )
 
 
 if __name__ == "__main__":
