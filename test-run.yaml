@@ -33,7 +33,8 @@ arb:
    dim_limit: 1024
 
 dataset:
-  img_path: "/storage/datasets/fuji"
+  img_path: 
+    - "/tmp/dataset-0"
   center_crop: false
   ucg: 0.0
   debug_arb: false
@@ -52,7 +53,6 @@ scheduler:
     num_training_steps: 100000
     num_cycles: 50
     last_epoch: -1
-
 
 monitor:
   wandb_id: "test-run-public-2"
