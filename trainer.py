@@ -3,6 +3,7 @@
 
 import torch
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 
 from data.buckets import init_sampler
 from data.store import AspectRatioDataset
@@ -43,7 +44,8 @@ def main(args):
         sampler=sampler, 
         num_workers=8
     )
-    trainer = pl.Trainer(limit_train_batches=100, max_epochs=8, accelerator='gpu')
+    logger = WandbLogger(project=config.monitor.wandb_id) if config.monitor.wandb_id != "" else None
+    trainer = pl.Trainer(limit_train_batches=100, max_epochs=config.trainer.max_train_epoch, accelerator='gpu', logger=logger)
     trainer.fit(model=model, train_dataloaders=train_dataloader)
 
 if __name__ == "__main__":

@@ -5,15 +5,14 @@ trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   resolution: 512
   center_crop: false
-  batch_size: 2
-  seed: 114514
+  seed: 1138
   gradient_accumulation_steps: 1
   gradient_checkpointing: true
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true
-  aspect_ratio_bucket: true
+  use_ema: false
+  max_train_epoch: 40
 
 hivemind:
   batch_size_per_step: 32
@@ -46,13 +45,6 @@ optimizer:
     betas: [0.9, 0.999]
     weight_decay: 1e-2
     eps: 1e-8
-
-scheduler:
-  params:
-    num_warmup_steps: 5000
-    num_training_steps: 100000
-    num_cycles: 50
-    last_epoch: -1
 
 monitor:
   wandb_id: "test-run-public-2"

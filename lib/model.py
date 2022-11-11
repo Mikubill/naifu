@@ -65,7 +65,7 @@ class StableDiffusionModel(pl.LightningModule):
         return optimizer
     
     def on_before_backward(self, loss: torch.Tensor) -> None:
-        if self.unet_ema:
+        if self.config.trainer.use_ema:
             self.unet_ema.step(self.unet.parameters())
 
 
