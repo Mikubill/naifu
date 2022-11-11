@@ -341,7 +341,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
 
 def init_sampler(args, config, dataset, world_size):
     arg_config = {
-        "bsz": args.train_batch_size,
+        "bsz": config.trainer.init_batch_size,
         "seed": config.trainer.seed,
         "world_size": world_size,
         "global_rank": args.local_rank,

@@ -3,6 +3,7 @@ name: test-run
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   output_path: checkpoint
+  init_batch_size: 2
   resolution: 512
   center_crop: false
   seed: 1138
@@ -14,11 +15,21 @@ trainer:
   use_ema: true
   use_hivemind: true
 
+checkpoint:
+  monitor: 'train_loss'
+  dirpath: checkpoint
+  filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
+  auto_insert_metric_name: false
+  every_n_epochs: 3
+  save_top_k: 5
+  save_last: true
+
 hivemind:
   target_batch_size: 10000
   verbose: true
-  initial_peers: ['/ip4/10.42.38.211/tcp/35127/p2p/QmZvNUwUpdpDBajsgb69SbEGE6fFLF8AheVego11rnK6HX']
+  initial_peers: ['/ip4/100.33.102.42/tcp/42713/p2p/QmbcbNkuoq2psV941sor3nZadySRC5aUXLYx8fM1Mvhrm7']
   run_id: "test-run-1112b"
+  use_local_updates: true
 
 lightning:
   accelerator: gpu
@@ -31,8 +42,8 @@ lightning:
 
 arb:
    debug: false
-   base_res: [512, 512]
-   max_size: [768, 512]
+   base_res: [768, 768]
+   max_size: [960, 768]
    divisible: 64
    max_ar_error: 4
    min_dim: 256

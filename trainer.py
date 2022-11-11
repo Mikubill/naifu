@@ -1,4 +1,4 @@
-# torchrun trainer.py --model_path=/tmp/model --config test-run.yaml
+# torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 
 from functools import partial
 import pytorch_lightning as pl
@@ -32,20 +32,12 @@ def main(args):
     dataset = AspectRatioDataset(
         tokenizer=tokenizer,
         size=config.trainer.resolution,
-        bsz=args.train_batch_size,
+        bsz=config.trainer.init_batch_size,
         seed=config.trainer.seed,
         **config.dataset
     )
     
-    checkpoint_callback = ModelCheckpoint(
-        monitor='train_loss',
-        dirpath=config.trainer.output_path,
-        filename='sample-mnist-epoch{epoch:02d}-val_loss{val/loss:.2f}',
-        auto_insert_metric_name=False,
-        every_n_epochs=3,
-        save_top_k=5,
-        save_last=True
-    )
+    checkpoint_callback = ModelCheckpoint(**config.checkpoint)
     
     train_dataloader = torch.utils.data.DataLoader(
         dataset,

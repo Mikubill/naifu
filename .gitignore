@@ -3,3 +3,4 @@ __pycache__
 lightning_logs
 wandb
 test-run-*
+checkpoint
