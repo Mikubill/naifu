@@ -304,9 +304,8 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         
     def init_buckets(self):
         base = random.choice(self.config.dataset.img_path)
-        
-        if base.startswith("https://"):
-            dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{self.batch_counter}")
+        if base.startswith("https://") :
+            dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{self.config.dataset.img_path.index(base)}")
             Path(dlpath).mkdir(exist_ok=True)
             self.download(base, dlpath)
             base = dlpath

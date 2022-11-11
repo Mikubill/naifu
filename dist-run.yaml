@@ -12,16 +12,11 @@ trainer:
   clip_skip: 2
   pad_tokens: true
   use_ema: false
-  use_hivemind: false
+  use_hivemind: true
   max_train_epoch: 40
 
 hivemind:
   target_batch_size: 10000
-  offload_optimizer: true
-  delay_state_averaging: true
-  delay_grad_averaging: true
-  delay_optimizer_step: true
-  reuse_grad_buffers: true
 
 arb:
    debug: false

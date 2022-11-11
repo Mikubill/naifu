@@ -4,6 +4,8 @@ Naifu Diffusion is the name for this project of finetuning Stable Diffusion on i
 
 See `test-run.yaml` for any configuration.
 
+Colab example: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
+
 ## Usage
 
 Fulfill deps

@@ -14,6 +14,7 @@ transformers==4.24.0
 diffusers==0.7.1
 torchmetrics==0.7.0
 bitsandbytes==0.35.4
+hivemind==1.1.2
 kornia==0.6
 gradio
 git+https://github.com/illeatmyhat/taming-transformers.git@master#egg=taming-transformers
