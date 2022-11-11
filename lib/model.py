@@ -18,15 +18,16 @@ device = torch.device('cuda')
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
-    def __init__(self, unet, vae, encoder, noise_scheduler, ema, config):
+    def __init__(self, unet, vae, encoder, noise_scheduler, config):
         super().__init__()
         self.unet = unet
         self.vae = vae
         self.config = config
         self.text_encoder = encoder
         self.noise_scheduler = noise_scheduler
-        self.ema = ema
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
+        if config.trainer.use_ema:
+            self.unet_ema = EMAModel(unet.parameters())
 
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
@@ -62,6 +63,10 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet.parameters(), **self.config.optimizer.params
         )
         return optimizer
+    
+    def on_before_backward(self, loss: torch.Tensor) -> None:
+        if self.unet_ema:
+            self.unet_ema.step(self.unet.parameters())
 
 
 class EMAModel:
@@ -204,13 +209,11 @@ def load_model(model_path, config):
     vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
     unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
     noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
-    ema = EMAModel(unet.parameters())
     
     weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
     vae = vae.to(device, dtype=weight_dtype)
     unet = unet.to(device, dtype=weight_dtype)
     text_encoder = text_encoder.to(device, dtype=weight_dtype)
-    ema.to(device, dtype=weight_dtype)
     
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -218,4 +221,4 @@ def load_model(model_path, config):
     if config.trainer.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
 
-    return tokenizer, StableDiffusionModel(unet, vae, text_encoder, noise_scheduler, ema, config)
+    return tokenizer, StableDiffusionModel(unet, vae, text_encoder, noise_scheduler, config)
