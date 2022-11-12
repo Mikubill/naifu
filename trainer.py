@@ -7,7 +7,7 @@ import torch
 from data.buckets import init_sampler
 from data.store import AspectRatioDataset
 from lib.args import parse_args
-from lib.model import load_model
+from lib.model import get_class, load_model
 from lib.utils import get_world_size
 
 from omegaconf import OmegaConf
@@ -20,11 +20,9 @@ torch.backends.cudnn.benchmark = True
 
 args = parse_args()
 config = OmegaConf.load(args.config)
-torch.cuda.set_device(args.local_rank)
-device = torch.device("cuda")
+
 world_size = get_world_size()
 weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
-
 
 def main(args):
     torch.manual_seed(config.trainer.seed)
@@ -57,7 +55,8 @@ def main(args):
     hivemind = (
         HivemindStrategy(
             scheduler_fn=partial(
-                torch.optim.lr_scheduler.CosineAnnealingWarmRestarts, T_0=1000
+                get_class(config.lr_scheduler.name),
+                **config.lr_scheduler.params
             ),
             grad_compression=Float16Compression(),
             state_averaging_compression=Float16Compression(),
