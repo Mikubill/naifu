@@ -67,12 +67,12 @@ def main(args):
         logger=logger, 
         strategy=hivemind, 
         callbacks=[checkpoint_callback],
-        ckpt_path=args.resume if args.resume else ""
         **config.lightning
     )
     
     trainer.fit(
         model=model, 
+        ckpt_path=args.resume if args.resume else None,
         train_dataloaders=train_dataloader, 
     )
 
