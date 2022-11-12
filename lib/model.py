@@ -32,7 +32,7 @@ class StableDiffusionModel(pl.LightningModule):
         
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
-        latent_dist = self.vae.encode(batch["pixel_values"].to(self.device)).latent_dist
+        latent_dist = self.vae.encode(batch[1]).latent_dist
         latents = latent_dist.sample() * 0.18215
 
         # Sample noise that we'll add to the latents
@@ -48,7 +48,7 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Get the text embedding for conditioning
-        encoder_hidden_states = self.text_encoder(batch['input_ids'].to(self.device), output_hidden_states=True)
+        encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
         encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
 
         # Predict the noise residual
