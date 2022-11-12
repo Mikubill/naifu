@@ -20,10 +20,25 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-Start training
+Start training.
+
+<details>
+      <summary>Project note</summary>
+      There is no need to prepare datasets and models by default, the script will download automatically.
+</details>
 
 ```bash
+# test
 torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
+
+# For multi-gpu
+torchrun trainer.py --model_path=/tmp/model --config config/multigpu.yaml
+
+# For TPU
+torchrun trainer.py --model_path=/tmp/model --config config/tpu.yaml
+
+# Disitrubuted
+torchrun trainer.py --model_path=/tmp/model --config config/distributed.yaml
 ```
 
 ## BibTeX
