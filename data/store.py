@@ -169,14 +169,9 @@ class AspectRatioDataset(ImageStore):
 
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-
         input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-
-        batch = {
-            "input_ids": input_ids,
-            "pixel_values": pixel_values,
-        }
-        return batch
+        
+        return [input_ids, pixel_values]
 
     def transformer(self, img, size, center_crop=False):
         x, y = img.size
@@ -186,7 +181,7 @@ class AspectRatioDataset(ImageStore):
         min_crop, max_crop = (w, h) if w <= h else (h, w)
         ratio_src, ratio_dst = float(long / short), float(max_crop / min_crop)
         
-        if (x>y and w<h) or (x<y and w>h) and self.with_prior_preservation:
+        if (x>y and w<h) or (x<y and w>h):
             # handle i/c mixed input
             img = img.rotate(90, expand=True)
             x, y = img.size
