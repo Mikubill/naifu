@@ -1,0 +1,67 @@
+name: test-run
+
+trainer:
+  model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  init_batch_size: 2
+  resolution: 512
+  center_crop: false
+  seed: 1138
+  gradient_checkpointing: false
+  precision: "fp16"
+  clip_skip: 2
+  pad_tokens: true
+  use_ema: true
+  use_hivemind: false
+  
+checkpoint:
+  monitor: 'train_loss'
+  dirpath: checkpoint
+  filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
+  auto_insert_metric_name: false
+  every_n_epochs: 3
+  save_top_k: 5
+  save_last: true
+
+lightning:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  limit_train_batches: 100
+  max_epochs: 20
+  gradient_clip_val: 0
+
+arb:
+   debug: false
+   base_res: [512, 512]
+   max_size: [768, 512]
+   divisible: 64
+   max_ar_error: 4
+   min_dim: 256
+   dim_limit: 1024
+
+dataset:
+  img_path: 
+    - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
+  center_crop: false
+  ucg: 0.0
+  debug_arb: false
+
+optimizer:
+  name: bitsandbytes.optim.AdamW8bit
+  params:
+    lr: 5e-6
+    betas: [0.9, 0.999]
+    weight_decay: 1e-2
+    eps: 1e-8
+
+lr_scheduler:
+  name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  params:
+    T_0: 10
+    T_mult: 1
+    eta_min: 7e-8
+    last_epoch: -1
+
+monitor:
+  wandb_id: ""
+  store_checkpoints: true
