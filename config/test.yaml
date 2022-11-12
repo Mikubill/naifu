@@ -64,5 +64,5 @@ lr_scheduler:
     last_epoch: -1
 
 monitor:
-  wandb_id: ""
+  wandb_id: "chintora"
   store_checkpoints: true

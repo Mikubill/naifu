@@ -1,4 +1,5 @@
 
+import itertools
 import os
 import random
 from pathlib import Path
@@ -161,8 +162,7 @@ class AspectRatioDataset(ImageStore):
         return res
     
     def collate_fn(self, examples):
-        if len(examples) == 1:
-            examples = examples[0]
+        examples = list(itertools.chain.from_iterable(examples))
     
         input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
