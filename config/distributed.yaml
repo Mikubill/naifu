@@ -29,6 +29,7 @@ hivemind:
   verbose: true
   initial_peers: ['/ip4/102.0.23.15/tcp/37467/p2p/QmSiRevn3qX8wQBcFftRbSCEe1LmPSfHA5P8PNBBup53fP']
   run_id: "test-run-1112b"
+  host_maddrs: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic"]
 
 lightning:
   accelerator: gpu

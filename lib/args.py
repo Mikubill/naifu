@@ -23,6 +23,12 @@ def parse_args():
         default=-1,
         help="For distributed training: local_rank",
     )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Resume from previous saved checkpoint.",
+    )
 
     args = parser.parse_args()
     
