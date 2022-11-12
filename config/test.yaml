@@ -10,7 +10,7 @@ trainer:
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true
+  use_ema: false # may OOM on colab
   use_hivemind: false
   
 checkpoint:
@@ -29,6 +29,7 @@ lightning:
   limit_train_batches: 100
   max_epochs: 20
   gradient_clip_val: 0
+  precision: 16
 
 arb:
    debug: false

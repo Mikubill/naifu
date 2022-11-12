@@ -5,6 +5,7 @@ imageio
 torch-ema
 pytorch-lightning
 omegaconf==2.1.1
+lightning_lite
 einops==0.3.0
 transformers==4.24.0
 diffusers==0.7.1

@@ -27,7 +27,7 @@ checkpoint:
 hivemind:
   target_batch_size: 1000
   verbose: true
-  initial_peers: ['/ip4/100.0.33.129/tcp/38123/p2p/QmbcbNkuoq2psV941sor3nZadySRC5aUXLYx8fM1Mvhrm7']
+  initial_peers: ['/ip4/102.0.23.15/tcp/37467/p2p/QmSiRevn3qX8wQBcFftRbSCEe1LmPSfHA5P8PNBBup53fP']
   run_id: "test-run-1112b"
 
 lightning:

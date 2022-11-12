@@ -8,6 +8,18 @@ Colab example: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08j
 
 ## Usage
 
+<details>
+      <summary>deployment notes</summary>
+      There is no need to prepare datasets and models by default, the script will download automatically.
+</details>
+
+Clone repo
+
+```bash
+git clone https://github.com/Mikubill/naifu-diffusion
+cd naifu-diffusion
+```
+
 Fulfill deps
 
 ```bash
@@ -16,16 +28,9 @@ conda env create -f environment.yaml
 conda activate ldm
 
 # OR by pip
-python3 -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 ```
 Start training.
-
-<details>
-      <summary>Project note</summary>
-      There is no need to prepare datasets and models by default, the script will download automatically.
-</details>
 
 ```bash
 # test
