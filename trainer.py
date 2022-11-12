@@ -40,7 +40,8 @@ def main(args):
         sampler=init_sampler(
             args, config=config, dataset=dataset, world_size=get_world_size()
         ),
-        num_workers=8,
+        num_workers=6,
+        persistent_workers=True,
     )
     
     logger = (

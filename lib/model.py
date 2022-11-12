@@ -27,10 +27,6 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
-        if self.config.trainer.use_ema: 
-            unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-            self.register_buffer("ema", unet_ema)
-        
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
         
@@ -73,7 +69,11 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return [[optimizer], [scheduler]]
     
-    def on_before_zero_grad(self, *args, **kwargs):
+    def on_train_start(self):
+        if self.config.trainer.use_ema: 
+            self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
+        
+    def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
             self.ema.update()
             

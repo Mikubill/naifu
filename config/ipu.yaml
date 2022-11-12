@@ -10,9 +10,9 @@ trainer:
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true # may OOM on colab
+  use_ema: false
   use_hivemind: false
-  
+
 checkpoint:
   monitor: 'train_loss'
   dirpath: checkpoint
@@ -23,13 +23,12 @@ checkpoint:
   save_last: true
 
 lightning:
-  accelerator: gpu
+  accelerator: ipu
   devices: -1
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 20
-  gradient_clip_val: 0.1
-  precision: 32
+  gradient_clip_val: 0
 
 arb:
    debug: false
@@ -48,7 +47,7 @@ dataset:
   debug_arb: false
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     betas: [0.9, 0.999]
