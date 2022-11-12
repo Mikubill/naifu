@@ -24,7 +24,7 @@ checkpoint:
 
 lightning:
   accelerator: ipu
-  devices: -1
+  ipus: 8
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 20
@@ -50,7 +50,6 @@ optimizer:
   name: torch.optim.AdamW
   params:
     lr: 5e-6
-    betas: [0.9, 0.999]
     weight_decay: 1e-2
     eps: 1e-8
 
