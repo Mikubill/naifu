@@ -67,6 +67,7 @@ def main(args):
         logger=logger, 
         strategy=hivemind, 
         callbacks=[checkpoint_callback],
+        ckpt_path=args.resume if args.resume else ""
         **config.lightning
     )
     
