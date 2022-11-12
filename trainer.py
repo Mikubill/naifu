@@ -12,9 +12,9 @@ from lib.utils import get_world_size
 
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import HivemindStrategy
 from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
 from hivemind import Float16Compression
+from lib.hivemind import HivemindStrategy
 
 torch.backends.cudnn.benchmark = True
 

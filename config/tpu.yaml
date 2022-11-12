@@ -25,6 +25,7 @@ checkpoint:
 lightning:
   accelerator: tpu
   devices: -1
+  tpu_cores: 8
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 20
@@ -47,7 +48,7 @@ dataset:
   debug_arb: false
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     betas: [0.9, 0.999]

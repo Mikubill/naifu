@@ -25,25 +25,24 @@ checkpoint:
   save_last: true
 
 hivemind:
-  target_batch_size: 10000
+  target_batch_size: 1000
   verbose: true
   initial_peers: ['/ip4/100.0.33.129/tcp/38123/p2p/QmbcbNkuoq2psV941sor3nZadySRC5aUXLYx8fM1Mvhrm7']
   run_id: "test-run-1112b"
-  use_local_updates: true
 
 lightning:
   accelerator: gpu
   devices: -1
   auto_select_gpus: true
   limit_train_batches: 100
-  max_epochs: 20
+  max_epochs: 200
   gradient_clip_val: 0
   precision: 16
 
 arb:
    debug: false
-   base_res: [768, 768]
-   max_size: [960, 768]
+   base_res: [512, 512]
+   max_size: [768, 512]
    divisible: 64
    max_ar_error: 4
    min_dim: 256
