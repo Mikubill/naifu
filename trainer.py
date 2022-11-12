@@ -16,8 +16,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import HivemindStrategy
 
-torch.backends.cudnn.benchmark = True
-
 args = parse_args()
 config = OmegaConf.load(args.config)
 
@@ -68,6 +66,7 @@ def main(args):
         logger=logger, 
         strategy=hivemind, 
         callbacks=[checkpoint_callback],
+        benchmark=True,
         **config.lightning
     )
     

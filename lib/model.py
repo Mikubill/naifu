@@ -79,11 +79,11 @@ class StableDiffusionModel(pl.LightningModule):
             
     def on_save_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
-            checkpoint["ema"] = self.ema.state_dict()
+            checkpoint["model_ema"] = self.ema.state_dict()
 
     def on_load_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
-            self.ema.load_state_dict(checkpoint["ema"])
+            self.ema.load_state_dict(checkpoint["model_ema"])
 
 
 def download_model(url, model_path="model"):
