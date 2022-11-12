@@ -1,10 +1,7 @@
-"""Simple script to finetune a stable-diffusion model"""
-
 import argparse
-import json
 import os
+
 import requests
-from pathlib import Path
 
 
 def parse_args():

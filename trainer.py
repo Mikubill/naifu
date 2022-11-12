@@ -1,28 +1,25 @@
 # torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 
 from functools import partial
+
 import pytorch_lightning as pl
 import torch
-
 from data.buckets import init_sampler
 from data.store import AspectRatioDataset
+from hivemind import Float16Compression
+
 from lib.args import parse_args
 from lib.model import get_class, load_model
 from lib.utils import get_world_size
-
 from omegaconf import OmegaConf
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
-from hivemind import Float16Compression
-from lib.hivemind import HivemindStrategy
+from pytorch_lightning.strategies import HivemindStrategy
 
 torch.backends.cudnn.benchmark = True
 
 args = parse_args()
 config = OmegaConf.load(args.config)
-
-world_size = get_world_size()
-weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
 
 def main(args):
     torch.manual_seed(config.trainer.seed)
@@ -41,7 +38,7 @@ def main(args):
         dataset,
         collate_fn=dataset.collate_fn,
         sampler=init_sampler(
-            args, config=config, dataset=dataset, world_size=world_size
+            args, config=config, dataset=dataset, world_size=get_world_size()
         ),
         num_workers=8,
     )
@@ -69,10 +66,7 @@ def main(args):
     trainer = pl.Trainer(
         logger=logger, 
         strategy=hivemind, 
-        callbacks=[
-            checkpoint_callback,
-            StochasticWeightAveraging(swa_lrs=1e-2)
-        ],
+        callbacks=[checkpoint_callback],
         **config.lightning
     )
     

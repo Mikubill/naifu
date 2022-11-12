@@ -4,3 +4,4 @@ lightning_logs
 wandb
 test-run-*
 checkpoint
+.devcontainer

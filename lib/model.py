@@ -1,9 +1,6 @@
-import contextlib
 import functools
-import gc
 import tarfile
 from pathlib import Path
-from typing import Iterable
 
 import pytorch_lightning as pl
 import requests
@@ -11,40 +8,35 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
+from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-from torch_ema import ExponentialMovingAverage
+
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self, model_path, config):
         super().__init__()
-        self.model_path = model_path
         self.config = config
-        self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
             
-    def setup(self, stage):
-        self.text_encoder = CLIPTextModel.from_pretrained(self.model_path, subfolder="text_encoder")
-        self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
-        self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet")
-        self.noise_scheduler = DDIMScheduler.from_config(self.model_path, subfolder="scheduler")
-        
-        self.vae.to(self.device, dtype=self.weight_dtype)
-        self.unet.to(self.device, dtype=self.weight_dtype)
-        self.text_encoder.to(self.device, dtype=self.weight_dtype)
-        
-        if self.config.trainer.use_ema: 
-            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
+        self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
+        self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
+        self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
+        self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
         
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
+        
+        if self.config.trainer.use_ema: 
+            unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
+            self.register_buffer("ema", unet_ema)
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
         
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
-        latent_dist = self.vae.encode(batch["pixel_values"].to(self.device, dtype=self.weight_dtype)).latent_dist
+        latent_dist = self.vae.encode(batch["pixel_values"].to(self.device)).latent_dist
         latents = latent_dist.sample() * 0.18215
 
         # Sample noise that we'll add to the latents
@@ -81,21 +73,17 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return [[optimizer], [scheduler]]
     
-    def on_train_start(self):
-        if self.config.trainer.use_ema:
-            self.unet_ema.to(self.device)
-    
     def on_before_zero_grad(self, *args, **kwargs):
         if self.config.trainer.use_ema:
-            self.unet_ema.update()
+            self.ema.update()
             
     def on_save_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
-            checkpoint["ema"] = self.unet_ema.state_dict()
+            checkpoint["ema"] = self.ema.state_dict()
 
     def on_load_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
-            self.unet_ema.load_state_dict(checkpoint["ema"])
+            self.ema.load_state_dict(checkpoint["ema"])
 
 
 def download_model(url, model_path="model"):
