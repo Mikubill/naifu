@@ -10,7 +10,7 @@ trainer:
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true # may OOM on colab
+  use_ema: false # may OOM on colab
   use_hivemind: false
   
 checkpoint:
