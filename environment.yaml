@@ -1,23 +1,24 @@
-name: ldm
+name: nai
 channels:
   - pytorch
   - defaults
 dependencies:
   - git
-  - python>=3.8.5
+  - python
   - pip>=20.3
-  - cudatoolkit>=11.3
+  - cudatoolkit
   - pytorch>=1.11.0
   - torchvision>=0.12.0
   - numpy>=1.19.2
   - pip:
     - accelerate
     - lightning_lite
+    - diffusers
     - opencv-python
     - imageio
     - pytorch-lightning
     - hivemind==1.1.2
-    - torch-ema
+    - ftfy
     - omegaconf==2.1.1
     - einops==0.3.0
     - torch-fidelity==0.3.0
@@ -25,5 +26,3 @@ dependencies:
     - bitsandbytes==0.35.4
     - torchmetrics==0.6.0
     - kornia==0.6
-    - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
-    - -e git+https://github.com/openai/CLIP.git@main#egg=clip

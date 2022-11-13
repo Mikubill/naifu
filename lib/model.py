@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
-from torch_ema import ExponentialMovingAverage
+from .ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
@@ -31,17 +31,20 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet.enable_gradient_checkpointing()
         
     def training_step(self, batch, batch_idx):
-        # Convert images to latent space
-        latent_dist = self.vae.encode(batch[1]).latent_dist
-        latents = latent_dist.sample() * 0.18215
+        
+        # latent conversion not requires graident
+        with torch.no_grad():
+            # Convert images to latent space
+            latent_dist = self.vae.encode(batch[1]).latent_dist
+            latents = latent_dist.sample() * 0.18215
 
-        # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents)
-        bsz = latents.shape[0]
+            # Sample noise that we'll add to the latents
+            noise = torch.randn_like(latents)
+            bsz = latents.shape[0]
             
-        # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
-        timesteps = timesteps.long()
+            # Sample a random timestep for each image
+            timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+            timesteps = timesteps.long()
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)

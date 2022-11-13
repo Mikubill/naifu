@@ -36,7 +36,10 @@ def main(args):
         dataset,
         collate_fn=dataset.collate_fn,
         sampler=init_sampler(
-            args, config=config, dataset=dataset, world_size=get_world_size()
+            args, 
+            config=config, 
+            dataset=dataset, 
+            world_size=get_world_size(),
         ),
         num_workers=6,
         persistent_workers=True,

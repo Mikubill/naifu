@@ -2,7 +2,6 @@ accelerate
 numpy
 opencv-python
 imageio
-torch-ema
 pytorch-lightning
 omegaconf==2.1.1
 lightning_lite
@@ -13,7 +12,6 @@ torchmetrics==0.10.2
 bitsandbytes==0.35.4
 hivemind==1.1.2
 kornia==0.6.8
-git+https://github.com/illeatmyhat/taming-transformers.git@master#egg=taming-transformers
-git+https://github.com/openai/CLIP.git@main#egg=clip
 wandb
+ftfy
 fairscale

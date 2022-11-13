@@ -46,6 +46,7 @@ dataset:
   center_crop: false
   ucg: 0.0
   debug_arb: false
+  reload_interval: 10
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit

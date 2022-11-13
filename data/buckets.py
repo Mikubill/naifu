@@ -281,7 +281,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         config,
         rank,
         dataset,
-        num_replicas: int = 1,
+        num_replicas= 1,
     ):
         super().__init__(None)
         self.num_replicas = num_replicas
@@ -289,6 +289,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         self.config = config
         self.dataset = dataset
         self.batch_counter = 0
+        self.reload_interval = config.dataset.reload_interval
         self.config = config
         self.init_buckets()
         
@@ -327,7 +328,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
     def __iter__(self):
         self.batch_counter += 1
         
-        if self.batch_counter > 10:
+        if self.batch_counter > self.reload_interval:
             self.init_buckets()
             self.batch_counter = 0
             
