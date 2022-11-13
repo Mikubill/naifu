@@ -26,6 +26,7 @@ class StableDiffusionModel(pl.LightningModule):
         
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
+        self.lr = config.optimizer.params.lr
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
@@ -60,6 +61,9 @@ class StableDiffusionModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        if self.config.lightning.auto_lr_find:
+            self.config.optimizer.params.lr = self.lr
+            
         optimizer = get_class(self.config.optimizer.name)(
             self.unet.parameters(), **self.config.optimizer.params
         )
