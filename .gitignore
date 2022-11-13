@@ -5,3 +5,4 @@ wandb
 test-run-*
 checkpoint
 .devcontainer
+venv

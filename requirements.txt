@@ -3,7 +3,6 @@ numpy
 opencv-python
 imageio
 pytorch-lightning==1.8.1
-torchmetrics>=0.7.0
 omegaconf==2.1.1
 lightning_lite
 einops==0.3.0
