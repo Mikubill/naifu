@@ -9,6 +9,7 @@ import contextlib
 import torch
 
 
+# Code from: https://github.com/fadel/pytorch_ema
 # Partially based on:
 # https://github.com/tensorflow/tensorflow/blob/r1.13/tensorflow/python/training/moving_averages.py
 class ExponentialMovingAverage:

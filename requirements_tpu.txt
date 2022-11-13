@@ -2,7 +2,7 @@ accelerate
 numpy
 opencv-python
 imageio
-pytorch-lightning
+pytorch-lightning==1.8.1
 omegaconf==2.1.1
 einops==0.3.0
 transformers==4.24.0
