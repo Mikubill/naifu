@@ -18,7 +18,7 @@ checkpoint:
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 3
+  every_n_epochs: 0
   save_top_k: 5
   save_last: true
 
@@ -27,7 +27,7 @@ lightning:
   devices: -1
   auto_select_gpus: true
   limit_train_batches: 100
-  max_epochs: 20
+  max_epochs: 100
   gradient_clip_val: 0.1
   precision: 32
 
@@ -44,7 +44,7 @@ dataset:
   img_path: 
     - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
   center_crop: false
-  ucg: 0.0
+  ucg: 0.1
   debug_arb: false
   reload_interval: 10
 
@@ -65,5 +65,5 @@ lr_scheduler:
     last_epoch: -1
 
 monitor:
-  wandb_id: ""
+  wandb_id: "chin"
   store_checkpoints: true

@@ -7,7 +7,6 @@ import torch
 from data.buckets import init_sampler
 from data.store import AspectRatioDataset
 from hivemind import Float16Compression
-
 from lib.args import parse_args
 from lib.model import get_class, load_model
 from lib.utils import get_world_size
