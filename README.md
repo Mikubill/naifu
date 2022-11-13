@@ -39,23 +39,6 @@ torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 # For multi-gpu
 torchrun trainer.py --model_path=/tmp/model --config config/multigpu.yaml
 
-# For TPU
-torchrun trainer.py --model_path=/tmp/model --config config/tpu.yaml
-
 # Disitrubuted
 torchrun trainer.py --model_path=/tmp/model --config config/distributed.yaml
-```
-
-## BibTeX
-
-```
-@misc{rombach2021highresolution,
-      title={High-Resolution Image Synthesis with Latent Diffusion Models}, 
-      author={Robin Rombach and Andreas Blattmann and Dominik Lorenz and Patrick Esser and Björn Ommer},
-      year={2021},
-      eprint={2112.10752},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
-}
-
 ```

@@ -19,7 +19,7 @@ async def report_status(dht: DHT, node: DHTNode):
     logger.debug(f"Local storage contents: {node.protocol.storage}")
 
 
-def main():
+def run():
     parser = ArgumentParser()
     parser.add_argument(
         "--initial_peers",
@@ -73,4 +73,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run()
