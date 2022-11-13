@@ -12,7 +12,7 @@ trainer:
   precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true
+  use_ema: false
   use_hivemind: true
 
 checkpoint:
@@ -27,7 +27,7 @@ checkpoint:
 hivemind:
   target_batch_size: 1000
   verbose: true
-  initial_peers: ['/ip4/102.0.23.15/tcp/37467/p2p/QmSiRevn3qX8wQBcFftRbSCEe1LmPSfHA5P8PNBBup53fP']
+  # initial_peers: ['/ip4/102.0.23.15/tcp/37467/p2p/QmSiRevn3qX8wQBcFftRbSCEe1LmPSfHA5P8PNBBup53fP']
   run_id: "test-run-1112b"
   host_maddrs: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic"]
 
