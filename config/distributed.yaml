@@ -7,7 +7,6 @@ trainer:
   resolution: 512
   center_crop: false
   seed: 1138
-  gradient_accumulation_steps: 1
   gradient_checkpointing: true
   clip_skip: 2
   pad_tokens: true

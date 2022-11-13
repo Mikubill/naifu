@@ -6,7 +6,8 @@ import pytorch_lightning as pl
 import torch
 from data.buckets import init_sampler
 from data.store import AspectRatioDataset
-from hivemind import Float16Compression
+from hivemind import Float16Compression, Uniform8BitQuantization
+from hivemind.compression import SizeAdaptiveCompression
 from lib.args import parse_args
 from lib.model import get_class, load_model
 from lib.utils import get_world_size
@@ -50,14 +51,18 @@ def main(args):
         else None
     )
     
+    compression = SizeAdaptiveCompression(
+        threshold=2 ** 16 + 1, less=Float16Compression(), greater_equal=Uniform8BitQuantization()
+    )
+    
     hivemind = (
         HivemindStrategy(
             scheduler_fn=partial(
                 get_class(config.lr_scheduler.name),
                 **config.lr_scheduler.params
             ),
-            grad_compression=Float16Compression(),
-            state_averaging_compression=Float16Compression(),
+            grad_compression=compression,
+            state_averaging_compression=compression,
             **config.hivemind
         )
         if config.trainer.use_hivemind
