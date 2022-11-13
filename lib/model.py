@@ -24,6 +24,11 @@ class StableDiffusionModel(pl.LightningModule):
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
         
+        if config.lightning.precision == 16:
+            self.vae = self.vae.to(self.device, dtype=torch.float16)
+            self.unet = self.unet.to(self.device, dtype=torch.float32)
+            self.text_encoder = self.text_encoder.to(self.device, dtype=torch.float16)
+        
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         self.lr = config.optimizer.params.lr
