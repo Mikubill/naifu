@@ -2,15 +2,14 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 2
+  init_batch_size: 1
   resolution: 512
   center_crop: false
   seed: 1138
   gradient_checkpointing: true
-  precision: "fp16"
   clip_skip: 2
   pad_tokens: true
-  use_ema: true
+  use_ema: false
   use_hivemind: false
   
 checkpoint:
@@ -29,7 +28,9 @@ lightning:
   limit_train_batches: 100
   max_epochs: 100
   gradient_clip_val: 0.1
-  precision: 32
+  precision: 16
+  auto_scale_batch_size: false
+  auto_lr_find: false
 
 arb:
    debug: false
@@ -65,5 +66,5 @@ lr_scheduler:
     last_epoch: -1
 
 monitor:
-  wandb_id: "chin"
+  wandb_id: ""
   store_checkpoints: true
