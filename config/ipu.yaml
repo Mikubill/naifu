@@ -24,7 +24,7 @@ checkpoint:
 
 lightning:
   accelerator: ipu
-  ipus: 8
+  devices: 8
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 20
@@ -45,6 +45,7 @@ dataset:
   center_crop: false
   ucg: 0.0
   debug_arb: false
+  reload_interval: 10
 
 optimizer:
   name: torch.optim.AdamW

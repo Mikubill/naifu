@@ -25,7 +25,7 @@ Fulfill deps
 ```bash
 # by conda
 conda env create -f environment.yaml
-conda activate ldm
+conda activate nai
 
 # OR by pip
 pip install -r requirements.txt

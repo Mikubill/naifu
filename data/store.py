@@ -56,7 +56,7 @@ class ImageStore(Dataset):
         return img_item
         
     def update_store(self, base):
-        print(f"Updating internal dataset: {base}")
+        print(f"Updating dataset metadata: {base}")
         self.entries = [self.prompt_resolver(x) for x in Path(base).iterdir() if x.is_file() and x.suffix != ".txt"]
         self._length = len(self.entries)
         random.shuffle(self.entries)
@@ -167,10 +167,8 @@ class AspectRatioDataset(ImageStore):
         input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
 
-        pixel_values = torch.stack(pixel_values)
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-        
+        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids        
         return [input_ids, pixel_values]
 
     def transformer(self, img, size, center_crop=False):

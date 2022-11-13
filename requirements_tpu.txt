@@ -2,7 +2,6 @@ accelerate
 numpy
 opencv-python
 imageio
-torch-ema
 pytorch-lightning
 omegaconf==2.1.1
 einops==0.3.0
@@ -11,10 +10,9 @@ diffusers==0.7.1
 torchmetrics==0.10.2
 hivemind==1.1.2
 kornia==0.6.8
-git+https://github.com/illeatmyhat/taming-transformers.git@master#egg=taming-transformers
-git+https://github.com/openai/CLIP.git@main#egg=clip
 cloud-tpu-client==0.10 
 torch==1.12.0 
 https://storage.googleapis.com/tpu-pytorch/wheels/colab/torch_xla-1.12-cp37-cp37m-linux_x86_64.whl
 wandb
+ftfy
 fairscale
