@@ -169,6 +169,7 @@ class AspectRatioDataset(ImageStore):
 
         pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
         input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids        
+        
         return [input_ids, pixel_values]
 
     def transformer(self, img, size, center_crop=False):

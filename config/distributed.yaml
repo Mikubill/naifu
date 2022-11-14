@@ -6,6 +6,7 @@ trainer:
   init_batch_size: 1
   resolution: 512
   center_crop: false
+  precision: fp16
   seed: 1138
   gradient_checkpointing: true
   clip_skip: 2
@@ -36,7 +37,6 @@ lightning:
   limit_train_batches: 100
   max_epochs: 200
   gradient_clip_val: 0
-  precision: 16
   auto_scale_batch_size: false
   auto_lr_find: false
 

@@ -18,29 +18,31 @@ class StableDiffusionModel(pl.LightningModule):
     def __init__(self, model_path, config):
         super().__init__()
         self.config = config
-            
-        self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
+        self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
+        
         self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
+        self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
+
+        self.vae.to(self.device, dtype=self.weight_dtype)
+        self.unet.to(self.device, dtype=self.weight_dtype)
+        self.text_encoder.to(self.device, dtype=self.weight_dtype)
         
-        if config.lightning.precision == 16:
-            self.vae = self.vae.to(self.device, dtype=torch.float16)
-            self.unet = self.unet.to(self.device, dtype=torch.float32)
-            self.text_encoder = self.text_encoder.to(self.device, dtype=torch.float16)
+        if self.config.trainer.use_ema: 
+            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
         
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
-        self.lr = config.optimizer.params.lr
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
-        
+
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
-        latent_dist = self.vae.encode(batch[1]).latent_dist
+        latent_dist = self.vae.encode(batch[1].to(self.device, dtype=self.weight_dtype)).latent_dist
         latents = latent_dist.sample() * 0.18215
-        
+
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]

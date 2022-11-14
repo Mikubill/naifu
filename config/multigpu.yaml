@@ -9,6 +9,7 @@ trainer:
   gradient_checkpointing: false
   clip_skip: 2
   pad_tokens: true
+  precision: 16
   use_ema: true
   use_hivemind: false
   
