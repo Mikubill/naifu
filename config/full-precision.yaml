@@ -2,15 +2,17 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  # output_path: checkpoint
   init_batch_size: 1
   resolution: 512
   center_crop: false
-  seed: 1138
   gradient_checkpointing: true
   clip_skip: 2
-  precision: fp32
+  seed: 1138
   pad_tokens: true
-  use_ema: false
+  precision: fp32
+  half_encoder: true
+  use_ema: true
   use_hivemind: false
   
 checkpoint:

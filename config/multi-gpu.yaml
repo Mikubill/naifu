@@ -2,43 +2,34 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  output_path: checkpoint
+  # output_path: checkpoint
   init_batch_size: 1
   resolution: 512
   center_crop: false
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   clip_skip: 2
   seed: 1138
   pad_tokens: true
-  precision: fp32
+  precision: fp16
   half_encoder: true
-  use_ema: false
-  use_hivemind: true
-
+  use_ema: true
+  use_hivemind: false
+  
 checkpoint:
   monitor: 'train_loss'
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 0
-  save_top_k: 2
+  every_n_epochs: 3
+  save_top_k: 5
   save_last: true
-
-hivemind:
-  target_batch_size: 1000
-  verbose: true
-  # initial_peers: ['/ip4/159.223.171.199/tcp/41555/p2p/QmVQks3jCMEyakLtayUxtFXohpunqiMdWuAWpXYo26vrdV']
-  run_id: "test-run-1112b"
-  host_maddrs: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic"]
-  reuse_grad_buffers: true
-  offload_optimizer: false
 
 lightning:
   accelerator: gpu
   devices: -1
   auto_select_gpus: true
   limit_train_batches: 100
-  max_epochs: 200
+  max_epochs: 20
   precision: 32
   gradient_clip_val: 0
   auto_scale_batch_size: false
