@@ -25,27 +25,25 @@ class StableDiffusionModel(pl.LightningModule):
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
 
-        self.vae.to(self.weight_dtype)
-        self.text_encoder.to(self.weight_dtype)
-        self.unet.to(self.weight_dtype)
-        
-        if self.config.trainer.use_ema: 
-            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-        
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
     
-    def on_before_batch_transfer(self, batch, dataloader_idx: int):
-        return batch[0], batch[1].to(self.weight_dtype)
-
-    def training_step(self, batch, batch_idx):
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
         # Convert images to latent space
         latent_dist = self.vae.encode(batch[1]).latent_dist
         latents = latent_dist.sample() * 0.18215
+        
+        # Get the text embedding for conditioning
+        encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
+        encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
+        return latents, encoder_hidden_states
 
+    def training_step(self, batch, batch_idx):
+        latents, encoder_hidden_states = batch
+        
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
@@ -58,12 +56,8 @@ class StableDiffusionModel(pl.LightningModule):
         # (this is the forward diffusion process)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
-        # Get the text embedding for conditioning
-        encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
-        encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
-
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        noise_pred = self.unet(noisy_latents.float(), timesteps, encoder_hidden_states.float()).sample
         loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")  
         
         # Logging to TensorBoard by default

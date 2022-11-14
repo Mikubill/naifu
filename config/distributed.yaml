@@ -3,7 +3,7 @@ name: test-run
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   output_path: checkpoint
-  init_batch_size: 2
+  init_batch_size: 1
   resolution: 512
   center_crop: false
   precision: fp16
@@ -26,9 +26,12 @@ checkpoint:
 hivemind:
   target_batch_size: 1000
   verbose: true
-  # initial_peers: ['/ip4/159.223.171.199/tcp/46685/p2p/QmRMLGsUPyvo3f5iiqxYsonXPRWCMXVC95gs17x7D4Xibe']
+  # initial_peers: ['/ip4/159.223.171.199/tcp/41555/p2p/QmVQks3jCMEyakLtayUxtFXohpunqiMdWuAWpXYo26vrdV']
   run_id: "test-run-1112b"
   host_maddrs: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic"]
+  reuse_grad_buffers: true
+  offload_optimizer: true
+
 
 lightning:
   accelerator: gpu
@@ -58,7 +61,7 @@ dataset:
   reload_interval: 10
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     weight_decay: 1e-2
