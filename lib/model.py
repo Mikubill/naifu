@@ -24,12 +24,19 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
+        
+        self.vae.to(self.weight_dtype)
+        self.text_encoder.to(self.weight_dtype)
+        self.unet.to(self.weight_dtype)
 
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
+            
+    def on_before_batch_transfer(self, batch, dataloader_idx: int):
+         return batch[0], batch[1].to(self.weight_dtype)
     
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
         # Convert images to latent space
@@ -39,6 +46,7 @@ class StableDiffusionModel(pl.LightningModule):
         # Get the text embedding for conditioning
         encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
         encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
+        
         return latents, encoder_hidden_states
 
     def training_step(self, batch, batch_idx):
@@ -57,7 +65,7 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents.float(), timesteps, encoder_hidden_states.float()).sample
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
         loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")  
         
         # Logging to TensorBoard by default
