@@ -37,7 +37,7 @@ Start training.
 torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 
 # For multi-gpu
-torchrun trainer.py --model_path=/tmp/model --config config/multigpu.yaml
+torchrun trainer.py --model_path=/tmp/model --config config/multi-gpu.yaml
 
 # Disitrubuted
 torchrun trainer.py --model_path=/tmp/model --config config/distributed.yaml

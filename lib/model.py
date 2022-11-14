@@ -24,10 +24,11 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
-        
-        self.vae.to(self.weight_dtype)
-        self.text_encoder.to(self.weight_dtype)
         self.unet.to(self.weight_dtype)
+        
+        if config.trainer.half_encoder or self.weight_dtype == torch.float16:
+            self.vae.to(torch.float16)
+            self.text_encoder.to(torch.float16)
 
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
@@ -40,13 +41,13 @@ class StableDiffusionModel(pl.LightningModule):
     
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
         # Convert images to latent space
-        latent_dist = self.vae.encode(batch[1]).latent_dist
+        latent_dist = self.vae.encode(batch[1].to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
         latents = latent_dist.sample() * 0.18215
         
         # Get the text embedding for conditioning
         encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
         encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
-        
+            
         return latents, encoder_hidden_states
 
     def training_step(self, batch, batch_idx):
@@ -62,10 +63,10 @@ class StableDiffusionModel(pl.LightningModule):
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps).to(self.weight_dtype)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states.to(self.weight_dtype)).sample
         loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")  
         
         # Logging to TensorBoard by default
@@ -88,7 +89,7 @@ class StableDiffusionModel(pl.LightningModule):
     def on_train_start(self):
         if self.config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-            self.ema.to(self.weight_dtype)
+            self.ema.to(dtype=self.weight_dtype)
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:

@@ -2,15 +2,17 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  # output_path: checkpoint
   init_batch_size: 1
   resolution: 512
   center_crop: false
-  seed: 1138
-  gradient_checkpointing: false
+  gradient_checkpointing: true
   clip_skip: 2
+  seed: 1138
   pad_tokens: true
-  precision: fp16
-  use_ema: true
+  precision: fp32
+  half_encoder: false
+  use_ema: false
   use_hivemind: false
   
 checkpoint:
@@ -18,19 +20,19 @@ checkpoint:
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 3
+  every_n_epochs: 0
   save_top_k: 5
   save_last: true
 
 lightning:
-  accelerator: gpu
-  devices: -1
-  auto_select_gpus: true
+  accelerator: cpu
   limit_train_batches: 100
-  max_epochs: 20
-  gradient_clip_val: 0
+  max_epochs: 10
+  precision: 32
+  gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
+  move_metrics_to_cpu: true
 
 arb:
    debug: false
@@ -45,7 +47,7 @@ dataset:
   img_path: 
     - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
   center_crop: false
-  ucg: 0.0
+  ucg: 0.1
   debug_arb: false
   reload_interval: 10
 
