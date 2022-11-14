@@ -28,7 +28,7 @@ lightning:
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 100
-  precision: 16
+  precision: 32
   gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
