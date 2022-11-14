@@ -37,13 +37,15 @@ class ImageStore(Dataset):
         self.dataset = img_path
         self.image_transforms = transforms.Compose(
             [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                transforms.Resize(
+                    size, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.CenterCrop(
+                    size) if center_crop else transforms.RandomCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-        
+
     def prompt_resolver(self, x):
         img_item = (x, "")
         fp = os.path.splitext(x)[0]
@@ -54,10 +56,11 @@ class ImageStore(Dataset):
         img_item = (x, new_prompt)
 
         return img_item
-        
+
     def update_store(self, base):
         print(f"Updating dataset metadata: {base}")
-        self.entries = [self.prompt_resolver(x) for x in Path(base).iterdir() if x.is_file() and x.suffix != ".txt"]
+        self.entries = [self.prompt_resolver(x) for x in Path(
+            base).iterdir() if x.is_file() and x.suffix != ".txt"]
         self._length = len(self.entries)
         random.shuffle(self.entries)
 
@@ -102,9 +105,11 @@ class ImageStore(Dataset):
             if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
                 base_chosen.append(tag)
 
-        tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
+        tag_count = min(random.randint(min_tags, max_tags),
+                        len(tag_dict.keys()))
         base_chosen_set = set(base_chosen)
-        chosen_tags = base_chosen + [tag for tag in random.sample(list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
+        chosen_tags = base_chosen + [tag for tag in random.sample(
+            list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
         if sort_tags:
             chosen_tags = sorted(chosen_tags)
 
@@ -139,7 +144,7 @@ class ImageStore(Dataset):
         example = {}
         instance_path, instance_prompt = self.entries[index % self._length]
         instance_image = self.read_img(instance_path)
-            
+
         example["images"] = self.image_transforms(instance_image)
         example["prompt_ids"] = self.tokenize(instance_prompt)
         return example
@@ -160,16 +165,18 @@ class AspectRatioDataset(ImageStore):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
         return res
-    
+
     def collate_fn(self, examples):
         examples = list(itertools.chain.from_iterable(examples))
-    
+
         input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
 
-        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids        
-        
+        pixel_values = torch.stack(pixel_values).to(
+            memory_format=torch.contiguous_format).float()
+        input_ids = self.tokenizer.pad(
+            {"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+
         return [input_ids, pixel_values]
 
     def transformer(self, img, size, center_crop=False):
@@ -179,22 +186,26 @@ class AspectRatioDataset(ImageStore):
         w, h = size
         min_crop, max_crop = (w, h) if w <= h else (h, w)
         ratio_src, ratio_dst = float(long / short), float(max_crop / min_crop)
-        
-        if (x>y and w<h) or (x<y and w>h):
+
+        if (x > y and w < h) or (x < y and w > h):
             # handle i/c mixed input
             img = img.rotate(90, expand=True)
             x, y = img.size
-            
+
         if ratio_src > ratio_dst:
-            new_w, new_h = (min_crop, int(min_crop * ratio_src)) if x<y else (int(min_crop * ratio_src), min_crop)
+            new_w, new_h = (min_crop, int(min_crop * ratio_src)
+                            ) if x < y else (int(min_crop * ratio_src), min_crop)
         elif ratio_src < ratio_dst:
-            new_w, new_h = (max_crop, int(max_crop / ratio_src)) if x>y else (int(max_crop / ratio_src), max_crop)
+            new_w, new_h = (max_crop, int(max_crop / ratio_src)
+                            ) if x > y else (int(max_crop / ratio_src), max_crop)
         else:
             new_w, new_h = w, h
 
         image_transforms = transforms.Compose([
-            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop((h, w)) if center_crop else transforms.RandomCrop((h, w)),
+            transforms.Resize(
+                (new_h, new_w), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(
+                (h, w)) if center_crop else transforms.RandomCrop((h, w)),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
@@ -207,24 +218,26 @@ class AspectRatioDataset(ImageStore):
             import torchvision
             print(x, y, "->", new_w, new_h, "->", new_img.shape)
             filename = str(uuid.uuid4())
-            torchvision.utils.save_image(self.denormalize(new_img), f"/tmp/{filename}_1.jpg")
-            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_2.jpg")
+            torchvision.utils.save_image(
+                self.denormalize(new_img), f"/tmp/{filename}_1.jpg")
+            torchvision.utils.save_image(
+                torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_2.jpg")
             print(f"saved: /tmp/{filename}")
 
         return new_img
 
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
-        
+
         if item_id == "":
             return {}
-        
+
         prompt = self.prompt_cache[item_id]
         image = self.read_img(item_id)
-        
+
         if random.random() < self.ucg:
             prompt = ''
-        
+
         example = {
             f"images": self.transformer(image, size),
             f"prompt_ids": self.tokenize(prompt)
@@ -237,4 +250,3 @@ class AspectRatioDataset(ImageStore):
             result.append(self.build_dict(item))
 
         return result
-

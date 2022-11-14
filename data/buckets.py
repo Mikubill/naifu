@@ -27,23 +27,23 @@ class AspectRatioBucket:
     '''
 
     def __init__(self,
-        id_size_map,
-        max_size=(768, 512),
-        divisible=64,
-        step_size=8,
-        min_dim=256,
-        base_res=(512, 512),
-        bsz=1,
-        world_size=1,
-        global_rank=0,
-        max_ar_error=4,
-        seed=42,
-        dim_limit=1024,
-        debug=True,
-    ):
+                 id_size_map,
+                 max_size=(768, 512),
+                 divisible=64,
+                 step_size=8,
+                 min_dim=256,
+                 base_res=(512, 512),
+                 bsz=1,
+                 world_size=1,
+                 global_rank=0,
+                 max_ar_error=4,
+                 seed=42,
+                 dim_limit=1024,
+                 debug=True,
+                 ):
         if global_rank == -1:
             global_rank = 0
-            
+
         self.res_map = id_size_map
         self.max_size = max_size
         self.f = 8
@@ -75,7 +75,7 @@ class AspectRatioBucket:
     @staticmethod
     def get_prng(seed):
         return np.random.RandomState(seed)
-    
+
     def __len__(self):
         return len(self.res_map) // self.bsz
 
@@ -151,7 +151,8 @@ class AspectRatioBucket:
             self.aspect_errors = np.array(self.aspect_errors)
             try:
                 print(f"skipped images: {skipped}")
-                print(f"aspect error: mean {self.aspect_errors.mean()}, median {np.median(self.aspect_errors)}, max {self.aspect_errors.max()}")
+                print(
+                    f"aspect error: mean {self.aspect_errors.mean()}, median {np.median(self.aspect_errors)}, max {self.aspect_errors.max()}")
                 for bucket_id in reversed(sorted(self.buckets.keys(), key=lambda b: len(self.buckets[b]))):
                     print(
                         f"bucket {bucket_id}: {self.resolutions[bucket_id]}, aspect {self.aspects[bucket_id]:.5f}, entries {len(self.buckets[bucket_id])}")
@@ -170,12 +171,12 @@ class AspectRatioBucket:
         # select ids for this epoch/rank
         index = sorted(list(self.res_map.keys()))
         index_len = len(index)
-        
+
         index = self.epoch_prng.permutation(index)
         index = index[:index_len - (index_len % (self.bsz * self.world_size))]
         # if self.debug:
-            # print("perm", self.global_rank, index[0:16])
-        
+        # print("perm", self.global_rank, index[0:16])
+
         index = index[self.global_rank::self.world_size]
         self.batch_total = len(index) // self.bsz
         assert (len(index) % self.bsz == 0)
@@ -186,7 +187,8 @@ class AspectRatioBucket:
         self.batch_delivered = 0
         for bucket_id in sorted(self.buckets.keys()):
             if len(self.buckets[bucket_id]) > 0:
-                self.epoch[bucket_id] = [post_id for post_id in self.buckets[bucket_id] if post_id in index]
+                self.epoch[bucket_id] = [
+                    post_id for post_id in self.buckets[bucket_id] if post_id in index]
                 self.prng.shuffle(self.epoch[bucket_id])
                 self.epoch[bucket_id] = list(self.epoch[bucket_id])
                 overhang = len(self.epoch[bucket_id]) % self.bsz
@@ -277,11 +279,11 @@ class AspectRatioBucket:
 
 class AspectRatioSampler(torch.utils.data.Sampler):
     def __init__(
-        self, 
+        self,
         config,
         rank,
         dataset,
-        num_replicas= 1,
+        num_replicas=1,
     ):
         super().__init__(None)
         self.num_replicas = num_replicas
@@ -292,7 +294,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         self.reload_interval = config.dataset.reload_interval
         self.config = config
         self.init_buckets()
-        
+
     def download(self, url, mpath="model"):
         print(f'Downloading: "{url}" to {mpath}\n')
         r = requests.get(url, stream=True)
@@ -302,19 +304,22 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
             file = tarfile.open(fileobj=r_raw, mode="r|gz")
             file.extractall(path=mpath)
-        
+
     def init_buckets(self):
         base = random.choice(self.config.dataset.img_path)
-        if base.startswith("https://") :
-            dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{self.config.dataset.img_path.index(base)}")
+        if base.startswith("https://"):
+            dlpath = os.path.join(tempfile.gettempdir(
+            ), f"dataset-{self.config.dataset.img_path.index(base)}")
             Path(dlpath).mkdir(exist_ok=True)
             self.download(base, dlpath)
             base = dlpath
-            
-        entries = [x for x in Path(base).iterdir() if x.is_file() and x.suffix != ".txt"]
-        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.config.arb)
+
+        entries = [x for x in Path(base).iterdir(
+        ) if x.is_file() and x.suffix != ".txt"]
+        self.buckets = AspectRatioBucket(
+            self.get_dict(entries), **self.config.arb)
         self.dataset.update(base)
-        
+
     def get_dict(self, entries):
         id_size_map = {}
 
@@ -324,20 +329,19 @@ class AspectRatioSampler(torch.utils.data.Sampler):
             id_size_map[entry] = size
 
         return id_size_map
-    
+
     def __iter__(self):
         self.batch_counter += 1
-        
+
         if self.batch_counter > self.reload_interval:
             self.init_buckets()
             self.batch_counter = 0
-            
+
         for batch, size in self.buckets.generator():
             yield [{"size": size, "instance": item} for item in batch]
-            
+
     def __len__(self):
         return len(self.buckets) // self.num_replicas
-
 
 
 def init_sampler(args, config, dataset, world_size):
@@ -353,7 +357,7 @@ def init_sampler(args, config, dataset, world_size):
         print("BucketManager initialized using config:")
         print(json.dumps(arg_config, sort_keys=True, indent=4))
     else:
-        print(f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
-        
+        print(
+            f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
 
     return AspectRatioSampler(config, args.local_rank, dataset, world_size)
