@@ -9,7 +9,7 @@ trainer:
   gradient_checkpointing: false
   clip_skip: 2
   pad_tokens: true
-  precision: 16
+  precision: fp16
   use_ema: true
   use_hivemind: false
   
@@ -29,7 +29,6 @@ lightning:
   limit_train_batches: 100
   max_epochs: 20
   gradient_clip_val: 0
-  precision: 16
   auto_scale_batch_size: false
   auto_lr_find: false
 
