@@ -19,14 +19,14 @@ checkpoint:
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 3
-  save_top_k: 5
+  every_n_epochs: 0
+  save_top_k: 2
   save_last: true
 
 hivemind:
   target_batch_size: 1000
   verbose: true
-  initial_peers: ['/ip4/10.42.4.171/tcp/34551/p2p/QmUgJL9ZQNSLjJH323bKfWvJyf4PGZQ6URNzcitaiqrpce']
+  # initial_peers: ['/ip4/159.223.171.199/tcp/46685/p2p/QmRMLGsUPyvo3f5iiqxYsonXPRWCMXVC95gs17x7D4Xibe']
   run_id: "test-run-1112b"
   host_maddrs: ["/ip4/0.0.0.0/tcp/0", "/ip4/0.0.0.0/udp/0/quic"]
 

@@ -25,9 +25,9 @@ class StableDiffusionModel(pl.LightningModule):
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
         self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
 
-        self.vae.to(self.device, dtype=self.weight_dtype)
-        self.unet.to(self.device, dtype=self.weight_dtype)
-        self.text_encoder.to(self.device, dtype=self.weight_dtype)
+        self.vae.to(self.weight_dtype)
+        self.text_encoder.to(self.weight_dtype)
+        self.unet.to(self.weight_dtype)
         
         if self.config.trainer.use_ema: 
             self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
@@ -37,10 +37,13 @@ class StableDiffusionModel(pl.LightningModule):
         
         if self.config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
+    
+    def on_before_batch_transfer(self, batch, dataloader_idx: int):
+        return batch[0], batch[1].to(self.weight_dtype)
 
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
-        latent_dist = self.vae.encode(batch[1].to(self.device, dtype=self.weight_dtype)).latent_dist
+        latent_dist = self.vae.encode(batch[1]).latent_dist
         latents = latent_dist.sample() * 0.18215
 
         # Sample noise that we'll add to the latents
@@ -83,6 +86,7 @@ class StableDiffusionModel(pl.LightningModule):
     def on_train_start(self):
         if self.config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
+            self.ema.to(self.weight_dtype)
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
