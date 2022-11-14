@@ -8,7 +8,7 @@ trainer:
   seed: 1138
   gradient_checkpointing: true
   clip_skip: 2
-  precision: 16
+  precision: fp16
   pad_tokens: true
   use_ema: true
   use_hivemind: false
