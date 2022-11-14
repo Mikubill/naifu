@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 2
+  init_batch_size: 1
   resolution: 512
   center_crop: false
   seed: 1138
@@ -28,6 +28,7 @@ lightning:
   auto_select_gpus: true
   limit_train_batches: 100
   max_epochs: 100
+  precision: 16
   gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
