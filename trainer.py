@@ -51,12 +51,18 @@ def main(args):
         else None
     )
     
+    compression = SizeAdaptiveCompression(
+        threshold=2 ** 16 + 1, less=Float16Compression(), greater_equal=Uniform8BitQuantization()
+    )
+    
     hivemind = (
         HivemindStrategy(
             scheduler_fn=partial(
                 get_class(config.lr_scheduler.name),
                 **config.lr_scheduler.params
             ),
+            grad_compression=compression,
+            state_averaging_compression=compression,
             **config.hivemind
         )
         if config.trainer.use_hivemind
