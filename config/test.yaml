@@ -54,7 +54,6 @@ optimizer:
   name: bitsandbytes.optim.AdamW8bit
   params:
     lr: 5e-6
-    betas: [0.9, 0.999]
     weight_decay: 1e-2
     eps: 1e-8
 
