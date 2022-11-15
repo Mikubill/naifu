@@ -354,8 +354,7 @@ def init_sampler(args, config, dataset, world_size):
     }
 
     if config.arb.debug:
-        print("BucketManager initialized using config:")
-        print(json.dumps(arg_config, sort_keys=True, indent=4))
+        print(f"BucketManager initialized using config: {arg_config}")
     else:
         print(
             f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
