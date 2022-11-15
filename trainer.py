@@ -27,6 +27,7 @@ def main(args):
         size=config.trainer.resolution,
         bsz=config.trainer.init_batch_size,
         seed=config.trainer.seed,
+        rank=args.local_rank,
         **config.dataset
     )
     
