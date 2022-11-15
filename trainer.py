@@ -74,7 +74,6 @@ def main(args):
         logger=logger, 
         strategy=hivemind, 
         callbacks=[checkpoint_callback],
-        benchmark=True,
         **config.lightning
     )
     
