@@ -14,6 +14,7 @@ trainer:
   use_ema: false
   half_encoder: true
   use_hivemind: false
+  use_xformers: false
   
 checkpoint:
   monitor: 'train_loss'
