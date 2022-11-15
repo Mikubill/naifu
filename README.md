@@ -30,6 +30,7 @@ conda activate nai
 # OR by pip
 pip install -r requirements.txt
 ```
+
 Start training.
 
 ```bash
@@ -41,4 +42,10 @@ torchrun trainer.py --model_path=/tmp/model --config config/multi-gpu.yaml
 
 # Disitrubuted
 torchrun trainer.py --model_path=/tmp/model --config config/distributed.yaml
+```
+
+Convert checkpoint files to use in SD-based webui
+
+```bash
+python convert.py --src /path/last.ckpt --dst /path/last.ckpt
 ```
