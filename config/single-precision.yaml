@@ -9,7 +9,6 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  pad_tokens: true
   precision: fp32
   half_encoder: false
   use_ema: true
@@ -52,6 +51,7 @@ dataset:
   ucg: 0.1
   debug_arb: false
   reload_interval: 10
+  num_workers: 3
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit

@@ -42,7 +42,7 @@ def main(args):
             dataset=dataset, 
             world_size=get_world_size(),
         ),
-        num_workers=4,
+        num_workers=config.dataset.num_workers,
         persistent_workers=True,
     )
     

@@ -51,6 +51,7 @@ dataset:
   ucg: 0.0
   debug_arb: false
   reload_interval: 10
+  num_workers: 3
 
 optimizer:
   name: torch.optim.AdamW

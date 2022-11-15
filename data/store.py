@@ -38,7 +38,7 @@ class ImageStore(Dataset):
         self.dataset = img_path
         self.image_transforms = transforms.Compose(
             [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
                 transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
@@ -208,7 +208,7 @@ class AspectRatioDataset(ImageStore):
             new_w, new_h = w, h
 
         image_transforms = transforms.Compose([
-            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.LANCZOS),
             transforms.CenterCrop((h, w)) if center_crop else transforms.RandomCrop((h, w)),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
