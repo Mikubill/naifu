@@ -287,9 +287,9 @@ class AspectRatioSampler(torch.utils.data.Sampler):
     ):
         super().__init__(None)
         self.num_replicas = num_replicas
-        self.rank = rank
         self.config = config
         self.dataset = dataset
+        self.rank = rank
         self.batch_counter = 0
         self.reload_interval = config.dataset.reload_interval
         self.config = config
@@ -323,7 +323,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
     def get_dict(self, entries):
         id_size_map = {}
 
-        for entry in tqdm(entries, desc=f"Loading resolution from images", disable=self.rank not in [0, -1]):
+        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
             with Image.open(entry) as img:
                 size = img.size
             id_size_map[entry] = size

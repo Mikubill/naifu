@@ -219,7 +219,7 @@ if __name__ == "__main__":
     vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
 
     # Convert the text encoder model
-    text_enc_dict = convert_text_enc_state_dict({k[14:]: v for k, v in state_dict.items() if k.startswith("text_encoder")})
+    text_enc_dict = convert_text_enc_state_dict({k[13:]: v for k, v in state_dict.items() if k.startswith("text_encoder")})
     text_enc_dict = {"cond_stage_model.transformer." + k: v for k, v in text_enc_dict.items()}
 
     # Put together new checkpoint

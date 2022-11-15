@@ -9,6 +9,7 @@ import torch.utils.checkpoint
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 torch.backends.cudnn.benchmark = True
 
@@ -27,6 +28,7 @@ class ImageStore(Dataset):
         center_crop=False,
         pad_tokens=False,
         ucg=0,
+        rank=0,
         **kwargs
     ):
         self.size = size
@@ -34,6 +36,7 @@ class ImageStore(Dataset):
         self.tokenizer = tokenizer
         self.pad_tokens = pad_tokens
         self.ucg = ucg
+        self.rank = rank
         self.dataset = img_path
         self.image_transforms = transforms.Compose(
             [
@@ -58,9 +61,11 @@ class ImageStore(Dataset):
         return img_item
 
     def update_store(self, base):
-        print(f"Updating dataset metadata: {base}")
-        self.entries = [self.prompt_resolver(x) for x in Path(
-            base).iterdir() if x.is_file() and x.suffix != ".txt"]
+        self.entries = []
+        for x in tqdm(Path(base).iterdir(), desc=f"Loading captions", disable=self.rank not in [0, -1]):
+            if x.is_file() and x.suffix != ".txt":
+                self.entries.append(self.prompt_resolver(x))
+
         self._length = len(self.entries)
         random.shuffle(self.entries)
 
