@@ -39,6 +39,9 @@ class StableDiffusionModel(pl.LightningModule):
             
         if self.config.trainer.use_xformers:
             self.unet.set_use_memory_efficient_attention_xformers(True)
+        
+        # finally setup ema
+        self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
     
     def training_step(self, batch, batch_idx):
         # Convert images to latent space
@@ -87,8 +90,7 @@ class StableDiffusionModel(pl.LightningModule):
     
     def on_train_start(self):
         if self.config.trainer.use_ema: 
-            self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-            self.ema.to(dtype=self.weight_dtype)
+            self.ema.to(self.device, dtype=self.weight_dtype)
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
