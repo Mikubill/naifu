@@ -24,21 +24,22 @@ class AspectRatioBucket:
     Requires a pickle with mapping of dataset IDs to resolutions called resolutions.pkl to use this.
     '''
 
-    def __init__(self,
-                 id_size_map,
-                 max_size=(768, 512),
-                 divisible=64,
-                 step_size=8,
-                 min_dim=256,
-                 base_res=(512, 512),
-                 bsz=1,
-                 world_size=1,
-                 global_rank=0,
-                 max_ar_error=4,
-                 seed=42,
-                 dim_limit=1024,
-                 debug=True,
-                 ):
+    def __init__(
+        self,
+        id_size_map,
+        max_size=(768, 512),
+        divisible=64,
+        step_size=8,
+        min_dim=256,
+        base_res=(512, 512),
+        bsz=1,
+        world_size=1,
+        global_rank=0,
+        max_ar_error=4,
+        seed=42,
+        dim_limit=1024,
+        debug=True,
+    ):
         if global_rank == -1:
             global_rank = 0
 
@@ -107,13 +108,12 @@ class AspectRatioBucket:
             resolutions.append((w, h))
             aspects.append(float(w)/float(h))
             h += self.div
+            
         res_map = {}
         for i, res in enumerate(resolutions):
             res_map[res] = aspects[i]
-        self.resolutions = sorted(
-            res_map.keys(), key=lambda x: x[0] * 4096 - x[1])
-        self.aspects = np.array(
-            list(map(lambda x: res_map[x], self.resolutions)))
+        self.resolutions = sorted(res_map.keys(), key=lambda x: x[0] * 4096 - x[1])
+        self.aspects = np.array(list(map(lambda x: res_map[x], self.resolutions)))
         self.resolutions = np.array(self.resolutions)
         if self.debug:
             timer = time.perf_counter() - timer
@@ -147,13 +147,12 @@ class AspectRatioBucket:
         if self.debug:
             timer = time.perf_counter() - timer
             self.aspect_errors = np.array(self.aspect_errors)
+            
             try:
                 print(f"skipped images: {skipped}")
-                print(
-                    f"aspect error: mean {self.aspect_errors.mean()}, median {np.median(self.aspect_errors)}, max {self.aspect_errors.max()}")
+                print(f"aspect error: mean {self.aspect_errors.mean()}, median {np.median(self.aspect_errors)}, max {self.aspect_errors.max()}")
                 for bucket_id in reversed(sorted(self.buckets.keys(), key=lambda b: len(self.buckets[b]))):
-                    print(
-                        f"bucket {bucket_id}: {self.resolutions[bucket_id]}, aspect {self.aspects[bucket_id]:.5f}, entries {len(self.buckets[bucket_id])}")
+                    print(f"bucket {bucket_id}: {self.resolutions[bucket_id]}, aspect {self.aspects[bucket_id]:.5f}, entries {len(self.buckets[bucket_id])}")
                 print(f"assign_buckets: {timer:.5f}s")
             except Exception as e:
                 pass
@@ -185,11 +184,11 @@ class AspectRatioBucket:
         self.batch_delivered = 0
         for bucket_id in sorted(self.buckets.keys()):
             if len(self.buckets[bucket_id]) > 0:
-                self.epoch[bucket_id] = [
-                    post_id for post_id in self.buckets[bucket_id] if post_id in index]
+                self.epoch[bucket_id] = [post_id for post_id in self.buckets[bucket_id] if post_id in index]
                 self.prng.shuffle(self.epoch[bucket_id])
                 self.epoch[bucket_id] = list(self.epoch[bucket_id])
                 overhang = len(self.epoch[bucket_id]) % self.bsz
+                
                 if overhang != 0:
                     self.left_over.extend(self.epoch[bucket_id][:overhang])
                     self.epoch[bucket_id] = self.epoch[bucket_id][overhang:]
@@ -201,8 +200,8 @@ class AspectRatioBucket:
             count = 0
             for bucket_id in self.epoch.keys():
                 count += len(self.epoch[bucket_id])
-            print(
-                f"correct item count: {count == len(index)} ({count} of {len(index)})")
+                
+            print(f"correct item count: {count == len(index)} ({count} of {len(index)})")
             print(f"start_epoch: {timer:.5f}s")
 
     def get_batch(self):
@@ -218,18 +217,15 @@ class AspectRatioBucket:
         while not found_batch:
             bucket_ids = list(self.epoch.keys())
             if len(self.left_over) >= self.bsz:
-                bucket_probs = [
-                    len(self.left_over)] + [len(self.epoch[bucket_id]) for bucket_id in bucket_ids]
+                bucket_probs = [len(self.left_over)] + [len(self.epoch[bucket_id]) for bucket_id in bucket_ids]
                 bucket_ids = [-1] + bucket_ids
             else:
-                bucket_probs = [len(self.epoch[bucket_id])
-                                for bucket_id in bucket_ids]
+                bucket_probs = [len(self.epoch[bucket_id]) for bucket_id in bucket_ids]
             bucket_probs = np.array(bucket_probs, dtype=np.float32)
             bucket_lens = bucket_probs
             bucket_probs = bucket_probs / bucket_probs.sum()
             if bool(self.epoch):
-                chosen_id = int(self.prng.choice(
-                    bucket_ids, 1, p=bucket_probs)[0])
+                chosen_id = int(self.prng.choice(bucket_ids, 1, p=bucket_probs)[0])
             else:
                 chosen_id = -1
 
@@ -253,13 +249,11 @@ class AspectRatioBucket:
                     self.left_over.extend(self.epoch[chosen_id])
                     del self.epoch[chosen_id]
 
-            assert (found_batch or len(self.left_over)
-                    >= self.bsz or bool(self.epoch))
+            assert (found_batch or len(self.left_over) >= self.bsz or bool(self.epoch))
 
         if self.debug:
             timer = time.perf_counter() - timer
-            print(f"bucket probs: " +
-                  ", ".join(map(lambda x: f"{x:.2f}", list(bucket_probs*100))))
+            print(f"bucket probs: " + ", ".join(map(lambda x: f"{x:.2f}", list(bucket_probs*100))))
             print(f"chosen id: {chosen_id}")
             print(f"batch data: {batch_data}")
             print(f"resolution: {resolution}")
@@ -354,7 +348,6 @@ def init_sampler(args, config, dataset, world_size):
     if config.arb.debug:
         print(f"BucketManager initialized using config: {arg_config}")
     else:
-        print(
-            f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
+        print(f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
 
     return AspectRatioSampler(config, args.local_rank, dataset, world_size)

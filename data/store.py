@@ -24,7 +24,7 @@ class ImageStore(Dataset):
         tokenizer,
         size=512,
         center_crop=False,
-        pad_tokens=False,
+        max_length=225,
         ucg=0,
         rank=0,
         **kwargs
@@ -32,16 +32,14 @@ class ImageStore(Dataset):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
-        self.pad_tokens = pad_tokens
         self.ucg = ucg
+        self.max_length = max_length
         self.rank = rank
         self.dataset = img_path
         self.image_transforms = transforms.Compose(
             [
-                transforms.Resize(
-                    size, interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.CenterCrop(
-                    size) if center_crop else transforms.RandomCrop(size),
+                transforms.Resize(size, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -68,11 +66,14 @@ class ImageStore(Dataset):
         random.shuffle(self.entries)
 
     def tokenize(self, prompt):
+        '''
+        Handle token truncation in collate_fn()
+        '''
         return self.tokenizer(
             prompt,
-            padding="max_length" if self.pad_tokens else "do_not_pad",
+            padding="do_not_pad",
             truncation=True,
-            max_length=self.tokenizer.model_max_length,
+            max_length=self.max_length,
         ).input_ids
 
     @staticmethod
@@ -137,7 +138,7 @@ class ImageStore(Dataset):
                 skip_image = True
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
             skip_image = True
-
+            
         return ", ".join(list(final_tags.keys()))
 
     def __len__(self):
@@ -168,19 +169,28 @@ class AspectRatioDataset(ImageStore):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
         return res
-
+    
+    # ref: stable-diffusion-private/ldm/modules/encoders
     def collate_fn(self, examples):
         examples = list(itertools.chain.from_iterable(examples))
 
         input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
 
-        pixel_values = torch.stack(pixel_values).to(
-            memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad(
-            {"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+        
+        z = []
+        while max(map(len, input_ids)) != 0:
+            rem_tokens = [x[75:] for x in input_ids]
+            tokens = []
+            for j in range(len(input_ids)):
+                tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
 
-        return [input_ids, pixel_values]
+            z.append(torch.asarray([[self.tokenizer.bos_token_id] + x[:75] + [self.tokenizer.eos_token_id] for x in tokens]))
+            input_ids = rem_tokens
+            
+        # input_ids = self.tokenizer.pad({"input_ids": z}, padding=True, return_tensors="pt").input_ids
+        return [z, pixel_values]
 
     def transformer(self, img, size, center_crop=False):
         x, y = img.size
@@ -190,25 +200,16 @@ class AspectRatioDataset(ImageStore):
         min_crop, max_crop = (w, h) if w <= h else (h, w)
         ratio_src, ratio_dst = float(long / short), float(max_crop / min_crop)
 
-        if (x > y and w < h) or (x < y and w > h):
-            # handle i/c mixed input
-            img = img.rotate(90, expand=True)
-            x, y = img.size
-
         if ratio_src > ratio_dst:
-            new_w, new_h = (min_crop, int(min_crop * ratio_src)
-                            ) if x < y else (int(min_crop * ratio_src), min_crop)
+            new_w, new_h = (min_crop, int(min_crop * ratio_src)) if x < y else (int(min_crop * ratio_src), min_crop)
         elif ratio_src < ratio_dst:
-            new_w, new_h = (max_crop, int(max_crop / ratio_src)
-                            ) if x > y else (int(max_crop / ratio_src), max_crop)
+            new_w, new_h = (max_crop, int(max_crop / ratio_src)) if x > y else (int(max_crop / ratio_src), max_crop)
         else:
             new_w, new_h = w, h
 
         image_transforms = transforms.Compose([
-            transforms.Resize(
-                (new_h, new_w), interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(
-                (h, w)) if center_crop else transforms.RandomCrop((h, w)),
+            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop((h, w)) if center_crop else transforms.RandomCrop((h, w)),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
@@ -221,10 +222,8 @@ class AspectRatioDataset(ImageStore):
             import torchvision
             print(x, y, "->", new_w, new_h, "->", new_img.shape)
             filename = str(uuid.uuid4())
-            torchvision.utils.save_image(
-                self.denormalize(new_img), f"/tmp/{filename}_1.jpg")
-            torchvision.utils.save_image(
-                torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_2.jpg")
+            torchvision.utils.save_image(self.denormalize(new_img), f"/tmp/{filename}_1.jpg")
+            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_2.jpg")
             print(f"saved: /tmp/{filename}")
 
         return new_img
@@ -235,7 +234,7 @@ class AspectRatioDataset(ImageStore):
         if item_id == "":
             return {}
 
-        prompt = self.prompt_cache[item_id]
+        prompt = self.process_tags(self.prompt_cache[item_id])
         image = self.read_img(item_id)
 
         if random.random() < self.ucg:
