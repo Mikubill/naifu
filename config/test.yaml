@@ -11,7 +11,7 @@ trainer:
   seed: 1138
   pad_tokens: true
   precision: fp16
-  use_ema: false
+  use_ema: true
   half_encoder: true
   use_hivemind: false
   use_xformers: false
