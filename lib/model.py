@@ -20,6 +20,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.config = config
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
         
+        self.tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
         self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
         self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
@@ -42,9 +43,12 @@ class StableDiffusionModel(pl.LightningModule):
         latents = latent_dist.sample() * 0.18215
         
         # Get the text embedding for conditioning
-        encoder_hidden_states = self.text_encoder(batch[0], output_hidden_states=True)
-        encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-self.config.trainer.clip_skip])
-        
+        encoder_hidden_states = None
+        for tokens in batch[0]:
+            state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
+            state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
+            encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
+
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
@@ -125,5 +129,5 @@ def load_model(model_path, config):
         Path(model_path).mkdir(exist_ok=True)
         download_model(model_url, model_path)
 
-    tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-    return tokenizer, StableDiffusionModel(model_path, config)
+    model = StableDiffusionModel(model_path, config)
+    return model.tokenizer, model

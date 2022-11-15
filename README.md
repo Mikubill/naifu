@@ -2,9 +2,16 @@
 
 Naifu Diffusion is the name for this project of finetuning Stable Diffusion on images and captions.
 
-See `config/test.yaml` for any configuration.
+Still under testing, see `config/test.yaml` for any configuration.
 
 Colab example: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
+
+Currently implemented features:
+
+- [x] Aspect Ratio Bucket and Custom Batch
+- [x] Using Hidden States of CLIP’s Penultimate Layer
+- [x] Nai-style tag processing
+- [x] Extending the Stable Diffusion Token Limit by 3x (beta)
 
 ## Usage
 
