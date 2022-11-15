@@ -11,8 +11,6 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
 
-torch.backends.cudnn.benchmark = True
-
 
 class ImageStore(Dataset):
     """

@@ -15,8 +15,6 @@ import torch.utils.checkpoint
 from PIL import Image
 from tqdm.auto import tqdm
 
-torch.backends.cudnn.benchmark = True
-
 
 class AspectRatioBucket:
     '''
