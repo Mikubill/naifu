@@ -275,16 +275,29 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         config,
         rank,
         dataset,
-        num_replicas=1,
+        world_size=1,
     ):
         super().__init__(None)
-        self.num_replicas = num_replicas
+        self.num_replicas = world_size
         self.config = config
         self.dataset = dataset
         self.rank = rank
         self.batch_counter = 0
         self.reload_interval = config.dataset.reload_interval
-        self.config = config
+        
+        self.arb_config = {
+            "bsz": config.trainer.init_batch_size,
+            "seed": config.trainer.seed,
+            "world_size": world_size,
+            "global_rank": rank,
+            **config.arb
+        }
+
+        if config.arb.debug:
+            print(f"BucketManager initialized using config: {self.arb_config}")
+        else:
+            print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
+
         self.init_buckets()
 
     def download(self, url, mpath="model"):
@@ -308,8 +321,7 @@ class AspectRatioSampler(torch.utils.data.Sampler):
 
         entries = [x for x in Path(base).iterdir(
         ) if x.is_file() and x.suffix != ".txt"]
-        self.buckets = AspectRatioBucket(
-            self.get_dict(entries), **self.config.arb)
+        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
         self.dataset.update(base)
 
     def get_dict(self, entries):
@@ -335,19 +347,3 @@ class AspectRatioSampler(torch.utils.data.Sampler):
     def __len__(self):
         return len(self.buckets) // self.num_replicas
 
-
-def init_sampler(args, config, dataset, world_size):
-    arg_config = {
-        "bsz": config.trainer.init_batch_size,
-        "seed": config.trainer.seed,
-        "world_size": world_size,
-        "global_rank": args.local_rank,
-        **config.arb
-    }
-
-    if config.arb.debug:
-        print(f"BucketManager initialized using config: {arg_config}")
-    else:
-        print(f"BucketManager initialized with base_res = {arg_config['base_res']}, max_size = {arg_config['max_size']}")
-
-    return AspectRatioSampler(config, args.local_rank, dataset, world_size)

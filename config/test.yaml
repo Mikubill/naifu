@@ -33,7 +33,7 @@ lightning:
   max_epochs: 100
   precision: 32
   gradient_clip_val: 0.0
-  auto_scale_batch_size: false
+  auto_scale_batch_size: true
   auto_lr_find: false
   move_metrics_to_cpu: true
 
