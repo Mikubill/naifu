@@ -4,7 +4,7 @@ from functools import partial
 
 import pytorch_lightning as pl
 import torch
-from data.buckets import init_sampler
+from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset
 from hivemind import Float16Compression, Uniform8BitQuantization
 from hivemind.compression import SizeAdaptiveCompression
@@ -32,16 +32,10 @@ def main(args):
     )
     
     checkpoint_callback = ModelCheckpoint(**config.checkpoint)
-    
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         collate_fn=dataset.collate_fn,
-        sampler=init_sampler(
-            args, 
-            config=config, 
-            dataset=dataset, 
-            world_size=get_world_size(),
-        ),
+        sampler=AspectRatioSampler(config, args.local_rank, dataset, get_world_size()),
         num_workers=config.dataset.num_workers,
         persistent_workers=True,
     )
@@ -56,7 +50,7 @@ def main(args):
         threshold=2 ** 16 + 1, less=Float16Compression(), greater_equal=Uniform8BitQuantization()
     )
     
-    hivemind = (
+    strategy = (
         HivemindStrategy(
             scheduler_fn=partial(
                 get_class(config.lr_scheduler.name),
@@ -72,12 +66,11 @@ def main(args):
     
     trainer = pl.Trainer(
         logger=logger, 
-        strategy=hivemind, 
+        strategy=strategy, 
         callbacks=[checkpoint_callback],
         **config.lightning
     )
     
-    trainer.tune(model=model)
     trainer.fit(
         model=model, 
         ckpt_path=args.resume if args.resume else None,

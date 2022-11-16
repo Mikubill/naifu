@@ -71,7 +71,7 @@ class ImageStore(Dataset):
         '''
         return self.tokenizer(
             prompt,
-            padding="do_not_pad",
+            padding="max_length",
             truncation=True,
             max_length=self.max_length,
         ).input_ids
@@ -179,6 +179,7 @@ class AspectRatioDataset(ImageStore):
 
         pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
         
+        # todo: Handle end-of-sentence truncation
         z = []
         while max(map(len, input_ids)) != 0:
             rem_tokens = [x[75:] for x in input_ids]
@@ -186,7 +187,8 @@ class AspectRatioDataset(ImageStore):
             for j in range(len(input_ids)):
                 tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
 
-            z.append(torch.asarray([[self.tokenizer.bos_token_id] + x[:75] + [self.tokenizer.eos_token_id] for x in tokens]))
+            rebuild = torch.asarray([[self.tokenizer.bos_token_id] + x[:75] + [self.tokenizer.eos_token_id] for x in tokens])
+            z.append(rebuild)
             input_ids = rem_tokens
             
         # input_ids = self.tokenizer.pad({"input_ids": z}, padding=True, return_tensors="pt").input_ids
