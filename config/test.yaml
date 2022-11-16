@@ -9,7 +9,6 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  pad_tokens: true
   precision: fp16
   use_ema: true
   half_encoder: true
