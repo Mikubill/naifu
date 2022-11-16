@@ -32,7 +32,7 @@ Fulfill deps
 ```bash
 # by conda
 conda env create -f environment.yaml
-conda activate nai
+conda activate nd
 
 # OR by pip
 pip install -r requirements.txt
