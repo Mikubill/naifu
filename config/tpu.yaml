@@ -9,7 +9,7 @@ trainer:
   clip_skip: 2
   seed: 1138
   precision: fp32
-  use_ema: true
+  use_ema: false
   half_encoder: false
   use_hivemind: false
   use_xformers: false
@@ -17,7 +17,7 @@ trainer:
 checkpoint:
   monitor: 'train_loss'
   dirpath: checkpoint
-  filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
+  filename: 'sample-nd-epoch{epoch:02d}-val_loss{train_loss:.2f}'
   auto_insert_metric_name: false
   every_n_epochs: 3
   save_top_k: 5
@@ -51,6 +51,18 @@ dataset:
   debug_arb: false
   reload_interval: 10
   num_workers: 3
+
+scheduler:
+  name: diffusers.DDIMScheduler
+  params:
+      beta_end: 0.012
+      beta_schedule: "scaled_linear"
+      beta_start: 0.00085
+      clip_sample: false
+      num_train_timesteps: 1000
+      set_alpha_to_one: false
+      steps_offset: 1
+      trained_betas: null
 
 optimizer:
   name: torch.optim.AdamW

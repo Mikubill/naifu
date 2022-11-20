@@ -6,21 +6,25 @@ import pytorch_lightning as pl
 import torch
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset
-from hivemind import Float16Compression, Uniform8BitQuantization
-from hivemind.compression import SizeAdaptiveCompression
+
 from lib.args import parse_args
-from lib.model import get_class, load_model
+from lib.model import load_model
 from lib.utils import get_world_size
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import HivemindStrategy
 
 args = parse_args()
 config = OmegaConf.load(args.config)
 
 def main(args):
     torch.manual_seed(config.trainer.seed)
+    
+    strategy = None
+    if config.trainer.use_hivemind:
+        from lib.hivemind import init_hivemind
+        strategy = init_hivemind(config)
+        
     tokenizer, model = load_model(args.model_path, config)
     dataset = AspectRatioDataset(
         tokenizer=tokenizer,
@@ -43,24 +47,6 @@ def main(args):
     logger = (
         WandbLogger(project=config.monitor.wandb_id)
         if config.monitor.wandb_id != ""
-        else None
-    )
-    
-    compression = SizeAdaptiveCompression(
-        threshold=2 ** 16 + 1, less=Float16Compression(), greater_equal=Uniform8BitQuantization()
-    )
-    
-    strategy = (
-        HivemindStrategy(
-            scheduler_fn=partial(
-                get_class(config.lr_scheduler.name),
-                **config.lr_scheduler.params
-            ),
-            grad_compression=compression,
-            state_averaging_compression=compression,
-            **config.hivemind
-        )
-        if config.trainer.use_hivemind
         else None
     )
     

@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 1
+  init_batch_size: 2
   resolution: 512
   center_crop: false
   gradient_checkpointing: true
@@ -12,15 +12,17 @@ trainer:
   use_ema: false
   half_encoder: true
   use_hivemind: false
+
+  # note: only works with init_batch_size > 1
   use_xformers: false
   
 checkpoint:
   monitor: 'train_loss'
   dirpath: checkpoint
-  filename: 'sample-nd-epoch{epoch:02d}-val_loss{val/loss:.2f}'
+  filename: 'sample-nd-epoch{epoch:02d}-val_loss{train_loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 0
-  save_top_k: 5
+  every_n_epochs: 3
+  save_top_k: 3
   save_last: true
 
 lightning:
@@ -52,6 +54,18 @@ dataset:
   debug_arb: false
   reload_interval: 10
   num_workers: 3
+
+scheduler:
+  name: diffusers.DDIMScheduler
+  params:
+      beta_end: 0.012
+      beta_schedule: "scaled_linear"
+      beta_start: 0.00085
+      clip_sample: false
+      num_train_timesteps: 1000
+      set_alpha_to_one: false
+      steps_offset: 1
+      trained_betas: null
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit

@@ -1,16 +1,28 @@
+
 import functools
 import tarfile
 from pathlib import Path
+from omegaconf import OmegaConf
 
 import pytorch_lightning as pl
 import requests
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
+
 from .ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, BertTokenizerFast
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from lib.utils import (
+    create_unet_diffusers_config,
+    convert_ldm_unet_checkpoint,
+    create_vae_diffusers_config,
+    convert_ldm_vae_checkpoint,
+    convert_ldm_clip_checkpoint,
+    create_ldm_bert_config,
+    convert_ldm_bert_checkpoint
+)
 
 
 # define the LightningModule
@@ -19,14 +31,56 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
+        scheduler_cls = get_class(config.scheduler.name)
+        self.noise_scheduler = scheduler_cls(**config.scheduler.params)
         
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
-        self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
-        self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
-        self.noise_scheduler = DDIMScheduler.from_config(model_path, subfolder="scheduler")
+        if (Path(model_path) / "model.ckpt").is_file():
+            # use autoconvert
+            
+            vae_path = Path(model_path) / "model.vae.pt"
+            checkpoint_path = Path(model_path) / "model.ckpt"
+            config_path = Path(model_path) / "config.yaml"
+            
+            print(f"Loading StableDiffusionModel from {checkpoint_path}")
+            original_config = OmegaConf.load(config_path)
+            
+            checkpoint = torch.load(checkpoint_path)
+            checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+            
+            vae_checkpoint = checkpoint
+            if vae_path.is_file():
+                vae_checkpoint = torch.load(vae_path)["state_dict"]
+
+            # Convert the UNet2DConditionModel model.
+            unet_config = create_unet_diffusers_config(original_config)
+            converted_unet_checkpoint = convert_ldm_unet_checkpoint(checkpoint, unet_config, path=checkpoint_path, extract_ema=False)
+
+            self.unet = UNet2DConditionModel(**unet_config)
+            self.unet.load_state_dict(converted_unet_checkpoint)
+
+            # Convert the VAE model.
+            vae_config = create_vae_diffusers_config(original_config)
+            converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+
+            self.vae = AutoencoderKL(**vae_config)
+            self.vae.load_state_dict(vae_checkpoint)
+            
+            text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
+            if text_model_type == "FrozenCLIPEmbedder":
+                self.text_encoder = convert_ldm_clip_checkpoint(checkpoint)
+                self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+            else:
+                text_config = create_ldm_bert_config(original_config)
+                self.text_encoder = convert_ldm_bert_checkpoint(checkpoint, text_config)
+                self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+                
+        else:
+            self.tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
+            self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
+            self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
+            self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet") 
+             
         self.unet.to(self.weight_dtype)
-        
         if config.trainer.half_encoder or self.weight_dtype == torch.float16:
             self.vae.to(torch.float16)
             self.text_encoder.to(torch.float16)
@@ -130,7 +184,9 @@ def load_model(model_path, config):
 
     if (
         not Path(model_path).is_dir()
-        or not (Path(model_path) / "model_index.json").is_file()
+        or not (
+            (Path(model_path) / "model_index.json").is_file() or (Path(model_path) / "model.ckpt").is_file()
+        )
     ):
         Path(model_path).mkdir(exist_ok=True)
         download_model(model_url, model_path)
