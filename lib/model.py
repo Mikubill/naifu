@@ -60,10 +60,10 @@ class StableDiffusionModel(pl.LightningModule):
 
             # Convert the VAE model.
             vae_config = create_vae_diffusers_config(original_config)
-            converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+            converted_vae_checkpoint = convert_ldm_vae_checkpoint(vae_checkpoint, vae_config)
 
             self.vae = AutoencoderKL(**vae_config)
-            self.vae.load_state_dict(vae_checkpoint)
+            self.vae.load_state_dict(converted_vae_checkpoint)
             
             text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
             if text_model_type == "FrozenCLIPEmbedder":
