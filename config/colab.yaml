@@ -2,16 +2,18 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 1
+  init_batch_size: 2
   resolution: 512
   center_crop: false
-  gradient_checkpointing: false
+  gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  precision: fp32
-  half_encoder: false
-  use_ema: true
+  precision: fp16
+  use_ema: false
+  half_encoder: true
   use_hivemind: false
+
+  # note: only works with init_batch_size > 1
   use_xformers: false
   
 checkpoint:
@@ -20,7 +22,7 @@ checkpoint:
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{train_loss:.2f}'
   auto_insert_metric_name: false
   every_n_epochs: 3
-  save_top_k: 5
+  save_top_k: 3
   save_last: true
 
 lightning:
@@ -28,12 +30,13 @@ lightning:
   devices: -1
   auto_select_gpus: true
   limit_train_batches: 100
-  max_epochs: 20
+  max_epochs: 100
   precision: 32
   log_every_n_steps: 1
-  gradient_clip_val: 0
+  gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
+  move_metrics_to_cpu: true
 
 arb:
    debug: false
@@ -48,7 +51,7 @@ dataset:
   img_path: 
     - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
   center_crop: false
-  ucg: 0.0
+  ucg: 0.1
   debug_arb: false
   reload_interval: 10
   num_workers: 3
@@ -66,7 +69,7 @@ scheduler:
       trained_betas: null
 
 optimizer:
-  name: torch.optim.AdamW
+  name: bitsandbytes.optim.AdamW8bit
   params:
     lr: 5e-6
     weight_decay: 1e-2

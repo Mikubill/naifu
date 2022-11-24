@@ -2,15 +2,15 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 2
+  init_batch_size: 1
   resolution: 512
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  precision: fp16
+  precision: fp32
   use_ema: false
-  half_encoder: true
+  half_encoder: false
   use_hivemind: false
 
   # note: only works with init_batch_size > 1
@@ -69,7 +69,7 @@ scheduler:
       trained_betas: null
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     weight_decay: 1e-2
