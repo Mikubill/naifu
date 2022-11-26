@@ -41,9 +41,7 @@ class ConvNextClassifier:
         )
         self.transform = transforms.Compose(
             [
-                transforms.Resize(
-                    (384, 384), interpolation=transforms.InterpolationMode.BICUBIC
-                ),
+                transforms.Resize((384, 384), interpolation=transforms.InterpolationMode.LANCZOS),
                 transforms.ToTensor(),
                 transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
             ]
