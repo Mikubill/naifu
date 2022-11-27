@@ -12,7 +12,7 @@ trainer:
   half_encoder: true
   use_ema: false
   use_hivemind: true
-  use_xformers: false
+  use_xformers: true
 
 checkpoint:
   monitor: 'train_loss'
@@ -35,8 +35,6 @@ hivemind:
   averaging_timeout: 1200.0
   allreduce_timeout: 1200.0
   load_state_timeout: 1200.0
-  
-
 
 lightning:
   accelerator: gpu
