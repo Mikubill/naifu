@@ -3,6 +3,7 @@ import itertools
 import os
 import random
 from pathlib import Path
+from data.buckets import AspectRatioSampler
 
 import torch
 import torch.utils.checkpoint
@@ -45,22 +46,24 @@ class ImageStore(Dataset):
             ]
         )
 
-    def prompt_resolver(self, x):
+    def prompt_resolver(self, x: str):
         img_item = (x, "")
         fp = os.path.splitext(x)[0]
 
         with open(fp + ".txt") as f:
             content = f.read()
             new_prompt = content
-        img_item = (x, new_prompt)
 
-        return img_item
+        return x, new_prompt
 
     def update_store(self, base):
         self.entries = []
         for x in tqdm(Path(base).iterdir(), desc=f"Loading captions", disable=self.rank not in [0, -1]):
             if x.is_file() and x.suffix != ".txt":
-                self.entries.append(self.prompt_resolver(x))
+                img, prompt = self.prompt_resolver(x)
+                result, skip = self.process_tags(prompt)
+                if skip: continue
+                self.entries.append((img, result))
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
@@ -74,7 +77,7 @@ class ImageStore(Dataset):
             padding="do_not_pad",
             truncation=True,
             max_length=self.max_length,
-        ).input_ids
+        ).input_ids 
 
     @staticmethod
     def read_img(filepath) -> Image:
@@ -139,7 +142,7 @@ class ImageStore(Dataset):
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
             skip_image = True
             
-        return ", ".join(list(final_tags.keys()))
+        return ", ".join(list(final_tags.keys())), skip_image
 
     def __len__(self):
         return self._length
@@ -160,10 +163,12 @@ class AspectRatioDataset(ImageStore):
         self.debug = debug_arb
         self.prompt_cache = {}
 
-    def update(self, x):
+    def update(self, x) -> list:
         self.update_store(x)
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
+        
+        return [x[0] for x in self.entries]
 
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
@@ -236,7 +241,7 @@ class AspectRatioDataset(ImageStore):
         if item_id == "":
             return {}
 
-        prompt = self.process_tags(self.prompt_cache[item_id])
+        prompt = self.prompt_cache[item_id]
         image = self.read_img(item_id)
 
         if random.random() < self.ucg:

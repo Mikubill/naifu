@@ -35,13 +35,13 @@ lightning:
   auto_lr_find: false
 
 arb:
-   debug: false
-   base_res: [512, 512]
-   max_size: [768, 512]
-   divisible: 64
-   max_ar_error: 4
-   min_dim: 256
-   dim_limit: 1024
+  debug: false
+  base_res: [512, 512]
+  max_size: [768, 512]
+  divisible: 64
+  max_ar_error: 4
+  min_dim: 256
+  dim_limit: 1024
 
 dataset:
   img_path: 
@@ -82,3 +82,7 @@ lr_scheduler:
 monitor:
   wandb_id: ""
   store_checkpoints: true
+
+experiment:
+  tokenizer: transformers.CLIPTokenizer
+  encoder: transformers.CLIPTextModel
