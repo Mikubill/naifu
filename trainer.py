@@ -26,6 +26,8 @@ def main(args):
         strategy = init_hivemind(config)
         
     tokenizer, model = load_model(args.model_path, config)
+    checkpoint_callback = ModelCheckpoint(**config.checkpoint)
+    
     dataset = AspectRatioDataset(
         tokenizer=tokenizer,
         size=config.trainer.resolution,
@@ -35,7 +37,6 @@ def main(args):
         **config.dataset
     )
     
-    checkpoint_callback = ModelCheckpoint(**config.checkpoint)
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         collate_fn=dataset.collate_fn,

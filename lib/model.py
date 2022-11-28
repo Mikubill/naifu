@@ -30,15 +30,19 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
+        
         scheduler_cls = get_class(config.scheduler.name)
         self.noise_scheduler = scheduler_cls(**config.scheduler.params)
+        
+        tokenizer_cls = get_class(config.experiment.tokenizer) if config.experiment else CLIPTokenizer
+        encoder_cls = get_class(config.experiment.encoder)if config.experiment else CLIPTextModel
         
         if (Path(model_path) / "model.ckpt").is_file():
             # use autoconvert
             self.unet, self.vae, self.tokenizer, self.text_encoder = load_sd_checkpoint(model_path)                
         else:
-            self.tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder")
+            self.tokenizer = tokenizer_cls.from_pretrained(model_path, subfolder="tokenizer")
+            self.text_encoder = encoder_cls.from_pretrained(model_path, subfolder="text_encoder")
             self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
             self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet") 
              

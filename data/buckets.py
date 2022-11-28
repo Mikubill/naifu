@@ -39,6 +39,7 @@ class AspectRatioBucket:
         seed=42,
         dim_limit=1024,
         debug=True,
+        **kwargs,
     ):
         if global_rank == -1:
             global_rank = 0
@@ -319,10 +320,9 @@ class AspectRatioSampler(torch.utils.data.Sampler):
             self.download(base, dlpath)
             base = dlpath
 
-        entries = [x for x in Path(base).iterdir(
-        ) if x.is_file() and x.suffix != ".txt"]
+        entries = self.dataset.update(base)
         self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
-        self.dataset.update(base)
+        
 
     def get_dict(self, entries):
         id_size_map = {}
