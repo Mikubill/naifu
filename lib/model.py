@@ -36,7 +36,7 @@ class StableDiffusionModel(pl.LightningModule):
         
         if (Path(model_path) / "model.ckpt").is_file():
             # use autoconvert
-            self.unet, self.vae, self.tokenizer, self.text_encoder = load_sd_checkpoint(model_path)                
+            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(model_path)                
         else:
             self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "tokenizer")
             self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "text_encoder")
