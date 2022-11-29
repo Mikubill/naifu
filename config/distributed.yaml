@@ -95,6 +95,8 @@ lr_scheduler:
 
 monitor:
   wandb_id: ""
+  huggingface_repo: ""
+  hf_auth_token: ""
   store_checkpoints: true
 
 experiment:
