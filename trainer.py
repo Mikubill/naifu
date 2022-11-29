@@ -1,13 +1,11 @@
 # torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 
-from functools import partial
-
 import pytorch_lightning as pl
 import torch
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset
-
 from lib.args import parse_args
+from lib.callbacks import HuggingFaceHubCallback
 from lib.model import load_model
 from lib.utils import get_world_size
 from omegaconf import OmegaConf
@@ -26,7 +24,13 @@ def main(args):
         strategy = init_hivemind(config)
         
     tokenizer, model = load_model(args.model_path, config)
-    checkpoint_callback = ModelCheckpoint(**config.checkpoint)
+    callbacks = [ModelCheckpoint(**config.checkpoint)]
+    if config.monitor.huggingface_repo != "":
+        hf_logger = HuggingFaceHubCallback(
+            config.monitor.huggingface_repo, 
+            use_auth_token=config.monitor.hf_auth_token
+        )
+        callbacks.append(hf_logger)
     
     dataset = AspectRatioDataset(
         tokenizer=tokenizer,
@@ -54,7 +58,7 @@ def main(args):
     trainer = pl.Trainer(
         logger=logger, 
         strategy=strategy, 
-        callbacks=[checkpoint_callback],
+        callbacks=callbacks,
         **config.lightning
     )
     
