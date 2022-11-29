@@ -34,16 +34,13 @@ class StableDiffusionModel(pl.LightningModule):
         scheduler_cls = get_class(config.scheduler.name)
         self.noise_scheduler = scheduler_cls(**config.scheduler.params)
         
-        tokenizer_cls = get_class(config.experiment.tokenizer) if config.experiment else CLIPTokenizer
-        encoder_cls = get_class(config.experiment.encoder)if config.experiment else CLIPTextModel
-        
         if (Path(model_path) / "model.ckpt").is_file():
             # use autoconvert
             self.unet, self.vae, self.tokenizer, self.text_encoder = load_sd_checkpoint(model_path)                
         else:
-            self.tokenizer = tokenizer_cls.from_pretrained(model_path, subfolder="tokenizer")
-            self.text_encoder = encoder_cls.from_pretrained(model_path, subfolder="text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae")
+            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "tokenizer")
+            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "text_encoder")
+            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else Path(model_path) / "vae")
             self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet") 
              
         self.unet.to(self.weight_dtype)
@@ -63,6 +60,25 @@ class StableDiffusionModel(pl.LightningModule):
         # finally setup ema
         if self.config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
+            
+    def on_before_batch_transfer(self, batch, dataloader_idx: int):
+        input_ids = batch[0]
+        if input_ids.shape[1] <= 77:
+            return [[input_ids], batch[1]]
+        
+        # todo: Handle end-of-sentence truncation
+        z = []
+        while max(map(len, input_ids)) != 0:
+            rem_tokens = [x[75:] for x in input_ids]
+            tokens = []
+            for j in range(len(input_ids)):
+                tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
+
+            rebuild = torch.asarray([[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens])
+            z.append(rebuild)
+            input_ids = rem_tokens
+            
+        return [z, batch[1]]
     
     def training_step(self, batch, batch_idx):
         # Convert images to latent space

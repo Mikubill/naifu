@@ -99,6 +99,7 @@ monitor:
   hf_auth_token: ""
   store_checkpoints: true
 
-experiment:
-  tokenizer: transformers.CLIPTokenizer
-  encoder: transformers.CLIPTextModel
+encoder:
+  # Leave blank to load from model
+  text: 
+  vae: 
