@@ -1,5 +1,6 @@
 # torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
 
+# from lib.experiments import T5CLIPDiffusionModel
 import pytorch_lightning as pl
 import torch
 from data.buckets import AspectRatioSampler
@@ -24,6 +25,9 @@ def main(args):
         strategy = init_hivemind(config)
         
     tokenizer, model = load_model(args.model_path, config)
+    # model = T5CLIPDiffusionModel(args.model_path, config)
+    # tokenizer = model.tokenizer
+    
     callbacks = [ModelCheckpoint(**config.checkpoint)]
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
