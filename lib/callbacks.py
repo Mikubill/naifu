@@ -13,6 +13,8 @@ class HuggingFaceHubCallback(Callback):
         git_user=None,
         git_email=None,
         private=True,
+        every_n_steps=None,
+        every_n_epochs=1,
     ):
         self.repo_owner, self.repo_name = repo_name.rstrip("/").split("/")[-2:]
         self.repo_namespace = f"{self.repo_owner}/{self.repo_name}"
@@ -22,6 +24,8 @@ class HuggingFaceHubCallback(Callback):
         self.git_email = git_email
         self.private = private
         self.repo = None
+        self.every_n_steps=every_n_steps
+        self.every_n_epochs=every_n_epochs
 
     def on_init_end(self, trainer):
         self.repo = Repository(
@@ -33,7 +37,19 @@ class HuggingFaceHubCallback(Callback):
             revision=None, 
             private=self.private,
         )
+        
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if not self.every_n_steps:
+            return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+        
+        if trainer.global_step % self.every_n_steps == 0 and trainer.global_step > 0:
+            with self.repo.commit("Add/Update Model"):
+                trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt")  
 
     def on_train_epoch_end(self, trainer, pl_module):
-        with self.repo.commit("Add/Update Model"):
-            trainer.save_checkpoint(f"model-e{trainer.current_epoch}.ckpt")
+        if not self.every_n_epochs:
+            return super().on_train_epoch_end(self, trainer, pl_module)
+        
+        if trainer.current_epoch % self.every_n_epochs == 0:
+            with self.repo.commit("Add/Update Model"):
+                trainer.save_checkpoint(f"model-e{trainer.current_epoch}.ckpt")
