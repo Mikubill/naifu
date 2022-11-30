@@ -1,3 +1,4 @@
+import os
 import torch
 
 
@@ -19,11 +20,8 @@ def get_gpu_ram() -> str:
 
 
 def get_world_size() -> int:
-    if not torch.distributed.is_initialized():
-        return 1
-    return torch.distributed.get_world_size()
-
-
+    return int(os.environ.get("WORLD_SIZE", 1))
+    
 # convert utils from upstream
 
 def shave_segments(path, n_shave_prefix_segments=1):

@@ -42,13 +42,13 @@ Start training.
 
 ```bash
 # test
-torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
+python trainer.py --model_path=/tmp/model --config config/test.yaml
 
 # For multi-gpu
-torchrun trainer.py --model_path=/tmp/model --config config/multi-gpu.yaml
+python trainer.py --model_path=/tmp/model --config config/multi-gpu.yaml
 
 # Disitrubuted
-torchrun trainer.py --model_path=/tmp/model --config config/distributed.yaml
+python trainer.py --model_path=/tmp/model --config config/distributed.yaml
 ```
 
 Convert checkpoint files to use in SD-based webui
