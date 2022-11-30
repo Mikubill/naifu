@@ -5,7 +5,7 @@ trainer:
   init_batch_size: 1
   resolution: 512
   center_crop: false
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   clip_skip: 2
   seed: 1138
   precision: fp32
