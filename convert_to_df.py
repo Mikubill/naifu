@@ -30,18 +30,13 @@ except ImportError:
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
-    DPMSolverMultistepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
     LDMTextToImagePipeline,
     LMSDiscreteScheduler,
     PNDMScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
 )
-from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
-from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
-from transformers import AutoFeatureExtractor, BertTokenizerFast, CLIPTextModel, CLIPTokenizer
+from transformers import BertTokenizerFast, CLIPTokenizer
 from lib.utils import (
     create_unet_diffusers_config,
     convert_ldm_unet_checkpoint,
@@ -49,7 +44,7 @@ from lib.utils import (
     convert_ldm_vae_checkpoint,
     convert_ldm_clip_checkpoint,
     create_ldm_bert_config,
-    convert_ldm_bert_checkpoint
+    convert_ldm_bert_checkpoint,
 )
 
 
@@ -57,9 +52,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--checkpoint_path", default=None, type=str, required=True, help="Path to the checkpoint to convert."
+        "--checkpoint_path",
+        "--src",
+        default=None,
+        type=str,
+        required=True,
+        help="Path to the checkpoint to convert.",
     )
-    # !wget https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml
     parser.add_argument(
         "--original_config_file",
         default=None,
@@ -81,7 +80,14 @@ if __name__ == "__main__":
             " higher quality images for inference. Non-EMA weights are usually better to continue fine-tuning."
         ),
     )
-    parser.add_argument("--dump_path", default=None, type=str, required=True, help="Path to the output model.")
+    parser.add_argument(
+        "--dump_path",
+        "--dst",
+        default=None,
+        type=str,
+        required=True,
+        help="Path to the output model.",
+    )
 
     args = parser.parse_args()
 
@@ -108,14 +114,26 @@ if __name__ == "__main__":
             skip_prk_steps=True,
         )
     elif args.scheduler_type == "lms":
-        scheduler = LMSDiscreteScheduler(beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear")
+        from diffusers import LMSDiscreteScheduler
+
+        scheduler = LMSDiscreteScheduler(
+            beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear"
+        )
     elif args.scheduler_type == "euler":
-        scheduler = EulerDiscreteScheduler(beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear")
+        from diffusers import EulerDiscreteScheduler
+
+        scheduler = EulerDiscreteScheduler(
+            beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear"
+        )
     elif args.scheduler_type == "euler-ancestral":
+        from diffusers import EulerAncestralDiscreteScheduler
+
         scheduler = EulerAncestralDiscreteScheduler(
             beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear"
         )
     elif args.scheduler_type == "dpm":
+        from diffusers import DPMSolverMultistepScheduler
+
         scheduler = DPMSolverMultistepScheduler(
             beta_start=beta_start, beta_end=beta_end, beta_schedule="scaled_linear"
         )
@@ -147,25 +165,33 @@ if __name__ == "__main__":
     vae.load_state_dict(converted_vae_checkpoint)
 
     # Convert the text model.
-    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
+    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[
+        -1
+    ]
     if text_model_type == "FrozenCLIPEmbedder":
         text_model = convert_ldm_clip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-#         safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
-#         feature_extractor = AutoFeatureExtractor.from_pretrained("CompVis/stable-diffusion-safety-checker")
+        # safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
+        # feature_extractor = AutoFeatureExtractor.from_pretrained("CompVis/stable-diffusion-safety-checker")
         pipe = StableDiffusionPipeline(
             vae=vae,
             text_encoder=text_model,
             tokenizer=tokenizer,
             unet=unet,
             scheduler=scheduler,
-#             safety_checker=safety_checker,
-#             feature_extractor=feature_extractor,
+            safety_checker=None,
+            feature_extractor=None,
         )
     else:
         text_config = create_ldm_bert_config(original_config)
         text_model = convert_ldm_bert_checkpoint(checkpoint, text_config)
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        pipe = LDMTextToImagePipeline(vqvae=vae, bert=text_model, tokenizer=tokenizer, unet=unet, scheduler=scheduler)
+        pipe = LDMTextToImagePipeline(
+            vqvae=vae,
+            bert=text_model,
+            tokenizer=tokenizer,
+            unet=unet,
+            scheduler=scheduler,
+        )
 
     pipe.save_pretrained(args.dump_path)

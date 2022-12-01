@@ -67,7 +67,7 @@ scheduler:
       trained_betas: null
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     weight_decay: 1e-2

@@ -7,6 +7,7 @@ import os.path as osp
 from pathlib import Path
 
 import torch
+from safetensors.torch import save_file
 
 # =================#
 # UNet Conversion #
@@ -236,5 +237,5 @@ if __name__ == "__main__":
     if args.half:
         state_dict = {k: v.half() for k, v in state_dict.items()}
         
-    state_dict = {"state_dict": state_dict}
-    torch.save(state_dict, args.dst)
+    state_dict = {k: v.contiguous().to_dense() for k, v in state_dict.items()}
+    save_file(state_dict, args.dst)
