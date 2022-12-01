@@ -1,4 +1,4 @@
-# torchrun trainer.py --model_path=/tmp/model --config config/test.yaml
+# python trainer.py --model_path=/tmp/model --config config/test.yaml
 
 # from lib.experiments import T5CLIPDiffusionModel
 import pytorch_lightning as pl

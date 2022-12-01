@@ -10,4 +10,5 @@ diffusers>=0.7.1
 kornia==0.6.8
 wandb
 ftfy
+safetensors
 fairscale
