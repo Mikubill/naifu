@@ -61,9 +61,9 @@ class ImageStore(Dataset):
         for x in tqdm(Path(base).iterdir(), desc=f"Loading captions", disable=self.rank not in [0, -1]):
             if x.is_file() and x.suffix != ".txt":
                 img, prompt = self.prompt_resolver(x)
-                result, skip = self.process_tags(prompt)
+                _, skip = self.process_tags(prompt)
                 if skip: continue
-                self.entries.append((img, result))
+                self.entries.append((img, prompt))
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
@@ -229,7 +229,7 @@ class AspectRatioDataset(ImageStore):
         if item_id == "":
             return {}
 
-        prompt = self.prompt_cache[item_id]
+        prompt, _ = self.process_tags(self.prompt_cache[item_id])
         image = self.read_img(item_id)
 
         if random.random() < self.ucg:
