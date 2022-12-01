@@ -212,9 +212,9 @@ if __name__ == "__main__":
 
     if Path(args.src).is_file():
         state_dict = torch.load(args.src, map_location="cpu")["state_dict"]
-        unet_state_dict = {k.lstrip("unet."): v for k, v in state_dict.items() if k.startswith("unet")}
-        vae_state_dict = {k.lstrip("vae."): v for k, v in state_dict.items() if k.startswith("vae")}
-        text_enc_dict = {k.lstrip("text_encoder."): v for k, v in state_dict.items() if k.startswith("text_encoder")}
+        unet_state_dict = {k.replace("unet.", "", 1): v for k, v in state_dict.items() if k.startswith("unet")}
+        vae_state_dict = {k.replace("vae.", "", 1): v for k, v in state_dict.items() if k.startswith("vae")}
+        text_enc_dict = {k.replace("text_encoder.", "", 1): v for k, v in state_dict.items() if k.startswith("text_encoder")}
     else:
         unet_state_dict = torch.load(osp.join(args.src, "unet", "diffusion_pytorch_model.bin"), map_location="cpu")
         vae_state_dict = torch.load(osp.join(args.src, "vae", "diffusion_pytorch_model.bin"), map_location="cpu")
