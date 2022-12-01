@@ -212,7 +212,7 @@ if __name__ == "__main__":
     assert args.dst is not None, "Must provide a checkpoint path!"
 
     if Path(args.src).is_file():
-        state_dict = torch.load(args.src, map_location="cuda" if args.use_ema else "cpu")
+        state_dict = torch.load(args.src, map_location="cpu")
         if args.use_ema:
             ema_weights = state_dict["model_ema"]
         
