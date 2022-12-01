@@ -88,7 +88,7 @@ class ImageStore(Dataset):
         return img
 
     @staticmethod
-    def process_tags(tags, min_tags=1, max_tags=32, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
+    def process_tags(tags, min_tags=1, max_tags=48, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
         if isinstance(tags, str):
             tags = tags.split(" ")
         final_tags = {}
@@ -141,10 +141,6 @@ class ImageStore(Dataset):
                 skip_image = True
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
             skip_image = True
-            
-        # for ydr: keep first 10 tags
-        for tag in tags[:10]:
-            final_tags[tag] = True
             
         return ", ".join(list(final_tags.keys())), skip_image
 

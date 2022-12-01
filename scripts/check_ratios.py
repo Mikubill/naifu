@@ -1,9 +1,6 @@
 import argparse
-import sys
 from pathlib import Path
 from PIL import Image
-
-
 
 def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64):
     min_dim, max_dim = dim_range
@@ -49,9 +46,11 @@ def arb_transform(source_size, size):
 
     return new_w, new_h
 
-def build_ratio_counter(x, available_buckets):
+def build_ratio_counter(x, buckets, show_path=False):
+    b = sorted(buckets.keys())
+    
     def closest_bucket(x, y):
-        return available_buckets[min(range(len(available_buckets)), key=lambda i: abs(available_buckets[i] - x / y),)]
+        return b[min(range(len(b)), key=lambda i: abs(b[i] - x / y),)]
     
     arb_counter = dict()
     for img_path in Path(x).glob("*.*"):
@@ -61,6 +60,8 @@ def build_ratio_counter(x, available_buckets):
         x, y = img.size
         ratio = closest_bucket(x, y)
         arb_counter[ratio] = 1 if ratio not in arb_counter else arb_counter[ratio]+1
+        if show_path:
+            print(f"{img_path} ({x}, {y}) -> {buckets[ratio]}")
         
     return arb_counter
 
@@ -73,6 +74,11 @@ def main():
     parser.add_argument(
         "-c", default=None, type=str, required=False, help="Path to class images."
     )
+    parser.add_argument(
+        "--show-path",
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -80,19 +86,17 @@ def main():
     aspects = gen_buckets()
     for x, y in aspects:
         buckets[x / y] = (x, y)
-
-    available_buckets = sorted(buckets.keys())
     
-    i_ratios = build_ratio_counter(args.i, available_buckets)
-    print(args.i)
-    [print(f"{buckets[k]}: {v} images") for k, v in i_ratios.items()]
+    i_ratios = build_ratio_counter(args.i, buckets, args.show_path)
+    print(f"Summary: {args.i}")
+    for k, v in i_ratios.items(): print(f"{buckets[k]}: {v} images") 
     
     if args.c:
-        c_ratios = build_ratio_counter(args.c, available_buckets)
-        print(args.c)
-        [print(f"{buckets[k]}: {v} images") for k, v in c_ratios.items()]
+        c_ratios = build_ratio_counter(args.c, buckets, args.show_path)
+        print(f"Summary: {args.c}")
+        for k, v in c_ratios.items(): print(f"{buckets[k]}: {v} images")
         
-        print("transform test:")
+        print("transforms:")
         i_len = len(list(Path(args.i).glob("*.*")))
         c_len = len(list(Path(args.c).glob("*.*")))
         base = i_ratios if i_len > c_len else c_ratios
