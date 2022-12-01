@@ -203,6 +203,7 @@ if __name__ == "__main__":
     parser.add_argument("--dst", default=None, type=str, required=True, help="Path to the output model.")
     parser.add_argument("--half", action="store_true", help="Save weights in half precision.")
     parser.add_argument("--unet-only", action="store_true", help="Only save unet in weights.")
+    parser.add_argument("--use-ema", action="store_true", help="Use ema-unet instead of last-unet.")
 
     args = parser.parse_args()
 
@@ -210,10 +211,25 @@ if __name__ == "__main__":
     assert args.dst is not None, "Must provide a checkpoint path!"
 
     if Path(args.src).is_file():
-        state_dict = torch.load(args.src, map_location="cpu")["state_dict"]
+        state_dict = torch.load(args.src, map_location="cuda" if args.use_ema else "cpu")
+        if args.use_ema:
+            ema_weights = state_dict["model_ema"]
+        
+        state_dict = state_dict["state_dict"]
         unet_state_dict = {k.replace("unet.", "", 1): v for k, v in state_dict.items() if k.startswith("unet")}
         vae_state_dict = {k.replace("vae.", "", 1): v for k, v in state_dict.items() if k.startswith("vae")}
         text_enc_dict = {k.replace("text_encoder.", "", 1): v for k, v in state_dict.items() if k.startswith("text_encoder")}
+        
+        if args.use_ema:
+            # rebuild unet from weights
+            from diffusers import UNet2DConditionModel
+            from torch_ema import ExponentialMovingAverage
+            unet = UNet2DConditionModel.from_config("CompVis/stable-diffusion-v1-4", subfolder="unet")
+            unet.load_state_dict(unet_state_dict)
+            unet_ema = ExponentialMovingAverage(unet.parameters(), decay=0.995)
+            unet_ema.load_state_dict(ema_weights)
+            unet_ema.copy_to(unet.parameters())
+            unet_state_dict = unet.state_dict()
     else:
         unet_state_dict = torch.load(osp.join(args.src, "unet", "diffusion_pytorch_model.bin"), map_location="cpu")
         vae_state_dict = torch.load(osp.join(args.src, "vae", "diffusion_pytorch_model.bin"), map_location="cpu")

@@ -12,3 +12,4 @@ wandb
 ftfy
 safetensors
 fairscale
+torch-ema

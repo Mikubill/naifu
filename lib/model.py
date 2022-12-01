@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from .ema import ExponentialMovingAverage
+from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer, BertTokenizerFast
 from diffusers import AutoencoderKL, UNet2DConditionModel
@@ -23,6 +23,7 @@ from lib.utils import (
     create_ldm_bert_config,
     convert_ldm_bert_checkpoint
 )
+
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):

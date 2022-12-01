@@ -165,9 +165,7 @@ if __name__ == "__main__":
     vae.load_state_dict(converted_vae_checkpoint)
 
     # Convert the text model.
-    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[
-        -1
-    ]
+    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
     if text_model_type == "FrozenCLIPEmbedder":
         text_model = convert_ldm_clip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
