@@ -2,10 +2,10 @@ name: test-run
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  init_batch_size: 1
+  init_batch_size: 2
   resolution: 512
   center_crop: false
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   clip_skip: 2
   seed: 1138
   precision: fp32
