@@ -99,7 +99,7 @@ class ImageStore(Dataset):
             if bad_tag in pure_tag_dict:
                 del tag_dict[pure_tag_dict[bad_tag]]
 
-        if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict:
+        if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
             final_tags["nsfw"] = True
 
         base_chosen = []
@@ -141,6 +141,10 @@ class ImageStore(Dataset):
                 skip_image = True
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
             skip_image = True
+            
+        # for ydr: keep first 10 tags
+        for tag in tags[:10]:
+            final_tags[tag] = True
             
         return ", ".join(list(final_tags.keys())), skip_image
 
