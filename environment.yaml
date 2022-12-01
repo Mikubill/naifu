@@ -33,3 +33,4 @@ dependencies:
     - bitsandbytes>=0.35.4
     - timm
     - torchmetrics>=0.7.0
+    - torch-ema
