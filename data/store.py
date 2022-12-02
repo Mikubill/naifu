@@ -88,7 +88,7 @@ class ImageStore(Dataset):
         return img
 
     @staticmethod
-    def process_tags(tags, min_tags=1, max_tags=48, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
+    def process_tags(tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
         if isinstance(tags, str):
             tags = tags.split(" ")
         final_tags = {}
