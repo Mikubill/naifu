@@ -1,5 +1,6 @@
 
 import itertools
+import json
 import os
 import random
 from pathlib import Path
@@ -45,6 +46,14 @@ class ImageStore(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        
+        self.yandere_tags = {}
+        # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
+        if Path("yandere-tags.json").is_file():
+            with open("yandere-tags.json") as f:
+                self.yandere_tags = json.loads(f.read())
+            print(f"Read {len(self.yandere_tags)} tags from yandere-tags.json")
+                
 
     def prompt_resolver(self, x: str):
         img_item = (x, "")
@@ -87,8 +96,7 @@ class ImageStore(Dataset):
             img = img.convert("RGB")
         return img
 
-    @staticmethod
-    def process_tags(tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
+    def process_tags(self, tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
         if isinstance(tags, str):
             tags = tags.split(" ")
         final_tags = {}
@@ -102,11 +110,15 @@ class ImageStore(Dataset):
         if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
             final_tags["nsfw"] = True
 
-        # For yande.re finetune only.
-        base_chosen = tags[:min(6, len(tags))]
-        
-        # For deepdanbooru finetune only.
+       
+        base_chosen = []
         for tag in tag_dict.keys():
+            # For yande.re tags.
+            if len(self.yandere_tags) > 0:
+                if tag in self.yandere_tags and self.yandere_tags[tag]["type"] >= 1 and random.random() < keep_important:
+                        base_chosen.append(tag)
+            
+            # For danbooru tags.
             parts = tag.split(":", 1)
             if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
                 base_chosen.append(tag)
