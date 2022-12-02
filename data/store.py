@@ -102,7 +102,10 @@ class ImageStore(Dataset):
         if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
             final_tags["nsfw"] = True
 
-        base_chosen = []
+        # For yande.re finetune only.
+        base_chosen = tags[:min(6, len(tags))]
+        
+        # For deepdanbooru finetune only.
         for tag in tag_dict.keys():
             parts = tag.split(":", 1)
             if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
@@ -112,11 +115,9 @@ class ImageStore(Dataset):
             if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
                 base_chosen.append(tag)
 
-        tag_count = min(random.randint(min_tags, max_tags),
-                        len(tag_dict.keys()))
+        tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
         base_chosen_set = set(base_chosen)
-        chosen_tags = base_chosen + [tag for tag in random.sample(
-            list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
+        chosen_tags = base_chosen + [tag for tag in random.sample(list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
         if sort_tags:
             chosen_tags = sorted(chosen_tags)
 
