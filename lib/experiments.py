@@ -1,14 +1,15 @@
 
-from lib.model import get_class
-
 import pytorch_lightning as pl
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from .ema import ExponentialMovingAverage
-from transformers import CLIPTextModel, CLIPTokenizer, T5EncoderModel, T5Tokenizer
 from diffusers import AutoencoderKL, UNet2DConditionModel
+from lib.model import get_class
+from torch_ema import ExponentialMovingAverage
+from transformers import  CLIPTextModel, CLIPTokenizer
+from transformers import T5EncoderModel, T5Tokenizer
 
 # pip install diffusers accelerate transformers sentencepiece gradio ftfy
 # clip_text: openai/clip-vit-large-patch14
@@ -58,6 +59,19 @@ class T5CLIPDiffusionModel(pl.LightningModule):
         if self.config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
             
+
+        self.cond_dim = 768
+        self.max_text_len = 77
+        self.null_text_hidden = nn.Parameter(torch.randn(1, self.time_cond_dim))
+
+        # for non-attention based text conditioning at all points in the network where time is also conditioned
+        self.non_attn_cond_fcn = nn.Sequential(
+            nn.LayerNorm(self.cond_dim),
+            nn.Linear(self.cond_dim, self.time_cond_dim),
+            nn.SiLU(),
+            nn.Linear(self.time_cond_dim, self.time_cond_dim)
+        )
+            
     def on_before_batch_transfer(self, batch, dataloader_idx: int):
         prompt, pixels = batch
         
@@ -67,11 +81,11 @@ class T5CLIPDiffusionModel(pl.LightningModule):
         
         t5_ids = self.t5_tokenizer(prompt, padding="max_length", truncation=True, max_length=113).input_ids 
         t5_state = self.t5_encoder(t5_ids)
-        
-        return torch.cat([clip_state, t5_state], dim=-2), pixels
+        return torch.cat([clip_state, t5_state, self.null_text_hidden], dim=-2), pixels, clip_state
     
     def training_step(self, batch, batch_idx):
-        encoder_hidden_states, pixels = batch
+        encoder_hidden_states, pixels, clip_state = batch
+        non_attn_cond = self.non_attn_cond_fcn(clip_state.mean(dim=-2))
         
         # Convert images to latent space
         latent_dist = self.vae.encode(pixels.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
@@ -90,7 +104,7 @@ class T5CLIPDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps).to(self.weight_dtype)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states.to(self.weight_dtype)).sample
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states.to(self.weight_dtype), non_attn_cond).sample
         loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")  
         
         # Logging to TensorBoard by default

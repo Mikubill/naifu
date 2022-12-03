@@ -12,6 +12,7 @@ from lib.utils import get_world_size
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+# from lib.experiments import T5CLIPDiffusionModel
 
 args = parse_args()
 config = OmegaConf.load(args.config)
