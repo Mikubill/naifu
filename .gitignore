@@ -7,3 +7,4 @@ checkpoint
 .devcontainer
 venv
 yandere-tags.json
+scripts/img_process.py
