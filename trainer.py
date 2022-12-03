@@ -19,7 +19,10 @@ config = OmegaConf.load(args.config)
 def main(args):
     torch.manual_seed(config.trainer.seed)
     
-    strategy = "ddp_find_unused_parameters_false" if not config.trainer.gradient_checkpointing else None
+    strategy = None
+    if not config.trainer.gradient_checkpointing and config.lightning.accelerator != "tpu":
+        strategy = "ddp_find_unused_parameters_false"
+         
     if config.trainer.use_hivemind:
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
