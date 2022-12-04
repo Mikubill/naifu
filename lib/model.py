@@ -39,9 +39,9 @@ class StableDiffusionModel(pl.LightningModule):
             # use autoconvert
             self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(model_path)                
         else:
-            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else Path(model_path) / "text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else Path(model_path) / "vae")
+            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else model_path, subfolder="tokenizer")
+            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else model_path, subfolder="text_encoder")
+            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else model_path, subfolder="vae")
             self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet") 
              
         self.unet.to(self.weight_dtype)
@@ -167,12 +167,13 @@ def load_model(model_path, config):
 
     if (
         not Path(model_path).is_dir()
-        or not (
-            (Path(model_path) / "model_index.json").is_file() or (Path(model_path) / "model.ckpt").is_file()
-        )
+        or not ((Path(model_path) / "model_index.json").is_file() or (Path(model_path) / "model.ckpt").is_file())
     ):
-        Path(model_path).mkdir(exist_ok=True)
-        download_model(model_url, model_path)
+        try:
+            Path(model_path).mkdir(exist_ok=True)
+            download_model(model_url, model_path)
+        except FileNotFoundError:
+            pass
 
     model = StableDiffusionModel(model_path, config)
     return model.tokenizer, model
