@@ -4,7 +4,7 @@
 import pytorch_lightning as pl
 import torch
 from data.buckets import AspectRatioSampler
-from data.store import AspectRatioDataset
+from data.store import AspectRatioDataset, ImageStore
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback
 from lib.model import load_model
@@ -42,19 +42,21 @@ def main(args):
         )
         callbacks.append(hf_logger)
     
-    dataset = AspectRatioDataset(
+    dataset_cls = AspectRatioDataset if config.arb.enabled else ImageStore
+    dataset = dataset_cls(
         tokenizer=tokenizer,
         size=config.trainer.resolution,
         bsz=config.trainer.init_batch_size,
         seed=config.trainer.seed,
         rank=args.local_rank,
+        init=not config.arb.enabled,
         **config.dataset
     )
-    
+        
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         collate_fn=dataset.collate_fn,
-        sampler=AspectRatioSampler(config, args.local_rank, dataset, get_world_size()),
+        sampler=AspectRatioSampler(config, args.local_rank, dataset, get_world_size()) if config.arb.enabled else None,
         num_workers=config.dataset.num_workers,
         persistent_workers=True,
     )
