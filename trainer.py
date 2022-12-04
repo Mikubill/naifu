@@ -12,7 +12,7 @@ from lib.utils import get_world_size
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-# from lib.experiments import T5CLIPDiffusionModel
+# from experiment.models import MultiEncoderDiffusionModel
 
 args = parse_args()
 config = OmegaConf.load(args.config)
@@ -29,7 +29,9 @@ def main(args):
         strategy = init_hivemind(config)
         
     tokenizer, model = load_model(args.model_path, config)
-    # model = T5CLIPDiffusionModel(args.model_path, config)
+    
+    # stable diffusion 2.0, use it with --model_path stabilityai/stable-diffusion-2
+    # model = MultiEncoderDiffusionModel(args.model_path, config)
     # tokenizer = model.tokenizer
     
     callbacks = [ModelCheckpoint(**config.checkpoint)]
