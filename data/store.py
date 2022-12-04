@@ -29,6 +29,7 @@ class ImageStore(Dataset):
         max_length=225,
         ucg=0,
         rank=0,
+        init=False,
         **kwargs
     ):
         self.size = size
@@ -53,7 +54,9 @@ class ImageStore(Dataset):
             with open("yandere-tags.json") as f:
                 self.yandere_tags = json.loads(f.read())
             print(f"Read {len(self.yandere_tags)} tags from yandere-tags.json")
-                
+            
+        if init:
+            self.update_store(random.choice(img_path))
 
     def prompt_resolver(self, x: str):
         img_item = (x, "")
@@ -156,6 +159,15 @@ class ImageStore(Dataset):
             skip_image = True
             
         return ", ".join(list(final_tags.keys())), skip_image
+    
+    def collate_fn(self, examples):
+        input_ids = [example["prompt_ids"] for example in examples]
+        pixel_values = [example["images"] for example in examples]
+
+        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+        
+        return [input_ids, pixel_values]
 
     def __len__(self):
         return self._length
@@ -188,17 +200,9 @@ class AspectRatioDataset(ImageStore):
         res = torch.clamp(res, 0, 1)
         return res
     
-    # ref: stable-diffusion-private/ldm/modules/encoders
     def collate_fn(self, examples):
         examples = list(itertools.chain.from_iterable(examples))
-
-        input_ids = [example["prompt_ids"] for example in examples]
-        pixel_values = [example["images"] for example in examples]
-
-        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-        
-        return [input_ids, pixel_values]
+        return super().collate_fn(examples=examples)
 
     def transformer(self, img, size, center_crop=False):
         x, y = img.size

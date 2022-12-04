@@ -39,6 +39,7 @@ lightning:
   move_metrics_to_cpu: true
 
 arb:
+  enabled: true
   debug: false
   base_res: [512, 512]
   max_size: [768, 512]
