@@ -55,6 +55,7 @@ class ImageStore(Dataset):
         
         self.yandere_tags = {}
         self.augment = AugmentTransforms(augconf)
+        print()
         
         # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
         if Path("yandere-tags.json").is_file():
