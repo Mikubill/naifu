@@ -108,9 +108,8 @@ class StableDiffusionModel(pl.LightningModule):
             persistent_workers=True,
         )
         return dataloader
-            
-    def on_after_batch_transfer(self, batch, dataloader_idx: int):
-        input_ids = batch[0]
+    
+    def encode_tokens(self, input_ids):
         z = []
         if input_ids.shape[1] > 77:  
             # todo: Handle end-of-sentence truncation
@@ -132,11 +131,10 @@ class StableDiffusionModel(pl.LightningModule):
             state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
             state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
-        
-        return encoder_hidden_states, batch[1]
-    
+            
     def training_step(self, batch, batch_idx):
-        encoder_hidden_states, pixels = batch
+        input_ids, pixels = batch[0], batch[1]
+        encoder_hidden_states = self.encode_tokens(input_ids)
         
         # Convert images to latent space
         latent_dist = self.vae.encode(pixels.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
