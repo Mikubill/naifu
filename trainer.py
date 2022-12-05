@@ -49,8 +49,15 @@ def main(args):
         **config.lightning
     )
     
-    trainer.tune(model=model)
-    trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
+    trainer.tune(
+        model=model,
+        scale_batch_size_kwargs={"steps_per_trial": 5}
+    )
+    
+    trainer.fit(
+        model=model,
+        ckpt_path=args.resume if args.resume else None
+    )
 
 
 if __name__ == "__main__":

@@ -299,15 +299,19 @@ class AspectRatioSampler(torch.utils.data.Sampler):
 
         super().__init__(None)
         self.init_buckets()
-
-    def init_buckets(self):
-        entries = [x[0] for x in self.dataset.entries]
-        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
         
-    def get_dict(self, entries):
+    def update_bsz(self, bsz):
+        self.arb_config["bsz"] = bsz
+        self.init_buckets(tuning=True)
+
+    def init_buckets(self, tuning=False):
+        entries = [x[0] for x in self.dataset.entries]
+        self.buckets = AspectRatioBucket(self.get_dict(entries, tuning), **self.arb_config)
+        
+    def get_dict(self, entries, tuning=False):
         id_size_map = {}
 
-        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
+        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1] or tuning):
             with Image.open(entry) as img:
                 size = img.size
             id_size_map[entry] = size
