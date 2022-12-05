@@ -49,7 +49,6 @@ class StableDiffusionModel(pl.LightningModule):
         # init Dataset
         self.dataset = dataset_cls(
             size=self.config.trainer.resolution,
-            bsz=self.batch_size,
             seed=self.config.trainer.seed,
             rank=local_rank,
             init=not self.config.arb.enabled,
@@ -59,11 +58,11 @@ class StableDiffusionModel(pl.LightningModule):
         
         # init sampler
         self.data_sampler = AspectRatioSampler(
-            self.batch_size,
-            self.config, 
-            local_rank, 
-            self.dataset, 
-            get_world_size()
+            bsz=self.batch_size,
+            config=self.config, 
+            rank=local_rank, 
+            dataset=self.dataset, 
+            world_size=get_world_size()
         ) if self.config.arb.enabled else None
         
     def setup(self, stage):
@@ -101,6 +100,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.dataset.set_tokenizer(self.tokenizer)
         
     def train_dataloader(self):
+        self.data_sampler.update_bsz(self.batch_size)
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             collate_fn=self.dataset.collate_fn,
