@@ -46,14 +46,18 @@ class StableDiffusionModel(pl.LightningModule):
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
+        # init Dataset
         self.dataset = dataset_cls(
             size=self.config.trainer.resolution,
             bsz=self.batch_size,
             seed=self.config.trainer.seed,
             rank=local_rank,
             init=not self.config.arb.enabled,
+            augconf=self.config.dataset.augment,
             **self.config.dataset
         )
+        
+        # init sampler
         self.data_sampler = AspectRatioSampler(
             self.batch_size,
             self.config, 
@@ -163,8 +167,8 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.lightning.auto_lr_find:
             self.config.optimizer.params.lr = self.lr
             
+        # Scale LR OPs
         f = self.trainer.accumulate_grad_batches * self.config.trainer.init_batch_size * self.trainer.num_nodes * self.trainer.num_devices
-        
         if self.config.trainer.lr_scale == "linear":
             self.config.optimizer.params.lr *= f
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
