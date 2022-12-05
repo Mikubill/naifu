@@ -53,7 +53,5 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
             
         self.dataset.set_tokenizer(self.tokenizer)
             
-    def on_after_batch_transfer(self, batch, dataloader_idx: int):
-        prompt, pixels = batch
-        encoder_hidden_states = self.text_encoder(prompt)
-        return [encoder_hidden_states, pixels]
+    def encode_tokens(self, prompt):
+        return self.text_encoder(prompt)
