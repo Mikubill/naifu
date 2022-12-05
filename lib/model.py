@@ -131,6 +131,8 @@ class StableDiffusionModel(pl.LightningModule):
             state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
             state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
+        
+        return encoder_hidden_states
             
     def training_step(self, batch, batch_idx):
         input_ids, pixels = batch[0], batch[1]
