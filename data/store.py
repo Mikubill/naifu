@@ -9,8 +9,9 @@ import tarfile
 import tempfile
 import types
 
+
 import requests
-from data.buckets import AspectRatioSampler
+from lib.augment import AugmentTransforms
 
 import torch
 import torch.utils.checkpoint
@@ -34,6 +35,7 @@ class ImageStore(Dataset):
         max_length=225,
         ucg=0,
         rank=0,
+        augconf=None,
         **kwargs
     ):
         self.size = size
@@ -52,7 +54,8 @@ class ImageStore(Dataset):
         )
         
         self.yandere_tags = {}
-        print()
+        self.augment = AugmentTransforms(augconf)
+        
         # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
         if Path("yandere-tags.json").is_file():
             with open("yandere-tags.json") as f:
@@ -256,21 +259,28 @@ class AspectRatioDataset(ImageStore):
 
             import torchvision
             print(x, y, "->", new_w, new_h, "->", new_img.shape)
-            filename = str(uuid.uuid4())
-            torchvision.utils.save_image(self.denormalize(new_img), f"/tmp/{filename}_1.jpg")
-            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_2.jpg")
-            print(f"saved: /tmp/{filename}")
+            
+            basedir = os.path.join(tempfile.gettempdir(), "nd-arb-debug")
+            os.makedirs(basedir, exist_ok=True)
+            filename = "arb_" + str(uuid.uuid4())[:8]
+            rawp = os.path.join(basedir, f"{filename}_raw.jpg")
+            trsp = os.path.join(basedir, f"{filename}_transformed.jpg")
+            
+            torchvision.utils.save_image(self.denormalize(new_img), rawp)
+            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), trsp)
+            print(f"saved: {rawp}")
+            print(f"saved: {trsp}")
 
         return new_img
 
-    def build_dict(self, item) -> dict:
+    def build_dict(self, item, roll) -> dict:
         item_id, size, = item["instance"], item["size"],
 
         if item_id == "":
             return {}
 
         prompt, _ = self.process_tags(self.prompt_cache[item_id])
-        image = self.read_img(item_id)
+        image = self.augment.transform(self.read_img(item_id), roll)
 
         if random.random() < self.ucg:
             prompt = ''
@@ -284,6 +294,7 @@ class AspectRatioDataset(ImageStore):
     def __getitem__(self, index):
         result = []
         for item in index:
-            result.append(self.build_dict(item))
+            rs = random.random()
+            result.append(self.build_dict(item, rs))
 
         return result

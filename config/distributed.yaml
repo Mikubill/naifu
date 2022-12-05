@@ -66,6 +66,14 @@ dataset:
   ucg: 0.0
   debug_arb: false
   num_workers: 3
+  augment:
+    enabled: false
+    debug: false
+    dropout: 0.5
+    methods:
+      adjust_brightness: 1.1
+      adjust_contrast: 1.1
+      rotate_with_crop: 10
 
 scheduler:
   name: diffusers.DDIMScheduler
