@@ -299,8 +299,8 @@ class AspectRatioDataset(ImageStore):
 
     def __getitem__(self, index):
         result = []
+        rs = random.random()
         for item in index:
-            rs = random.random()
             result.append(self.build_dict(item, rs))
 
         return result
