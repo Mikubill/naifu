@@ -52,9 +52,6 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
             
         self.dataset.set_tokenizer(self.tokenizer)
-        
-    def on_before_batch_transfer(self, batch, dataloader_idx):
-        return batch[0], batch[1]
             
     def encode_tokens(self, prompt):
         return self.text_encoder(prompt)

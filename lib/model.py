@@ -109,10 +109,7 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return dataloader
     
-    def on_before_batch_transfer(self, batch, dataloader_idx):
-        input_ids, pixels = batch[0], batch[1]
-        
-        # rebuild tokens to [77]s array
+    def encode_tokens(self, input_ids):
         z = []
         if input_ids.shape[1] > 77:  
             # todo: Handle end-of-sentence truncation
@@ -123,21 +120,14 @@ class StableDiffusionModel(pl.LightningModule):
                     tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
 
                 rebuild = [[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens]
-                if hasattr(torch, "asarray"):
-                    z.append(torch.asarray(rebuild))
-                else:
-                    z.append(torch.IntTensor(rebuild))
-
+                z.append(torch.asarray(rebuild))
                 input_ids = rem_tokens
         else:
             z.append(input_ids)
-        
-        return z, pixels
-    
-    def encode_tokens(self, input_ids):
+
         # Get the text embedding for conditioning
         encoder_hidden_states = None
-        for tokens in input_ids:
+        for tokens in z:
             state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
             state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
@@ -145,7 +135,7 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
             
     def training_step(self, batch, batch_idx):
-        input_ids, pixels = batch
+        input_ids, pixels = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids)
         
         # Convert images to latent space
