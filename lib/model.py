@@ -52,7 +52,6 @@ class StableDiffusionModel(pl.LightningModule):
             seed=self.config.trainer.seed,
             rank=local_rank,
             init=not self.config.arb.enabled,
-            augconf=self.config.dataset.augment,
             **self.config.dataset
         )
         
@@ -162,7 +161,7 @@ class StableDiffusionModel(pl.LightningModule):
         # Logging to TensorBoard by default
         self.log("train_loss", loss)
         return loss
-
+    
     def configure_optimizers(self):
         if self.config.lightning.auto_lr_find:
             self.config.optimizer.params.lr = self.lr
