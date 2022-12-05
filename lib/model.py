@@ -109,7 +109,10 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return dataloader
     
-    def encode_tokens(self, input_ids):
+    def on_before_batch_transfer(self, batch, dataloader_idx):
+        input_ids, pixels = batch[0], batch[1]
+        
+        # rebuild tokens to [77]s array
         z = []
         if input_ids.shape[1] > 77:  
             # todo: Handle end-of-sentence truncation
@@ -119,15 +122,22 @@ class StableDiffusionModel(pl.LightningModule):
                 for j in range(len(input_ids)):
                     tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
 
-                rebuild = torch.asarray([[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens])
-                z.append(rebuild)
+                rebuild = [[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens]
+                if hasattr(torch, "asarray"):
+                    z.append(torch.asarray(rebuild))
+                else:
+                    z.append(torch.IntTensor(rebuild))
+
                 input_ids = rem_tokens
         else:
             z.append(input_ids)
-            
+        
+        return z, pixels
+    
+    def encode_tokens(self, input_ids):
         # Get the text embedding for conditioning
         encoder_hidden_states = None
-        for tokens in z:
+        for tokens in input_ids:
             state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
             state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
@@ -135,7 +145,7 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
             
     def training_step(self, batch, batch_idx):
-        input_ids, pixels = batch[0], batch[1]
+        input_ids, pixels = batch
         encoder_hidden_states = self.encode_tokens(input_ids)
         
         # Convert images to latent space
