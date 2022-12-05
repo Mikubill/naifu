@@ -273,57 +273,37 @@ class AspectRatioBucket:
 class AspectRatioSampler(torch.utils.data.Sampler):
     def __init__(
         self,
+        bsz,
         config,
         rank,
         dataset,
         world_size=1,
     ):
-        super().__init__(None)
         self.num_replicas = world_size
         self.config = config
         self.dataset = dataset
         self.rank = rank
         self.batch_counter = 0
-        self.reload_interval = config.dataset.reload_interval
         
         self.arb_config = {
-            "bsz": config.trainer.init_batch_size,
+            "bsz": bsz,
             "seed": config.trainer.seed,
             "world_size": world_size,
             "global_rank": rank,
             **config.arb
         }
-
         if config.arb.debug:
             print(f"BucketManager initialized using config: {self.arb_config}")
         else:
             print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
 
+        super().__init__(None)
         self.init_buckets()
 
-    def download(self, url, mpath="model"):
-        print(f'Downloading: "{url}" to {mpath}\n')
-        r = requests.get(url, stream=True)
-        file_size = int(r.headers.get("content-length", 0))
-
-        r.raw.read = functools.partial(r.raw.read, decode_content=True)
-        with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
-            file = tarfile.open(fileobj=r_raw, mode="r|gz")
-            file.extractall(path=mpath)
-
     def init_buckets(self):
-        base = random.choice(self.config.dataset.img_path)
-        if base.startswith("https://"):
-            dlpath = os.path.join(tempfile.gettempdir(
-            ), f"dataset-{self.config.dataset.img_path.index(base)}")
-            Path(dlpath).mkdir(exist_ok=True)
-            self.download(base, dlpath)
-            base = dlpath
-
-        entries = self.dataset.update(base)
+        entries = [x[0] for x in self.dataset.entries]
         self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
         
-
     def get_dict(self, entries):
         id_size_map = {}
 
@@ -335,12 +315,6 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         return id_size_map
 
     def __iter__(self):
-        self.batch_counter += 1
-
-        if self.batch_counter > self.reload_interval:
-            self.init_buckets()
-            self.batch_counter = 0
-
         for batch, size in self.buckets.generator():
             yield [{"size": size, "instance": item} for item in batch]
 

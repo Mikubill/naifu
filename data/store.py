@@ -1,9 +1,15 @@
 
+import functools
 import itertools
 import json
 import os
 import random
 from pathlib import Path
+import tarfile
+import tempfile
+import types
+
+import requests
 from data.buckets import AspectRatioSampler
 
 import torch
@@ -23,18 +29,15 @@ class ImageStore(Dataset):
     def __init__(
         self,
         img_path,
-        tokenizer,
         size=512,
         center_crop=False,
         max_length=225,
         ucg=0,
         rank=0,
-        init=False,
         **kwargs
     ):
         self.size = size
         self.center_crop = center_crop
-        self.tokenizer = tokenizer
         self.ucg = ucg
         self.max_length = max_length
         self.rank = rank
@@ -49,14 +52,14 @@ class ImageStore(Dataset):
         )
         
         self.yandere_tags = {}
+        print()
         # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
         if Path("yandere-tags.json").is_file():
             with open("yandere-tags.json") as f:
                 self.yandere_tags = json.loads(f.read())
             print(f"Read {len(self.yandere_tags)} tags from yandere-tags.json")
             
-        if init:
-            self.update_store(random.choice(img_path))
+        self.update_store()
 
     def prompt_resolver(self, x: str):
         img_item = (x, "")
@@ -67,15 +70,39 @@ class ImageStore(Dataset):
             new_prompt = content
 
         return x, new_prompt
+    
+    def download(self, url, mpath="model"):
+        print(f'Downloading: "{url}" to {mpath}\n')
+        r = requests.get(url, stream=True)
+        file_size = int(r.headers.get("content-length", 0))
 
-    def update_store(self, base):
+        r.raw.read = functools.partial(r.raw.read, decode_content=True)
+        with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
+            file = tarfile.open(fileobj=r_raw, mode="r|gz")
+            file.extractall(path=mpath)
+            
+    def set_tokenizer(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def update_store(self):            
         self.entries = []
-        for x in tqdm(Path(base).iterdir(), desc=f"Loading captions", disable=self.rank not in [0, -1]):
-            if x.is_file() and x.suffix != ".txt":
+        bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
+        
+        for entry in self.dataset:
+            if entry.startswith("https://"):
+                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{self.dataset.index(entry)}")
+                Path(dlpath).mkdir(exist_ok=True)
+                self.download(entry, dlpath)
+                entry = dlpath
+            
+            for x in Path(entry).iterdir():
+                if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif"]):
+                    continue
                 img, prompt = self.prompt_resolver(x)
                 _, skip = self.process_tags(prompt)
                 if skip: continue
                 self.entries.append((img, prompt))
+                bar.update(1)
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
@@ -187,13 +214,9 @@ class AspectRatioDataset(ImageStore):
         super().__init__(**kwargs)
         self.debug = debug_arb
         self.prompt_cache = {}
-
-    def update(self, x) -> list:
-        self.update_store(x)
+        
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
-        
-        return [x[0] for x in self.entries]
 
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))

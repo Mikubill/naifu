@@ -1,18 +1,13 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 
-# from lib.experiments import T5CLIPDiffusionModel
 import pytorch_lightning as pl
 import torch
-from data.buckets import AspectRatioSampler
-from data.store import AspectRatioDataset, ImageStore
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback
-from lib.model import load_model
-from lib.utils import get_world_size
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-# from experiment.models import MultiEncoderDiffusionModel
+from lib.model import load_model
 
 args = parse_args()
 config = OmegaConf.load(args.config)
@@ -28,11 +23,11 @@ def main(args):
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
         
-    tokenizer, model = load_model(args.model_path, config)
+    model = load_model(args.model_path, config)
     
     # stable diffusion 2.0, use it with --model_path stabilityai/stable-diffusion-2
-    # model = MultiEncoderDiffusionModel(args.model_path, config)
-    # tokenizer = model.tokenizer
+    # from experiment.models import MultiEncoderDiffusionModel
+    # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
     callbacks = [ModelCheckpoint(**config.checkpoint)]
     if config.monitor.huggingface_repo != "":
@@ -42,29 +37,9 @@ def main(args):
         )
         callbacks.append(hf_logger)
     
-    dataset_cls = AspectRatioDataset if config.arb.enabled else ImageStore
-    dataset = dataset_cls(
-        tokenizer=tokenizer,
-        size=config.trainer.resolution,
-        bsz=config.trainer.init_batch_size,
-        seed=config.trainer.seed,
-        rank=args.local_rank,
-        init=not config.arb.enabled,
-        **config.dataset
-    )
-        
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset,
-        collate_fn=dataset.collate_fn,
-        sampler=AspectRatioSampler(config, args.local_rank, dataset, get_world_size()) if config.arb.enabled else None,
-        num_workers=config.dataset.num_workers,
-        persistent_workers=True,
-    )
-    
     logger = (
         WandbLogger(project=config.monitor.wandb_id)
-        if config.monitor.wandb_id != ""
-        else None
+        if config.monitor.wandb_id != "" else None
     )
     
     trainer = pl.Trainer(
@@ -74,16 +49,8 @@ def main(args):
         **config.lightning
     )
     
-    trainer.tune(
-        model=model,
-        train_dataloaders=train_dataloader, 
-    )
-    
-    trainer.fit(
-        model=model, 
-        ckpt_path=args.resume if args.resume else None,
-        train_dataloaders=train_dataloader, 
-    )
+    trainer.tune(model=model)
+    trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
 
 
 if __name__ == "__main__":
