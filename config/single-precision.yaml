@@ -27,7 +27,7 @@ lightning:
   accelerator: gpu
   devices: -1
   auto_select_gpus: true
-  limit_train_batches: 100
+  # limit_train_batches: 100
   max_epochs: 20
   precision: 32
   log_every_n_steps: 1
@@ -35,6 +35,7 @@ lightning:
   auto_scale_batch_size: false
   auto_lr_find: false
   move_metrics_to_cpu: true
+  lr_scale: linear
 
 arb:
   enabled: true

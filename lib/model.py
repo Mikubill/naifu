@@ -1,5 +1,6 @@
 
 import functools
+import math
 import tarfile
 from pathlib import Path
 from omegaconf import OmegaConf
@@ -10,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
+from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer, BertTokenizerFast
@@ -117,6 +119,19 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.lightning.auto_lr_find:
             self.config.optimizer.params.lr = self.lr
             
+        f = self.trainer.accumulate_grad_batches * self.config.trainer.init_batch_size * self.trainer.num_nodes * self.trainer.num_devices
+        
+        if self.config.trainer.lr_scale == "linear":
+            self.config.optimizer.params.lr *= f
+            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
+        elif self.config.trainer.lr_scale == "sqrt":
+            self.config.optimizer.params.lr *= math.sqrt(f)
+            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
+        elif self.config.trainer.lr_scale == "none":
+            pass
+        else:
+            raise ValueError(self.config.lr_scale)
+        
         optimizer = get_class(self.config.optimizer.name)(
             self.unet.parameters(), **self.config.optimizer.params
         )

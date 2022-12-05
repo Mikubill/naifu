@@ -74,6 +74,11 @@ def main(args):
         **config.lightning
     )
     
+    trainer.tune(
+        model=model,
+        train_dataloaders=train_dataloader, 
+    )
+    
     trainer.fit(
         model=model, 
         ckpt_path=args.resume if args.resume else None,
