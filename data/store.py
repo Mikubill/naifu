@@ -36,7 +36,7 @@ class ImageStore(Dataset):
         ucg=0,
         rank=0,
         augment=None,
-        process_tags=False,
+        process_tags=True,
         **kwargs
     ):
         self.size = size
