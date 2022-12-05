@@ -51,7 +51,6 @@ dataset:
   center_crop: false
   ucg: 0.1
   debug_arb: false
-  reload_interval: 10
   num_workers: 3
 
 scheduler:

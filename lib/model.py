@@ -1,8 +1,13 @@
 
 import functools
 import math
+import os
 import tarfile
 from pathlib import Path
+
+from data.buckets import AspectRatioSampler
+from data.store import ImageStore
+from data.store import AspectRatioDataset
 from omegaconf import OmegaConf
 
 import pytorch_lightning as pl
@@ -23,28 +28,53 @@ from lib.utils import (
     convert_ldm_vae_checkpoint,
     convert_ldm_clip_checkpoint,
     create_ldm_bert_config,
-    convert_ldm_bert_checkpoint
+    convert_ldm_bert_checkpoint,
+    get_world_size
 )
-
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
-    def __init__(self, model_path, config):
+    def __init__(self, model_path, config, batch_size):
         super().__init__()
         self.config = config
+        self.model_path = model_path
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
+        self.lr = self.config.optimizer.params.lr
+        self.batch_size = batch_size 
         
+    def prepare_data(self):
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
+        
+        self.dataset = dataset_cls(
+            size=self.config.trainer.resolution,
+            bsz=self.batch_size,
+            seed=self.config.trainer.seed,
+            rank=local_rank,
+            init=not self.config.arb.enabled,
+            **self.config.dataset
+        )
+        self.data_sampler = AspectRatioSampler(
+            self.batch_size,
+            self.config, 
+            local_rank, 
+            self.dataset, 
+            get_world_size()
+        ) if self.config.arb.enabled else None
+        
+    def setup(self, stage):
+        config = self.config
         scheduler_cls = get_class(config.scheduler.name)
         self.noise_scheduler = scheduler_cls(**config.scheduler.params)
         
-        if (Path(model_path) / "model.ckpt").is_file():
+        if (Path(self.model_path) / "model.ckpt").is_file():
             # use autoconvert
-            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(model_path)                
+            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)                
         else:
-            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else model_path, subfolder="tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else model_path, subfolder="text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else model_path, subfolder="vae")
-            self.unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet") 
+            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="tokenizer")
+            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="text_encoder")
+            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
+            self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
              
         self.unet.to(self.weight_dtype)
         if config.trainer.half_encoder or self.weight_dtype == torch.float16:
@@ -54,46 +84,60 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
-        if self.config.trainer.gradient_checkpointing: 
+        if config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
             
-        if self.config.trainer.use_xformers:
+        if config.trainer.use_xformers:
             self.unet.set_use_memory_efficient_attention_xformers(True)
         
         # finally setup ema
-        if self.config.trainer.use_ema: 
+        if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
             
-    def on_before_batch_transfer(self, batch, dataloader_idx: int):
-        input_ids = batch[0]
-        if input_ids.shape[1] <= 77:
-            return [[input_ids], batch[1]]
+        self.dataset.set_tokenizer(self.tokenizer)
         
-        # todo: Handle end-of-sentence truncation
-        z = []
-        while max(map(len, input_ids)) != 0:
-            rem_tokens = [x[75:] for x in input_ids]
-            tokens = []
-            for j in range(len(input_ids)):
-                tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
-
-            rebuild = torch.asarray([[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens])
-            z.append(rebuild)
-            input_ids = rem_tokens
+    def train_dataloader(self):
+        dataloader = torch.utils.data.DataLoader(
+            self.dataset,
+            collate_fn=self.dataset.collate_fn,
+            sampler=self.data_sampler,
+            num_workers=self.config.dataset.num_workers,
+            persistent_workers=True,
+        )
+        return dataloader
             
-        return [z, batch[1]]
-    
-    def training_step(self, batch, batch_idx):
-        # Convert images to latent space
-        latent_dist = self.vae.encode(batch[1].to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
-        latents = latent_dist.sample() * 0.18215
-        
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
+        input_ids = batch[0]
+        z = []
+        if input_ids.shape[1] > 77:  
+            # todo: Handle end-of-sentence truncation
+            while max(map(len, input_ids)) != 0:
+                rem_tokens = [x[75:] for x in input_ids]
+                tokens = []
+                for j in range(len(input_ids)):
+                    tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
+
+                rebuild = torch.asarray([[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens])
+                z.append(rebuild)
+                input_ids = rem_tokens
+        else:
+            z.append(input_ids)
+            
         # Get the text embedding for conditioning
         encoder_hidden_states = None
-        for tokens in batch[0]:
+        for tokens in z:
             state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
             state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
+        
+        return encoder_hidden_states, batch[1]
+    
+    def training_step(self, batch, batch_idx):
+        encoder_hidden_states, pixels = batch
+        
+        # Convert images to latent space
+        latent_dist = self.vae.encode(pixels.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
+        latents = latent_dist.sample() * 0.18215
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -190,8 +234,7 @@ def load_model(model_path, config):
         except FileNotFoundError:
             pass
 
-    model = StableDiffusionModel(model_path, config)
-    return model.tokenizer, model
+    return StableDiffusionModel(model_path, config, config.trainer.init_batch_size)
 
 
 def load_sd_checkpoint(model_path):
