@@ -1,13 +1,15 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 
-import pytorch_lightning as pl
 import torch
+import pytorch_lightning as pl
+
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback
-from omegaconf import OmegaConf
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
 from lib.model import load_model
+
+from omegaconf import OmegaConf
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 
 args = parse_args()
 config = OmegaConf.load(args.config)
@@ -25,11 +27,11 @@ def main(args):
         
     model = load_model(args.model_path, config)
     
-    # stable diffusion 2.0, use it with --model_path stabilityai/stable-diffusion-2
+    # for stable diffusion 2.0, use it with --model_path stabilityai/stable-diffusion-2
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
-    callbacks = [ModelCheckpoint(**config.checkpoint)]
+    callbacks = [ ModelCheckpoint(**config.checkpoint)]
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
             config.monitor.huggingface_repo, 
@@ -37,10 +39,10 @@ def main(args):
         )
         callbacks.append(hf_logger)
     
-    logger = (
-        WandbLogger(project=config.monitor.wandb_id)
-        if config.monitor.wandb_id != "" else None
-    )
+    logger = None
+    if config.monitor.wandb_id != "":
+        logger = WandbLogger(project=config.monitor.wandb_id)
+        callbacks.append(LearningRateMonitor(logging_interval='step'))
     
     trainer = pl.Trainer(
         logger=logger, 

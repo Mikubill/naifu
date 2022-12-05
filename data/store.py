@@ -35,10 +35,12 @@ class ImageStore(Dataset):
         max_length=225,
         ucg=0,
         rank=0,
-        augconf=None,
+        augment=None,
+        process_tags=False,
         **kwargs
     ):
         self.size = size
+        self.fliter_tags = process_tags
         self.center_crop = center_crop
         self.ucg = ucg
         self.max_length = max_length
@@ -54,7 +56,7 @@ class ImageStore(Dataset):
         )
         
         self.yandere_tags = {}
-        self.augment = AugmentTransforms(augconf)
+        self.augment = AugmentTransforms(augment)
         print()
         
         # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
@@ -131,6 +133,9 @@ class ImageStore(Dataset):
         return img
 
     def process_tags(self, tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
+        if not self.fliter_tags:
+            return tags, False
+        
         if isinstance(tags, str):
             tags = tags.split(" ")
         final_tags = {}
