@@ -12,6 +12,7 @@ trainer:
   use_ema: false
   half_encoder: true
   use_hivemind: false
+  lr_scale: linear
 
   # note: only works with init_batch_size > 1
   use_xformers: false
@@ -29,7 +30,7 @@ lightning:
   accelerator: gpu
   devices: -1
   auto_select_gpus: true
-  limit_train_batches: 100
+  # limit_train_batches: 100
   max_epochs: 20
   precision: 32
   log_every_n_steps: 1

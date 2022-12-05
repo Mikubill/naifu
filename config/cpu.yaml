@@ -13,6 +13,7 @@ trainer:
   use_ema: false
   use_hivemind: false
   use_xformers: false
+  lr_scale: linear
   
 checkpoint:
   monitor: 'train_loss'
@@ -25,7 +26,7 @@ checkpoint:
 
 lightning:
   accelerator: cpu
-  limit_train_batches: 100
+  # limit_train_batches: 100
   max_epochs: 20
   precision: 32
   log_every_n_steps: 1
