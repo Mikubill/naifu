@@ -51,10 +51,8 @@ def main(args):
         **config.lightning
     )
     
-    trainer.tune(
-        model=model,
-        scale_batch_size_kwargs={"steps_per_trial": 5}
-    )
+    if trainer.auto_scale_batch_size or trainer.auto_lr_find:
+        trainer.tune(model=model, scale_batch_size_kwargs={"steps_per_trial": 5})
     
     trainer.fit(
         model=model,
