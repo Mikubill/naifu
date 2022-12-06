@@ -26,10 +26,7 @@ checkpoint:
 
 lightning:
   accelerator: tpu
-  devices: -1
-  tpu_cores: 8
-  auto_select_gpus: true
-  # limit_train_batches: 100
+  devices: 8
   max_epochs: 20
   gradient_clip_val: 0
   auto_scale_batch_size: false
