@@ -29,7 +29,8 @@ from lib.utils import (
     convert_ldm_clip_checkpoint,
     create_ldm_bert_config,
     convert_ldm_bert_checkpoint,
-    get_world_size
+    get_world_size,
+    get_local_rank
 )
 
 # define the LightningModule
@@ -43,7 +44,8 @@ class StableDiffusionModel(pl.LightningModule):
         self.batch_size = batch_size 
         
     def prepare_data(self):
-        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        local_rank = get_local_rank(self.config)
+        world_size = get_world_size(self.config)
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
         # init Dataset
@@ -61,7 +63,7 @@ class StableDiffusionModel(pl.LightningModule):
             config=self.config, 
             rank=local_rank, 
             dataset=self.dataset, 
-            world_size=get_world_size()
+            world_size=world_size,
         ) if self.config.arb.enabled else None
         
     def setup(self, stage):
