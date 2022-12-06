@@ -15,7 +15,7 @@ trainer:
   use_xformers: false
   
 checkpoint:
-  monitor: 'train_loss'
+  monitor: 'epoch'
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-val_loss{train_loss:.2f}'
   auto_insert_metric_name: false

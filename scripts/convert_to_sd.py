@@ -204,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--half", action="store_true", help="Save weights in half precision.")
     parser.add_argument("--unet-only", action="store_true", help="Only save unet in weights.")
     parser.add_argument("--use-ema", action="store_true", help="Use ema-unet instead of last-unet.")
+    parser.add_argument("--base", default="CompVis/stable-diffusion-v1-4", type=str, help="Path to the base model.")
 
     args = parser.parse_args()
 
@@ -224,7 +225,7 @@ if __name__ == "__main__":
             # rebuild unet from weights
             from diffusers import UNet2DConditionModel
             from torch_ema import ExponentialMovingAverage
-            unet = UNet2DConditionModel.from_config("CompVis/stable-diffusion-v1-4", subfolder="unet")
+            unet = UNet2DConditionModel.from_config(args.base, subfolder="unet")
             unet.load_state_dict(unet_state_dict)
             unet_ema = ExponentialMovingAverage(unet.parameters(), decay=0.995)
             unet_ema.load_state_dict(ema_weights)

@@ -1,17 +1,8 @@
-import functools
-import json
-import os
-import random
-import tarfile
-import tempfile
 import time
-from pathlib import Path
 
 import numpy as np
-import requests
 import torch
 import torch.utils.checkpoint
-
 from PIL import Image
 from tqdm.auto import tqdm
 
