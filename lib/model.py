@@ -12,7 +12,6 @@ import torch.utils.checkpoint
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import AutoencoderKL, UNet2DConditionModel
-from lib.warmup import WarmupLR
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
@@ -177,10 +176,30 @@ class StableDiffusionModel(pl.LightningModule):
             **self.config.lr_scheduler.params
         )
         
-        # if self.config.lr_scheduler.warmup.enabled:
-        #     scheduler = WarmupLR(scheduler, **self.config.lr_scheduler.warmup)
+        warmup_config = self.config.lr_scheduler.warmup
+        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
+            for pg in optimizer.param_groups:
+                pg["lr"] = min(pg["lr"], warmup_config.init_lr)
             
         return [[optimizer], [scheduler]]
+    
+    def lr_scheduler_step(self, *args):
+        warmup_config = self.config.lr_scheduler.warmup
+        if not warmup_config.enabled or self.trainer.global_step > warmup_config.num_warmup:
+            super().lr_scheduler_step(*args)
+                
+    def optimizer_step(self, epoch, batch_idx, optimizer, *args, **kwargs):
+        super().optimizer_step(epoch, batch_idx, optimizer, *args, **kwargs)
+        
+        warmup_config = self.config.lr_scheduler.warmup
+        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
+            f = min(1.0, float(self.trainer.global_step + 1) / float(warmup_config.num_warmup))
+            if warmup_config.strategy == "cos":
+                f = (math.cos(math.pi*(1+f))+1)/2.
+            delta = self.config.optimizer.params.lr-warmup_config.init_lr
+            for pg in optimizer.param_groups:
+                if pg["lr"] >= warmup_config.init_lr:
+                    pg["lr"] = warmup_config.init_lr+f*delta
     
     def on_train_start(self):
         if self.config.trainer.use_ema: 
@@ -193,7 +212,7 @@ class StableDiffusionModel(pl.LightningModule):
     def on_save_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
             checkpoint["model_ema"] = self.ema.state_dict()
-
+            
     def on_load_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
