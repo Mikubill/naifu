@@ -4,33 +4,22 @@ import math
 import tarfile
 from pathlib import Path
 
-from data.buckets import AspectRatioSampler
-from data.store import ImageStore
-from data.store import AspectRatioDataset
-from omegaconf import OmegaConf
-
 import pytorch_lightning as pl
 import requests
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-
+from data.buckets import AspectRatioSampler
+from data.store import AspectRatioDataset, ImageStore
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from lib.warmup import WarmupLR
+from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer, BertTokenizerFast
-from diffusers import AutoencoderKL, UNet2DConditionModel
-from lib.utils import (
-    create_unet_diffusers_config,
-    convert_ldm_unet_checkpoint,
-    create_vae_diffusers_config,
-    convert_ldm_vae_checkpoint,
-    convert_ldm_clip_checkpoint,
-    create_ldm_bert_config,
-    convert_ldm_bert_checkpoint,
-    get_world_size,
-    get_local_rank
-)
+from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
+from lib.utils import get_local_rank, get_world_size
+
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -187,6 +176,10 @@ class StableDiffusionModel(pl.LightningModule):
             optimizer=optimizer,
             **self.config.lr_scheduler.params
         )
+        
+        # if self.config.lr_scheduler.warmup.enabled:
+        #     scheduler = WarmupLR(scheduler, **self.config.lr_scheduler.warmup)
+            
         return [[optimizer], [scheduler]]
     
     def on_train_start(self):
@@ -226,12 +219,12 @@ def get_class(name: str):
 
 
 def load_model(model_path, config):
-    model_url = config.trainer.model_url
-
+    
     if (
         not Path(model_path).is_dir()
         or not ((Path(model_path) / "model_index.json").is_file() or (Path(model_path) / "model.ckpt").is_file())
     ):
+        model_url = config.trainer.model_url
         try:
             Path(model_path).mkdir(exist_ok=True)
             download_model(model_url, model_path)
@@ -242,6 +235,14 @@ def load_model(model_path, config):
 
 
 def load_sd_checkpoint(model_path):
+    from lib.utils import (
+        convert_ldm_bert_checkpoint,
+        convert_ldm_clip_checkpoint,
+        convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint,
+        create_ldm_bert_config, create_unet_diffusers_config,
+        create_vae_diffusers_config
+    )
+    
     vae_path = Path(model_path) / "model.vae.pt"
     checkpoint_path = Path(model_path) / "model.ckpt"
     config_path = Path(model_path) / "config.yaml"

@@ -88,6 +88,11 @@ optimizer:
 
 lr_scheduler:
   name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  warmup: 
+    enabled: false
+    init_lr: 2e-8
+    num_warmup: 50
+    warmup_strategy: "cos"
   params:
     T_0: 10
     T_mult: 1
