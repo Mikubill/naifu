@@ -35,8 +35,6 @@ from diffusers import (
     PNDMScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
-    StableDiffusionSafetyChecker,
-    AutoFeatureExtractor,
 )
 from transformers import BertTokenizerFast, CLIPTokenizer
 from lib.utils import (
