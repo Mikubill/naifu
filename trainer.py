@@ -16,6 +16,8 @@ config = OmegaConf.load(args.config)
 
 def main(args):
     torch.manual_seed(config.trainer.seed)
+    if args.model_path == None:
+        args.model_path = config.trainer.model_path
     
     strategy = None
     tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
