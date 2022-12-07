@@ -100,7 +100,7 @@ lr_scheduler:
     last_epoch: -1
 
 monitor:
-  wandb_id: "test-3"
+  wandb_id: ""
   huggingface_repo: ""
   hf_auth_token: ""
   store_checkpoints: true
