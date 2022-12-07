@@ -1,12 +1,12 @@
 numpy
 accelerate
-pytorch-lightning==1.8.1
+pytorch-lightning>=1.8.1
 omegaconf==2.1.1
 lightning_lite
 transformers==4.24.0
-diffusers==0.7.1
-bitsandbytes==0.35.4
-hivemind==1.1.2
+diffusers>=0.9.0
+bitsandbytes>=0.35.4
+hivemind>=1.1.2
 wandb
 ftfy
 torchvision
