@@ -35,6 +35,8 @@ from diffusers import (
     PNDMScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
+    StableDiffusionSafetyChecker,
+    AutoFeatureExtractor,
 )
 from transformers import BertTokenizerFast, CLIPTokenizer
 from lib.utils import (
@@ -64,6 +66,9 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help="The YAML config file corresponding to the original architecture.",
+    )
+    parser.add_argument(
+        "--vae_path", default=None, type=str, help="Path to the vae to convert."
     )
     parser.add_argument(
         "--scheduler_type",
@@ -158,8 +163,12 @@ if __name__ == "__main__":
     unet.load_state_dict(converted_unet_checkpoint)
 
     # Convert the VAE model.
-    vae_config = create_vae_diffusers_config(original_config)
-    converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+    if args.vae_path:
+        vae_config = create_vae_diffusers_config(original_config)
+        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, args.vae_path, vae_config)
+    else:
+        vae_config = create_vae_diffusers_config(original_config)
+        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
 
     vae = AutoencoderKL(**vae_config)
     vae.load_state_dict(converted_vae_checkpoint)
