@@ -100,7 +100,7 @@ if __name__ == "__main__":
     original_config = OmegaConf.load(args.original_config_file)
 
     checkpoint = torch.load(args.checkpoint_path)
-    checkpoint = checkpoint["state_dict"]
+    checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
 
     num_train_timesteps = original_config.model.params.timesteps
     beta_start = original_config.model.params.linear_start
