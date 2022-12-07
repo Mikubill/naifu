@@ -163,7 +163,7 @@ if __name__ == "__main__":
     # Convert the VAE model.
     if args.vae_path:
         vae_config = create_vae_diffusers_config(original_config)
-        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, args.vae_path, vae_config)
+        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config, vae=args.vae_path)
     else:
         vae_config = create_vae_diffusers_config(original_config)
         converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
