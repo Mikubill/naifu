@@ -62,6 +62,7 @@ class StableDiffusionModel(pl.LightningModule):
             # use autoconvert
             self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)                
         else:
+            self.noise_scheduler = scheduler_cls.from_config(self.model_path, subfolder="scheduler")
             self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="tokenizer")
             self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="text_encoder")
             self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
