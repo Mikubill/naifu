@@ -1,5 +1,7 @@
 import os
 
+import torch
+
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
         if abs(num) < 1024.0:
@@ -435,7 +437,10 @@ def convert_ldm_unet_checkpoint(checkpoint, config, path=None, extract_ema=False
     return new_checkpoint
 
 
-def convert_ldm_vae_checkpoint(checkpoint, config):
+def convert_ldm_vae_checkpoint(checkpoint, config, vae=None):
+    if vae:
+        checkpoint = torch.load(vae)['state_dict']
+        
     # extract state dict for VAE
     vae_state_dict = {}
     vae_key = "first_stage_model."
