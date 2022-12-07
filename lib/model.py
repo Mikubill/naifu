@@ -56,11 +56,11 @@ class StableDiffusionModel(pl.LightningModule):
     def setup(self, stage):
         config = self.config
         scheduler_cls = get_class(config.scheduler.name)
-        self.noise_scheduler = scheduler_cls(**config.scheduler.params)
         
         if (Path(self.model_path) / "model.ckpt").is_file():
             # use autoconvert
-            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)                
+            self.noise_scheduler = scheduler_cls(**config.scheduler.params)            
+            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)   
         else:
             self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
             self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="tokenizer")
