@@ -62,7 +62,10 @@ class StableDiffusionModel(pl.LightningModule):
             self.noise_scheduler = scheduler_cls(**config.scheduler.params)            
             self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)   
         else:
-            self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
+            if hasattr(scheduler_cls, "from_pretrained"):
+                self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
+            else:
+                self.noise_scheduler = scheduler_cls.from_config(self.model_path, subfolder="scheduler")
             self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="tokenizer")
             self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="text_encoder")
             self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
