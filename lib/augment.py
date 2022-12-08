@@ -48,7 +48,7 @@ class AugmentTransforms():
             (dx, dy, dx + X, dy + Y)
         )
 
-    def flip(self, image):
+    def flip(self, image, x):
         return torch.flip(image, (3,))
 
     def adjust_contrast(self, image, factor):
