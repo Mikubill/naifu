@@ -92,12 +92,15 @@ class StableDiffusionModel(pl.LightningModule):
         self.dataset.set_tokenizer(self.tokenizer)
         
     def train_dataloader(self):
-        self.data_sampler.update_bsz(self.batch_size)
+        if self.data_sampler:
+            self.data_sampler.update_bsz(self.batch_size)
+            
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             collate_fn=self.dataset.collate_fn,
             sampler=self.data_sampler,
             num_workers=self.config.dataset.num_workers,
+            batch_size=1 if self.data_sampler else self.batch_size,
             persistent_workers=True,
         )
         return dataloader
