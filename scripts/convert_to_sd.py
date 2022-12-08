@@ -316,9 +316,6 @@ if __name__ == "__main__":
     vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
 
     # Convert the text encoder model
-    text_enc_dict = convert_text_enc_state_dict(text_enc_dict)
-    text_enc_dict = {"cond_stage_model.transformer." + k: v for k, v in text_enc_dict.items()}
-
     if "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict:
         # Need to add the tag 'transformer' in advance so we can knock it out from the final layer-norm
         text_enc_dict = {"transformer." + k: v for k, v in text_enc_dict.items()}
