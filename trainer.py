@@ -29,10 +29,12 @@ def main(args):
         strategy = init_hivemind(config)
         
     model = load_model(args.model_path, config)
+    
+    # for stable diffusion v2, use it with model_path: stabilityai/stable-diffusion-2-1 
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
-    callbacks = [ ModelCheckpoint(**config.checkpoint)]
+    callbacks = [ModelCheckpoint(**config.checkpoint)]
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
             config.monitor.huggingface_repo, 
