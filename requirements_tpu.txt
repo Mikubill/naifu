@@ -13,3 +13,4 @@ ftfy
 safetensors
 fairscale
 torch-ema
+tensorboard

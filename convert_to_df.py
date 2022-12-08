@@ -38,6 +38,7 @@ from diffusers import (
 )
 from transformers import BertTokenizerFast, CLIPTokenizer
 from lib.utils import (
+    convert_ldm_openclip_checkpoint,
     create_unet_diffusers_config,
     convert_ldm_unet_checkpoint,
     create_vae_diffusers_config,
@@ -186,6 +187,20 @@ if __name__ == "__main__":
             scheduler=scheduler,
             safety_checker=None,
             feature_extractor=None,
+            requires_safety_checker=False,
+        )
+    elif text_model_type == "FrozenOpenCLIPEmbedder":
+        text_model = convert_ldm_openclip_checkpoint(checkpoint)
+        tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
+        pipe = StableDiffusionPipeline(
+            vae=vae,
+            text_encoder=text_model,
+            tokenizer=tokenizer,
+            unet=unet,
+            scheduler=scheduler,
+            safety_checker=None,
+            feature_extractor=None,
+            requires_safety_checker=False,
         )
     else:
         text_config = create_ldm_bert_config(original_config)
@@ -197,6 +212,9 @@ if __name__ == "__main__":
             tokenizer=tokenizer,
             unet=unet,
             scheduler=scheduler,
+            safety_checker=None,
+            feature_extractor=None,
+            requires_safety_checker=False,
         )
 
     pipe.save_pretrained(args.dump_path)
