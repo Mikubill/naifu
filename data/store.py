@@ -102,7 +102,7 @@ class ImageStore(Dataset):
                 entry = dlpath
             
             for x in Path(entry).iterdir():
-                if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif"]):
+                if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
                 img, prompt = self.prompt_resolver(x)
                 _, skip = self.process_tags(prompt)
