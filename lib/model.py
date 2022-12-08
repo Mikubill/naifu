@@ -264,6 +264,7 @@ def load_sd_checkpoint(model_path):
     from lib.utils import (
         convert_ldm_bert_checkpoint,
         convert_ldm_clip_checkpoint,
+        convert_ldm_openclip_checkpoint,
         convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint,
         create_ldm_bert_config, create_unet_diffusers_config,
         create_vae_diffusers_config
@@ -301,6 +302,9 @@ def load_sd_checkpoint(model_path):
     if text_model_type == "FrozenCLIPEmbedder":
         text_encoder = convert_ldm_clip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+    elif text_model_type == "FrozenOpenCLIPEmbedder":
+        text_encoder = convert_ldm_openclip_checkpoint(checkpoint)
+        tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
     else:
         text_config = create_ldm_bert_config(original_config)
         text_encoder = convert_ldm_bert_checkpoint(checkpoint, text_config)
