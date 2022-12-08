@@ -31,6 +31,7 @@ lightning:
   devices: 8
   max_epochs: 20
   gradient_clip_val: 0
+  accumulate_grad_batches: 1
   auto_scale_batch_size: false
   auto_lr_find: false
 
