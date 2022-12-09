@@ -104,7 +104,7 @@ def main():
 
     # Load models and create wrapper for stable diffusion
     tokenizer = CLIPTokenizer.from_pretrained(config.trainer.model_path, subfolder="tokenizer")
-    noise_scheduler = FlaxDDIMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
+    noise_scheduler, noise_scheduler_state = FlaxDDIMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
     text_encoder = FlaxCLIPTextModel.from_pretrained(config.trainer.model_path, subfolder="text_encoder", dtype=weight_dtype, from_pt=True)
     vae, vae_params = FlaxAutoencoderKL.from_pretrained(config.trainer.model_path, subfolder="vae", dtype=weight_dtype, from_pt=True)
     unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(config.trainer.model_path, subfolder="unet", dtype=weight_dtype, from_pt=True)

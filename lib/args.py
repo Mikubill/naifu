@@ -32,7 +32,7 @@ def parse_args():
 
     args = parser.parse_args()
     
-    if args.config.startswith("https://"):
+    if args.config != None and args.config.startswith("https://"):
         print(f"Downloading config {args.config}...")
         r = requests.get(args.config, stream=True)
         with open("config.yaml", 'wb') as fd:
