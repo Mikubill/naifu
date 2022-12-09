@@ -4,17 +4,13 @@ import itertools
 import json
 import os
 import random
-from pathlib import Path
+import torch
 import tarfile
 import tempfile
-import types
-
-
 import requests
-from lib.augment import AugmentTransforms
 
-import torch
-import torch.utils.checkpoint
+from lib.augment import AugmentTransforms
+from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms

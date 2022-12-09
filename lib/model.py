@@ -81,6 +81,9 @@ class StableDiffusionModel(pl.LightningModule):
         
         if config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
+            
+        if hasattr(self.unet, "set_use_memory_efficient_attention_xformers") and config.trainer.use_xformers:
+            self.unet.set_use_memory_efficient_attention_xformers(True)
         
         # finally setup ema
         if config.trainer.use_ema: 

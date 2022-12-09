@@ -1,8 +1,6 @@
 import time
-
-import numpy as np
 import torch
-import torch.utils.checkpoint
+import numpy as np
 from PIL import Image
 from tqdm.auto import tqdm
 
