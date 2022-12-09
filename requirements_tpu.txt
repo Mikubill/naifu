@@ -6,7 +6,7 @@ pytorch-lightning>=1.8.1
 omegaconf==2.1.1
 einops==0.3.0
 transformers>=4.25.1
-diffusers==0.10.0
+diffusers==0.10.2
 kornia==0.6.8
 wandb
 ftfy
