@@ -87,8 +87,7 @@ for j in range(2):
     sd_mid_res_prefix = f"middle_block.{2*j}."
     unet_conversion_map_layer.append((sd_mid_res_prefix, hf_mid_res_prefix))
 
-
-def convert_unet_state_dict(unet_state_dict):
+def convert_unet_state_dict(unet_state_dict, is_v2):
     # buyer beware: this is a *brittle* function,
     # and correct output requires that all of these pieces interact in
     # the exact order in which I have arranged them.
@@ -105,8 +104,16 @@ def convert_unet_state_dict(unet_state_dict):
             v = v.replace(hf_part, sd_part)
         mapping[k] = v
     new_state_dict = {v: unet_state_dict[k] for k, v in mapping.items()}
-    return new_state_dict
+    
+    if is_v2:
+        keys = list(new_state_dict.keys())
+        tf_keys = ["proj_in.weight", "proj_out.weight"]
+        for key in keys:
+            if ".".join(key.split(".")[-2:]) in tf_keys:
+                if new_state_dict[key].ndim > 2:
+                    new_state_dict[key] = new_state_dict[key][:, :, 0, 0]
 
+    return new_state_dict
 
 # ================#
 # VAE Conversion #
@@ -193,7 +200,7 @@ def convert_vae_state_dict(vae_state_dict):
 # =========================#
 
 
-def convert_text_enc_state_dict_v20(text_enc_dict: dict[str, torch.Tensor]):
+def convert_text_enc_state_dict_v20(text_enc_dict):
     textenc_conversion_lst = [
         # (stable-diffusion, HF Diffusers)
         ("resblocks.", "text_model.encoder.layers."),
@@ -308,7 +315,8 @@ if __name__ == "__main__":
         text_enc_dict = torch.load(osp.join(args.src, "text_encoder", "pytorch_model.bin"), map_location="cpu")
 
     # Convert the UNet model
-    unet_state_dict = convert_unet_state_dict(unet_state_dict)
+    is_v2 = "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict
+    unet_state_dict = convert_unet_state_dict(unet_state_dict, is_v2)
     unet_state_dict = {"model.diffusion_model." + k: v for k, v in unet_state_dict.items()}
 
     # Convert the VAE model
@@ -316,7 +324,7 @@ if __name__ == "__main__":
     vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
 
     # Convert the text encoder model
-    if "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict:
+    if is_v2:
         # Need to add the tag 'transformer' in advance so we can knock it out from the final layer-norm
         text_enc_dict = {"transformer." + k: v for k, v in text_enc_dict.items()}
         text_enc_dict = convert_text_enc_state_dict_v20(text_enc_dict)
