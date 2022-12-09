@@ -30,7 +30,7 @@ def main(args):
         
     model = load_model(args.model_path, config)
     
-    # for stable diffusion v2, use it with model_path: stabilityai/stable-diffusion-2-1 
+    # for experiment only
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
