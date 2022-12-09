@@ -14,9 +14,11 @@ trainer:
   half_encoder: true
   use_hivemind: false
   lr_scale: linear
+  attention_slicing: false
 
   # note: only works with init_batch_size > 1
   use_xformers: false
+
   
 checkpoint:
   monitor: 'epoch'

@@ -15,6 +15,7 @@ trainer:
   use_hivemind: true
   use_xformers: false
   lr_scale: linear
+  attention_slicing: false
 
 checkpoint:
   monitor: 'epoch'
