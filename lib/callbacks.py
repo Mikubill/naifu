@@ -15,6 +15,7 @@ class HuggingFaceHubCallback(Callback):
         private=True,
         every_n_steps=None,
         every_n_epochs=1,
+        **kwargs
     ):
         self.repo_owner, self.repo_name = repo_name.rstrip("/").split("/")[-2:]
         self.repo_namespace = f"{self.repo_owner}/{self.repo_name}"
@@ -43,7 +44,7 @@ class HuggingFaceHubCallback(Callback):
             return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         
         if trainer.global_step % self.every_n_steps == 0 and trainer.global_step > 0:
-            with self.repo.commit("Add/Update Model"):
+            with self.repo.commit(f"Add/Update Model: Step {trainer.global_step}", blocking=False, auto_lfs_prune=True):
                 trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt")  
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -51,5 +52,5 @@ class HuggingFaceHubCallback(Callback):
             return super().on_train_epoch_end(self, trainer, pl_module)
         
         if trainer.current_epoch % self.every_n_epochs == 0:
-            with self.repo.commit("Add/Update Model"):
+            with self.repo.commit(f"Add/Update Model: epoch {trainer.current_epoch}", blocking=False, auto_lfs_prune=True):
                 trainer.save_checkpoint(f"model-e{trainer.current_epoch}.ckpt")

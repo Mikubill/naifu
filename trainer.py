@@ -37,8 +37,9 @@ def main(args):
     callbacks = [ModelCheckpoint(**config.checkpoint)]
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
-            config.monitor.huggingface_repo, 
-            use_auth_token=config.monitor.hf_auth_token
+            repo_name=config.monitor.huggingface_repo, 
+            use_auth_token=config.monitor.hf_auth_token,
+            **config.monitor
         )
         callbacks.append(hf_logger)
     
