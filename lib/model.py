@@ -116,7 +116,10 @@ class StableDiffusionModel(pl.LightningModule):
                     tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
 
                 rebuild = [[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens]
-                z.append(torch.asarray(rebuild))
+                if hasattr(torch, "asarray"):
+                    z.append(torch.asarray(rebuild))
+                else:
+                    z.append(torch.IntTensor(rebuild))
                 input_ids = rem_tokens
         else:
             z.append(input_ids)
