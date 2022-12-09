@@ -88,7 +88,7 @@ class StableDiffusionModel(pl.LightningModule):
             elif hasattr(self.unet, "enable_xformers_memory_efficient_attention"):
                 self.unet.enable_xformers_memory_efficient_attention()
         
-        if config.trainer.get("ttention_slicing") == True:
+        if config.trainer.get("attention_slicing") == True:
             if hasattr(self.unet, "enable_attention_slicing"):
                 self.unet.enable_attention_slicing()
         
