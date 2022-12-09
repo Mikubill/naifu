@@ -81,9 +81,6 @@ class StableDiffusionModel(pl.LightningModule):
         
         if config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
-            
-        if config.trainer.use_xformers:
-            self.unet.set_use_memory_efficient_attention_xformers(True)
         
         # finally setup ema
         if config.trainer.use_ema: 
@@ -152,7 +149,16 @@ class StableDiffusionModel(pl.LightningModule):
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states.to(self.weight_dtype)).sample
-        loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")  
+        
+        # Get the target for loss depending on the prediction type
+        if self.noise_scheduler.config.prediction_type == "epsilon":
+            target = noise
+        elif self.noise_scheduler.config.prediction_type == "v_prediction":
+            target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        else:
+            raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
+
+        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
         
         # Logging to TensorBoard by default
         self.log("train_loss", loss)

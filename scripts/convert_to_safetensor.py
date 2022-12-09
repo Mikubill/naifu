@@ -88,7 +88,7 @@ for j in range(2):
     unet_conversion_map_layer.append((sd_mid_res_prefix, hf_mid_res_prefix))
 
 
-def convert_unet_state_dict(unet_state_dict):
+def convert_unet_state_dict(unet_state_dict, is_v2):
     # buyer beware: this is a *brittle* function,
     # and correct output requires that all of these pieces interact in
     # the exact order in which I have arranged them.
@@ -105,7 +105,17 @@ def convert_unet_state_dict(unet_state_dict):
             v = v.replace(hf_part, sd_part)
         mapping[k] = v
     new_state_dict = {v: unet_state_dict[k] for k, v in mapping.items()}
+    
+    if is_v2:
+        keys = list(new_state_dict.keys())
+        tf_keys = ["proj_in.weight", "proj_out.weight"]
+        for key in keys:
+            if ".".join(key.split(".")[-2:]) in tf_keys:
+                if new_state_dict[key].ndim > 2:
+                    new_state_dict[key] = new_state_dict[key][:, :, 0, 0]
+
     return new_state_dict
+
 
 
 # ================#
@@ -190,7 +200,76 @@ def convert_vae_state_dict(vae_state_dict):
 # =========================#
 # Text Encoder Conversion #
 # =========================#
-# pretty much a no-op
+
+def convert_text_enc_state_dict_v20(text_enc_dict):
+    textenc_conversion_lst = [
+        # (stable-diffusion, HF Diffusers)
+        ("resblocks.", "text_model.encoder.layers."),
+        ("ln_1", "layer_norm1"),
+        ("ln_2", "layer_norm2"),
+        (".c_fc.", ".fc1."),
+        (".c_proj.", ".fc2."),
+        (".attn", ".self_attn"),
+        ("ln_final.", "transformer.text_model.final_layer_norm."),
+        ("token_embedding.weight", "transformer.text_model.embeddings.token_embedding.weight"),
+        ("positional_embedding", "transformer.text_model.embeddings.position_embedding.weight"),
+    ]
+    protected = {re.escape(x[1]): x[0] for x in textenc_conversion_lst}
+    textenc_pattern = re.compile("|".join(protected.keys()))
+
+    # Ordering is from https://github.com/pytorch/pytorch/blob/master/test/cpp/api/modules.cpp
+    code2idx = {"q": 0, "k": 1, "v": 2}
+    code2idx = {"q": 0, "k": 1, "v": 2}
+
+    new_state_dict = {}
+    capture_qkv_weight = {}
+    capture_qkv_bias = {}
+    for k, v in text_enc_dict.items():
+        if (
+            k.endswith(".self_attn.q_proj.weight")
+            or k.endswith(".self_attn.k_proj.weight")
+            or k.endswith(".self_attn.v_proj.weight")
+        ):
+            k_pre = k[: -len(".q_proj.weight")]
+            k_code = k[-len("q_proj.weight")]
+            if k_pre not in capture_qkv_weight:
+                capture_qkv_weight[k_pre] = [None, None, None]
+            capture_qkv_weight[k_pre][code2idx[k_code]] = v
+            capture_qkv_weight[k_pre][code2idx[k_code]] = v
+            continue
+
+        if (
+            k.endswith(".self_attn.q_proj.bias")
+            or k.endswith(".self_attn.k_proj.bias")
+            or k.endswith(".self_attn.v_proj.bias")
+        ):
+            k_pre = k[: -len(".q_proj.bias")]
+            k_code = k[-len("q_proj.bias")]
+            if k_pre not in capture_qkv_bias:
+                capture_qkv_bias[k_pre] = [None, None, None]
+            capture_qkv_bias[k_pre][code2idx[k_code]] = v
+            capture_qkv_bias[k_pre][code2idx[k_code]] = v
+            continue
+
+        relabelled_key = textenc_pattern.sub(lambda m: protected[re.escape(m.group(0))], k)
+        #        if relabelled_key != k:
+        #            print(f"{k} -> {relabelled_key}")
+
+        new_state_dict[relabelled_key] = v
+
+    for k_pre, tensors in capture_qkv_weight.items():
+        if None in tensors:
+            raise Exception("CORRUPTED MODEL: one of the q-k-v values for the text encoder was missing")
+        relabelled_key = textenc_pattern.sub(lambda m: protected[re.escape(m.group(0))], k_pre)
+        new_state_dict[relabelled_key + ".in_proj_weight"] = torch.cat(tensors)
+
+    for k_pre, tensors in capture_qkv_bias.items():
+        if None in tensors:
+            raise Exception("CORRUPTED MODEL: one of the q-k-v values for the text encoder was missing")
+        relabelled_key = textenc_pattern.sub(lambda m: protected[re.escape(m.group(0))], k_pre)
+        new_state_dict[relabelled_key + ".in_proj_bias"] = torch.cat(tensors)
+
+    return new_state_dict
 
 
 def convert_text_enc_state_dict(text_enc_dict):
@@ -241,12 +320,19 @@ if __name__ == "__main__":
     unet_state_dict = {"model.diffusion_model." + k: v for k, v in unet_state_dict.items()}
 
     # Convert the VAE model
-    vae_state_dict = convert_vae_state_dict(vae_state_dict)
+    is_v2 = "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict
+    unet_state_dict = convert_unet_state_dict(unet_state_dict, is_v2)
     vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
 
     # Convert the text encoder model
-    text_enc_dict = convert_text_enc_state_dict(text_enc_dict)
-    text_enc_dict = {"cond_stage_model.transformer." + k: v for k, v in text_enc_dict.items()}
+    if is_v2:
+        # Need to add the tag 'transformer' in advance so we can knock it out from the final layer-norm
+        text_enc_dict = {"transformer." + k: v for k, v in text_enc_dict.items()}
+        text_enc_dict = convert_text_enc_state_dict_v20(text_enc_dict)
+        text_enc_dict = {"cond_stage_model.model." + k: v for k, v in text_enc_dict.items()}
+    else:
+        text_enc_dict = convert_text_enc_state_dict(text_enc_dict)
+        text_enc_dict = {"cond_stage_model.transformer." + k: v for k, v in text_enc_dict.items()}
 
     # Put together new checkpoint
     state_dict = {**unet_state_dict, **vae_state_dict, **text_enc_dict} if not args.unet_only else {**unet_state_dict}
