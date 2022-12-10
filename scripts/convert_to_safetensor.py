@@ -316,12 +316,12 @@ if __name__ == "__main__":
         text_enc_dict = torch.load(osp.join(args.src, "text_encoder", "pytorch_model.bin"), map_location="cpu")
 
     # Convert the UNet model
-    unet_state_dict = convert_unet_state_dict(unet_state_dict)
+    is_v2 = "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict
+    unet_state_dict = convert_unet_state_dict(unet_state_dict, is_v2)
     unet_state_dict = {"model.diffusion_model." + k: v for k, v in unet_state_dict.items()}
 
     # Convert the VAE model
-    is_v2 = "text_model.encoder.layers.22.layer_norm2.bias" in text_enc_dict
-    unet_state_dict = convert_unet_state_dict(unet_state_dict, is_v2)
+    vae_state_dict = convert_vae_state_dict(vae_state_dict)
     vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
 
     # Convert the text encoder model
