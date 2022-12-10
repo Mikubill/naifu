@@ -271,7 +271,7 @@ def convert_text_enc_state_dict_v20(text_enc_dict):
     return new_state_dict
 
 
-def convert_text_enc_state_dict(text_enc_dict: dict[str, torch.Tensor]):
+def convert_text_enc_state_dict(text_enc_dict):
     return text_enc_dict
 
 if __name__ == "__main__":
