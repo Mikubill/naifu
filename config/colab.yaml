@@ -61,7 +61,7 @@ dataset:
   ucg: 0.1
   debug_arb: false
   num_workers: 3
-  process_tags: false
+  process_tags: true
   augment:
     enabled: false
     debug: false
