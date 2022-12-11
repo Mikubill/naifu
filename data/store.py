@@ -190,7 +190,7 @@ class ImageStore(Dataset):
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
             skip_image = True
             
-        return ", ".join(list(final_tags.keys())), skip_image
+        return "Tags:" + ", ".join(list(final_tags.keys())), skip_image
     
     def collate_fn(self, examples):
         input_ids = [example["prompt_ids"] for example in examples]
