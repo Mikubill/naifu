@@ -60,11 +60,11 @@ dataset:
   augment:
     enabled: false
     debug: false
-    dropout: 0.5
+    dropout: 0.7
     methods:
       adjust_brightness: 1.1
       adjust_contrast: 1.1
-      rotate_with_crop: 10
+      # rotate_with_crop: 10
 
 scheduler:
   name: diffusers.DDIMScheduler
