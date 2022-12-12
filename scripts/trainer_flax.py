@@ -31,7 +31,6 @@ check_min_version("0.10.0")
 
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 args = parse_args()
-args.config = "/root/workspace/storage/sdv2-train/main.yaml"
 config = OmegaConf.load(args.config)
 
 def get_params_to_save(params):
