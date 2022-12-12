@@ -1,6 +1,9 @@
 import logging
 import math
 import os
+
+from experiment.utils import AbstractTokenizer
+from experiment.encoder import FrozenOpenCLIPEmbedder
 import torch
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
@@ -13,7 +16,7 @@ import optax
 import torch
 import torch.utils.checkpoint
 import transformers
-from diffusers import FlaxAutoencoderKL, FlaxDDIMScheduler
+from diffusers import FlaxAutoencoderKL, FlaxDDPMScheduler
 from diffusers import FlaxStableDiffusionPipeline, FlaxUNet2DConditionModel
 from diffusers.utils import check_min_version
 from flax import jax_utils
@@ -28,6 +31,7 @@ check_min_version("0.10.0")
 
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 args = parse_args()
+args.config = "/root/workspace/storage/sdv2-train/main.yaml"
 config = OmegaConf.load(args.config)
 
 def get_params_to_save(params):
@@ -103,8 +107,11 @@ def main():
         weight_dtype = jnp.bfloat16
 
     # Load models and create wrapper for stable diffusion
+    text_encoder_internal = FrozenOpenCLIPEmbedder(device="cpu")
+    tokenizer_internal = AbstractTokenizer()
+    
     tokenizer = CLIPTokenizer.from_pretrained(config.trainer.model_path, subfolder="tokenizer")
-    noise_scheduler, noise_scheduler_state = FlaxDDIMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
+    noise_scheduler = FlaxDDPMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
     text_encoder = FlaxCLIPTextModel.from_pretrained(config.trainer.model_path, subfolder="text_encoder", dtype=weight_dtype, from_pt=True)
     vae, vae_params = FlaxAutoencoderKL.from_pretrained(config.trainer.model_path, subfolder="vae", dtype=weight_dtype, from_pt=True)
     unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(config.trainer.model_path, subfolder="unet", dtype=weight_dtype, from_pt=True)
@@ -124,45 +131,20 @@ def main():
     adamw = optax.adamw(learning_rate=lr_scheduler)
     optimizer = optax.chain(optax.clip_by_global_norm(config.lightning.gradient_clip_val), adamw)
     state = train_state.TrainState.create(apply_fn=unet.__call__, params=unet_params, tx=optimizer)
-    dataset.set_tokenizer(tokenizer)
+    dataset.set_tokenizer(tokenizer_internal)
     
     # Initialize our training
     rng = jax.random.PRNGKey(config.trainer.seed)
     train_rngs = jax.random.split(rng, jax.local_device_count())
-    
-    def encode_tokens(input_ids, tp):
-        z = []
-        if input_ids.shape[1] > 77:  
-            # todo: Handle end-of-sentence truncation
-            while max(map(len, input_ids)) != 0:
-                rem_tokens = [x[75:] for x in input_ids]
-                tokens = []
-                for j in range(len(input_ids)):
-                    tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [tokenizer.eos_token_id] * 75)
-
-                rebuild = [[tokenizer.bos_token_id] + list(x[:75]) + [tokenizer.eos_token_id] for x in tokens]
-                z.append(torch.asarray(rebuild))
-                input_ids = rem_tokens
-        else:
-            z.append(input_ids)
-
-        # Get the text embedding for conditioning
-        encoder_hidden_states = None
-        for tokens in z:
-            state = text_encoder(tokens, params=tp, train=False, output_hidden_states=True)
-            state = text_encoder.text_model.final_layer_norm(state['hidden_states'][-config.trainer.clip_skip])
-            encoder_hidden_states = state if encoder_hidden_states is None else jnp.concatenate((encoder_hidden_states, state), axis=-2)
-        
-        return encoder_hidden_states
-    
     noise_scheduler = noise_scheduler[0]
 
-    def train_step(state, text_encoder_params, vae_params, batch, train_rng):
+    def train_step(state, vae_params, batch, train_rng):
         dropout_rng, sample_rng, new_train_rng = jax.random.split(train_rng, 3)
 
         def compute_loss(params):
+            encoder_hidden_states, pixels = batch
             # Convert images to latent space
-            vae_outputs = vae.apply({"params": vae_params}, batch[1], deterministic=True, method=vae.encode)
+            vae_outputs = vae.apply({"params": vae_params}, pixels, deterministic=True, method=vae.encode)
             latents = vae_outputs.latent_dist.sample(sample_rng)
             
             # (NHWC) -> (NCHW)
@@ -180,10 +162,6 @@ def main():
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-
-            # Get the text embedding for conditioning
-            encoder_hidden_states = encode_tokens(batch[0], text_encoder_params)
-            # encoder_hidden_states = text_encoder(batch[0], params=text_encoder_params, train=False)[0]
 
             # Predict the noise residual and compute loss
             unet_outputs = unet.apply({"params": params}, noisy_latents, timesteps, encoder_hidden_states, train=True)
@@ -224,8 +202,9 @@ def main():
         train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
         # train
         for batch in dataloader:
+            batch[0] = text_encoder_internal(batch[0])
             batch = shard([jnp.array(batch[0]), jnp.array(batch[1])])
-            state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
+            state, train_metric, train_rngs = p_train_step(state, vae_params, batch, train_rngs)
             train_metrics.append(train_metric)
             train_step_progress_bar.update(1)
 
@@ -240,7 +219,7 @@ def main():
 
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
-        noise_scheduler = FlaxDDIMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
+        noise_scheduler = FlaxDDPMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
         pipeline = FlaxStableDiffusionPipeline(
             text_encoder=text_encoder,
             vae=vae,
