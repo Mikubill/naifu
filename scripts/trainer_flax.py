@@ -211,8 +211,7 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        train_metric = jax_utils.unreplicate(train_metric)
-
+        train_metric = jax_utils.unreplicate(train_metrics)
         train_step_progress_bar.close()
         epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
 
