@@ -21,7 +21,7 @@ def main(args):
     
     strategy = None
     tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
-    if not config.trainer.gradient_checkpointing and config.lightning.accelerator in ["gpu", "cpu"] and not tune:
+    if config.lightning.accelerator in ["gpu", "cpu"] and not tune:
         strategy = "ddp_find_unused_parameters_false"
          
     if config.trainer.use_hivemind:

@@ -40,12 +40,19 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
 
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
-        
+    
         if config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
             
-        if config.trainer.use_xformers:
-            self.unet.set_use_memory_efficient_attention_xformers(True)
+        if config.trainer.get("use_xformers") == True:
+            if hasattr(self.unet, "set_use_memory_efficient_attention_xformers"):
+                self.unet.set_use_memory_efficient_attention_xformers(True)
+            elif hasattr(self.unet, "enable_xformers_memory_efficient_attention"):
+                self.unet.enable_xformers_memory_efficient_attention()
+        
+        if config.trainer.get("attention_slicing") == True:
+            if hasattr(self.unet, "enable_attention_slicing"):
+                self.unet.enable_attention_slicing()
         
         # finally setup ema
         if config.trainer.use_ema: 
