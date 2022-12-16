@@ -7,13 +7,20 @@ class AbstractEmb():
     @property
     def input_ids(self): 
       return self.x
-
+  
 class AbstractTokenizer():
     def __call__(self, x, *args, **kwds):
         return AbstractEmb(x)
     
     def pad(self, x, *args, **kwds):
         return AbstractEmb(x["input_ids"])
+
+class FrozenCustomEncoder(AbstractTokenizer):
+    def __init__(self, encoder) -> None:
+        self.encoder = encoder
+    
+    def pad(self, x, *args, **kwds):
+        return AbstractEmb(self.encoder(x["input_ids"]))
     
 def count_params(model, verbose=False):
     total_params = sum(p.numel() for p in model.parameters())
