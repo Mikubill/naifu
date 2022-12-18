@@ -104,6 +104,24 @@ monitor:
   hf_auth_token: ""
   store_checkpoints: true
 
+sampling:
+  enabled: true
+  use_wandb: false
+  every_n_steps: -1
+  every_n_epochs: 1
+  save_dir: "samples"
+  seed: 1139
+  height: 512
+  width: 512
+  steps: 20
+  cfg_scale: 9
+  negative_prompts: 
+    - "lowres, bad anatomy, text, error, extra digit, cropped"
+    - "lowres, low quality"
+  prompts: 
+    - "a girl running fast on the country lane"
+    - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
+
 encoder:
   # Leave blank to load from model
   text: 

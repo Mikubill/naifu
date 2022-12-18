@@ -4,7 +4,7 @@ import torch
 import pytorch_lightning as pl
 
 from lib.args import parse_args
-from lib.callbacks import HuggingFaceHubCallback
+from lib.callbacks import HuggingFaceHubCallback, SampleCallback
 from lib.model import load_model
 
 from omegaconf import OmegaConf
@@ -28,13 +28,14 @@ def main(args):
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
         
+        
     model = load_model(args.model_path, config)
     
     # for experiment only
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
-    callbacks = [ModelCheckpoint(**config.checkpoint)]
+    callbacks = []
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
             repo_name=config.monitor.huggingface_repo, 
@@ -42,12 +43,16 @@ def main(args):
             **config.monitor
         )
         callbacks.append(hf_logger)
+        
+    if config.get("sampling"):
+        callbacks.append(SampleCallback(config.get("sampling")))
     
     logger = None
     if config.monitor.wandb_id != "":
         logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
     
+    callbacks.append(ModelCheckpoint(**config.checkpoint))
     trainer = pl.Trainer(
         logger=logger, 
         strategy=strategy, 

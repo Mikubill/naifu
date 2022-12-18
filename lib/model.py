@@ -12,6 +12,7 @@ import torch.utils.checkpoint
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
@@ -97,6 +98,19 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
             
         self.dataset.set_tokenizer(self.tokenizer)
+        
+        if config.get("sampling"):
+            self.pipeline = StableDiffusionPipeline(
+                vae=self.vae, 
+                text_encoder=self.text_encoder, 
+                tokenizer=self.tokenizer, 
+                unet=self.unet, 
+                scheduler=self.noise_scheduler, 
+                safety_checker=None,
+                feature_extractor=None,
+                requires_safety_checker=False
+            )
+            self.pipeline.set_progress_bar_config(disable=True)
         
     def train_dataloader(self):
         if self.data_sampler:
