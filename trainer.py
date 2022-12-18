@@ -44,8 +44,9 @@ def main(args):
         )
         callbacks.append(hf_logger)
         
-    if config.get("sampling"):
-        callbacks.append(SampleCallback(config.get("sampling")))
+    sp =  config.get("sampling")
+    if sp != None and sp.enabled:
+        callbacks.append(SampleCallback(sp))
     
     logger = None
     if config.monitor.wandb_id != "":
