@@ -43,15 +43,15 @@ def main(args):
             **config.monitor
         )
         callbacks.append(hf_logger)
-        
-    sp =  config.get("sampling")
-    if sp != None and sp.enabled:
-        callbacks.append(SampleCallback(sp))
     
     logger = None
     if config.monitor.wandb_id != "":
         logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
+        
+    sp =  config.get("sampling")
+    if sp != None and sp.enabled:
+        callbacks.append(SampleCallback(sp, logger))
     
     callbacks.append(ModelCheckpoint(**config.checkpoint))
     trainer = pl.Trainer(

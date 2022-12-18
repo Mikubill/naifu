@@ -12,7 +12,7 @@ import torch.utils.checkpoint
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import AutoencoderKL, UNet2DConditionModel
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, DDIMScheduler
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
@@ -30,6 +30,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
         self.lr = self.config.optimizer.params.lr
         self.batch_size = batch_size 
+        self.save_hyperparameters(config)
         
     def prepare_data(self):
         local_rank = get_local_rank(self.config)
@@ -56,12 +57,11 @@ class StableDiffusionModel(pl.LightningModule):
         
     def setup(self, stage):
         config = self.config
-        scheduler_cls = get_class(config.scheduler.name)
+        scheduler_cls = DDIMScheduler
         
         if (Path(self.model_path) / "model.ckpt").is_file():
             # use autoconvert
-            self.noise_scheduler = scheduler_cls(**config.scheduler.params)            
-            self.unet, self.vae, self.text_encoder, self.tokenizer = load_sd_checkpoint(self.model_path)   
+            self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = load_sd_checkpoint(self.model_path)   
         else:
             if hasattr(scheduler_cls, "from_pretrained"):
                 self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
@@ -309,6 +309,16 @@ def load_sd_checkpoint(model_path):
             
     print(f"Loading StableDiffusionModel from {checkpoint_path}")
     original_config = OmegaConf.load(config_path)
+    
+    num_train_timesteps = original_config.model.params.timesteps
+    beta_start = original_config.model.params.linear_start
+    beta_end = original_config.model.params.linear_end
+    scheduler = DDIMScheduler(
+        num_train_timesteps=num_train_timesteps,
+        beta_start=beta_start,
+        beta_end=beta_end,
+        beta_schedule="scaled_linear",
+    )
             
     checkpoint = torch.load(checkpoint_path)
     checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
@@ -343,4 +353,4 @@ def load_sd_checkpoint(model_path):
         text_encoder = convert_ldm_bert_checkpoint(checkpoint, text_config)
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         
-    return unet, vae, text_encoder, tokenizer
+    return unet, vae, text_encoder, tokenizer, scheduler

@@ -10,8 +10,9 @@ from pathlib import Path
 from pytorch_lightning.utilities import rank_zero_only
 
 class SampleCallback(Callback):
-    def __init__(self, config):
+    def __init__(self, config, logger):
         self.config = config    
+        self.logger = logger
         
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):        
         if self.config is None or pl_module.pipeline is None or self.config.every_n_steps == -1:
@@ -55,10 +56,8 @@ class SampleCallback(Callback):
         for j, image in enumerate(images):
             image.save(save_dir / f"nd_sample_e{trainer.current_epoch}_s{trainer.global_step}_{j}.png")
         
-        if self.config.use_wandb:
-            import wandb
-            samples = [wandb.Image(image, caption=self.config.prompts[j]) for j, image in enumerate(images)]
-            wandb.log({"samples": samples}, trainer.global_step)
+        if self.config.use_wandb and self.logger:
+            self.logger.log_image(key="samples", images=images, caption=prompts)
 
 # Modified: https://github.com/nateraw/hf-hub-lightning/blob/main/hf_hub_lightning/callback.py
 
