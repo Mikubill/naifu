@@ -1,8 +1,10 @@
 
 import functools
 import math
+import os
 import tarfile
 from pathlib import Path
+import tempfile
 
 import pytorch_lightning as pl
 import requests
@@ -20,7 +22,6 @@ from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size
 
-
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self, model_path, config, batch_size):
@@ -33,28 +34,13 @@ class StableDiffusionModel(pl.LightningModule):
         self.save_hyperparameters(config)
         
     def prepare_data(self):
-        local_rank = get_local_rank(self.config)
-        world_size = get_world_size(self.config)
-        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
-        
-        # init Dataset
-        self.dataset = dataset_cls(
-            size=self.config.trainer.resolution,
-            seed=self.config.trainer.seed,
-            rank=local_rank,
-            init=not self.config.arb.enabled,
-            **self.config.dataset
-        )
-        
-        # init sampler
-        self.data_sampler = AspectRatioSampler(
-            bsz=self.batch_size,
-            config=self.config, 
-            rank=local_rank, 
-            dataset=self.dataset, 
-            world_size=world_size,
-        ) if self.config.arb.enabled else None
-        
+        for k, entry in enumerate(self.config.dataset.img_path):
+            if entry.startswith("https://") or entry.startswith("http://"):
+                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
+                Path(dlpath).mkdir(exist_ok=True)
+                download(entry, dlpath)
+                self.config.dataset.img_path[k] = dlpath
+            
     def setup(self, stage):
         config = self.config
         scheduler_cls = DDIMScheduler
@@ -96,8 +82,6 @@ class StableDiffusionModel(pl.LightningModule):
         # finally setup ema
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-            
-        self.dataset.set_tokenizer(self.tokenizer)
         
         if config.get("sampling"):
             self.pipeline = StableDiffusionPipeline(
@@ -111,6 +95,36 @@ class StableDiffusionModel(pl.LightningModule):
                 requires_safety_checker=False
             )
             self.pipeline.set_progress_bar_config(disable=True)
+            
+        for k, entry in enumerate(self.config.dataset.img_path):
+            if entry.startswith("https://") or entry.startswith("http://"):
+                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
+                self.config.dataset.img_path[k] = dlpath
+            
+        local_rank = get_local_rank(self.config)
+        world_size = get_world_size(self.config)
+        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
+        
+        # init Dataset
+        self.dataset = dataset_cls(
+            size=self.config.trainer.resolution,
+            seed=self.config.trainer.seed,
+            rank=local_rank,
+            init=not self.config.arb.enabled,
+            tokenizer=self.tokenizer,
+            **self.config.dataset
+        )
+        
+        # init sampler
+        self.data_sampler = None
+        if self.config.arb.enabled:
+            self.data_sampler = AspectRatioSampler(
+                bsz=self.batch_size,
+                config=self.config, 
+                rank=local_rank, 
+                dataset=self.dataset, 
+                world_size=world_size,
+            ) 
         
     def train_dataloader(self):
         if self.data_sampler:
@@ -256,9 +270,9 @@ class StableDiffusionModel(pl.LightningModule):
     def on_load_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
+            
 
-
-def download_model(url, model_path="model"):
+def download(url, model_path="model"):
     print(f'Downloading: "{url}" to {model_path}\n')
     r = requests.get(url, stream=True)
     file_size = int(r.headers.get("content-length", 0))
@@ -286,7 +300,7 @@ def load_model(model_path, config):
         model_url = config.trainer.model_url
         try:
             Path(model_path).mkdir(exist_ok=True)
-            download_model(model_url, model_path)
+            download(model_url, model_path)
         except FileNotFoundError:
             pass
 
