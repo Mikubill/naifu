@@ -33,6 +33,7 @@ class ImageStore(Dataset):
         rank=0,
         augment=None,
         process_tags=True,
+        tokenizer=None,
         **kwargs
     ):
         self.size = size
@@ -40,6 +41,7 @@ class ImageStore(Dataset):
         self.center_crop = center_crop
         self.ucg = ucg
         self.max_length = max_length
+        self.tokenizer=tokenizer
         self.rank = rank
         self.dataset = img_path
         self.image_transforms = transforms.Compose(
@@ -72,31 +74,12 @@ class ImageStore(Dataset):
             new_prompt = content
 
         return x, new_prompt
-    
-    def download(self, url, mpath="model"):
-        print(f'Downloading: "{url}" to {mpath}\n')
-        r = requests.get(url, stream=True)
-        file_size = int(r.headers.get("content-length", 0))
-
-        r.raw.read = functools.partial(r.raw.read, decode_content=True)
-        with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
-            file = tarfile.open(fileobj=r_raw, mode="r|gz")
-            file.extractall(path=mpath)
-            
-    def set_tokenizer(self, tokenizer):
-        self.tokenizer = tokenizer
 
     def update_store(self):            
         self.entries = []
         bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
         
         for entry in self.dataset:
-            if entry.startswith("https://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{self.dataset.index(entry)}")
-                Path(dlpath).mkdir(exist_ok=True)
-                self.download(entry, dlpath)
-                entry = dlpath
-            
             for x in Path(entry).iterdir():
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
@@ -145,14 +128,29 @@ class ImageStore(Dataset):
         if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
             final_tags["nsfw"] = True
 
-       
         base_chosen = []
+        skip_image = False
+        # counts = [0]
+        
         for tag in tag_dict.keys():
             # For yande.re tags.
-            if len(self.yandere_tags) > 0:
-                if tag in self.yandere_tags and self.yandere_tags[tag]["type"] >= 1 and random.random() < keep_important:
-                        base_chosen.append(tag)
+            if len(self.yandere_tags) <= 0 or tag not in self.yandere_tags:
+                continue
             
+            if self.yandere_tags[tag]["type"] >= 1 and random.random() < keep_important:
+                    base_chosen.append(tag)
+
+            if tag in self.yandere_tags:
+                if self.yandere_tags[tag]["type"] == 6:
+                    skip_image = True
+            
+        #     if self.yandere_tags[tag]["type"] in [2, 4, 5]:
+        #         counts.append(int(self.yandere_tags[tag]["count"]))
+                
+        # if len(self.yandere_tags) > 0 and max(counts) < 50:
+        #     skip_image = True
+                      
+        for tag in tag_dict.keys():
             # For danbooru tags.
             parts = tag.split(":", 1)
             if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
@@ -161,6 +159,7 @@ class ImageStore(Dataset):
                 base_chosen.append(tag)
             if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
                 base_chosen.append(tag)
+        
 
         tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
         base_chosen_set = set(base_chosen)
@@ -183,7 +182,6 @@ class ImageStore(Dataset):
                 tag = tag[5:]
             final_tags[tag] = True
 
-        skip_image = False
         for bad_tag in ["comic", "panels", "everyone", "sample_watermark", "text_focus", "tagme"]:
             if bad_tag in pure_tag_dict:
                 skip_image = True
