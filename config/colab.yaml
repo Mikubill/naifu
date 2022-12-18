@@ -69,19 +69,7 @@ dataset:
     methods:
       adjust_brightness: 1.1
       adjust_contrast: 1.1
-      # rotate_with_crop: 10
-
-scheduler:
-  name: diffusers.DDIMScheduler
-  params:
-      beta_end: 0.012
-      beta_schedule: "scaled_linear"
-      beta_start: 0.00085
-      clip_sample: false
-      num_train_timesteps: 1000
-      set_alpha_to_one: false
-      steps_offset: 1
-      trained_betas: null
+      # rotate_with_crop: 5
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit
