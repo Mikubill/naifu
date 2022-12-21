@@ -61,6 +61,12 @@ def main(args):
         **config.lightning
     )
     
+    if config.trainer.precision == "fp16" and config.lightning.precision == 16:
+        from pytorch_lightning.plugins import PrecisionPlugin
+        precision_plugin = PrecisionPlugin()
+        precision_plugin.precision = config.lightning.precision
+        trainer.strategy.precision_plugin = precision_plugin
+    
     if trainer.auto_scale_batch_size or trainer.auto_lr_find:
         trainer.tune(model=model, scale_batch_size_kwargs={"steps_per_trial": 5})
     

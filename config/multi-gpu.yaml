@@ -75,16 +75,15 @@ optimizer:
     eps: 1e-8
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  name: torch.optim.lr_scheduler.CosineAnnealingLR
   warmup: 
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
     warmup_strategy: "cos"
   params:
-    T_0: 10
-    T_mult: 1
-    eta_min: 7e-8
+    T_max: 20
+    eta_min: 1e-7
     last_epoch: -1
 
 monitor:

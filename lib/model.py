@@ -35,6 +35,9 @@ class StableDiffusionModel(pl.LightningModule):
         
     def prepare_data(self):
         for k, entry in enumerate(self.config.dataset.img_path):
+            if Path(entry).is_file() and entry.endswith(".pth"):
+                continue
+            
             if entry.startswith("https://") or entry.startswith("http://"):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
                 Path(dlpath).mkdir(exist_ok=True)
