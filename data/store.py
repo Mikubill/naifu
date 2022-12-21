@@ -116,7 +116,7 @@ class ImageStore(Dataset):
             max_length=self.max_length,
         ).input_ids 
 
-    def read_img(self, filepath, size) -> Image.Image | torch.Tensor:
+    def read_img(self, filepath, size):
         if isinstance(filepath, str) and filepath.startswith("@"):
             groups = filepath[1:].split(",")
             item = self.latent_cache[groups[0]][groups[1]]
