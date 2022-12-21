@@ -34,6 +34,7 @@ def main(args):
     # for experiment only
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+    # model =LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     
     callbacks = []
     if config.monitor.huggingface_repo != "":
@@ -66,7 +67,7 @@ def main(args):
         precision_plugin = PrecisionPlugin()
         precision_plugin.precision = config.lightning.precision
         trainer.strategy.precision_plugin = precision_plugin
-    
+
     if trainer.auto_scale_batch_size or trainer.auto_lr_find:
         trainer.tune(model=model, scale_batch_size_kwargs={"steps_per_trial": 5})
     
