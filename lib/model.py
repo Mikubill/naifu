@@ -35,9 +35,6 @@ class StableDiffusionModel(pl.LightningModule):
         
     def prepare_data(self):
         for k, entry in enumerate(self.config.dataset.img_path):
-            if Path(entry).is_file() and entry.endswith(".pth"):
-                continue
-            
             if entry.startswith("https://") or entry.startswith("http://"):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
                 Path(dlpath).mkdir(exist_ok=True)
@@ -170,14 +167,29 @@ class StableDiffusionModel(pl.LightningModule):
             encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
         
         return encoder_hidden_states
-            
-    def training_step(self, batch, batch_idx):
-        input_ids, pixels = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids)
+    
+    def encode_pixels(self, pixels):
+        if self.config.trainer.get("slice_vae"):
+            result = []
+            for nx in range(pixels.shape[0]):
+                px = pixels[nx, ...].unsqueeze(0)
+                latent_dist = self.vae.encode(px.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
+                latents = latent_dist.sample() * 0.18215
+                result.append(latents)
+        
+            result = torch.stack(result).squeeze(1)
+            return result
         
         # Convert images to latent space
         latent_dist = self.vae.encode(pixels.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
         latents = latent_dist.sample() * 0.18215
+        return latents
+        
+            
+    def training_step(self, batch, batch_idx):
+        input_ids, pixels = batch[0], batch[1]
+        encoder_hidden_states = self.encode_tokens(input_ids)
+        latents = self.encode_pixels(pixels)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)

@@ -80,19 +80,7 @@ class ImageStore(Dataset):
         self.entries = []
         bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
         
-        for entry in self.dataset:
-            if Path(entry).is_file() and entry.endswith(".pth"):
-                latent_dataset = torch.load(entry)
-                self.latent_cache[entry] = latent_dataset
-                for k, v in latent_dataset.items():
-                    img = f"@{entry},{k}"
-                    prompt = v["prompts"]
-                    _, skip = self.process_tags(prompt)
-                    if skip: continue
-                    self.entries.append((img, prompt))
-                    bar.update(1)
-                continue
-            
+        for entry in self.dataset:            
             for x in Path(entry).iterdir():
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
@@ -116,12 +104,7 @@ class ImageStore(Dataset):
             max_length=self.max_length,
         ).input_ids 
 
-    def read_img(self, filepath, size):
-        if isinstance(filepath, str) and filepath.startswith("@"):
-            groups = filepath[1:].split(",")
-            item = self.latent_cache[groups[0]][groups[1]]
-            return item["latents_actual"] if size == item["size"] else item["latents_base"]
-            
+    def read_img(self, filepath):            
         img = Image.open(filepath)
         if not img.mode == "RGB":
             img = img.convert("RGB")
@@ -247,9 +230,6 @@ class AspectRatioDataset(ImageStore):
         return super().collate_fn(examples=examples)
 
     def transformer(self, img, size, center_crop=False):
-        if isinstance(img, torch.Tensor):
-            return img
-        
         x, y = img.size
         short, long = (x, y) if x <= y else (y, x)
 
@@ -299,9 +279,7 @@ class AspectRatioDataset(ImageStore):
             return {}
 
         prompt, _ = self.process_tags(self.prompt_cache[item_id])
-        image = self.read_img(item_id, size)
-        if not isinstance(image, torch.Tensor):
-            image = self.augment.transform(image, roll)
+        image = self.augment.transform(self.read_img(item_id), roll)
 
         if random.random() < self.ucg:
             prompt = ''
