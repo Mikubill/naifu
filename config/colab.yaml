@@ -9,7 +9,7 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  precision: fp16
+  precision: fp32
   use_ema: false
   half_encoder: true
   use_hivemind: false
