@@ -6,8 +6,9 @@ import torch.utils.checkpoint
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from lib.model import StableDiffusionModel, get_class
 from torch_ema import ExponentialMovingAverage
-from .encoder import FrozenOpenCLIPEmbedder
-from .utils import FrozenCustomEncoder
+from .utils import AbstractTokenizer
+from diffusers import StableDiffusionPipeline
+from transformers import CLIPTextModel, CLIPTokenizer
 
 # pip install diffusers accelerate transformers sentencepiece gradio ftfy open-clip-torch
 # clip_text: openai/clip-vit-large-patch14
@@ -27,7 +28,9 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
         scheduler_cls = get_class(config.scheduler.name)
         self.noise_scheduler = scheduler_cls(**config.scheduler.params)
         
-        self.tokenizer = FrozenCustomEncoder(FrozenOpenCLIPEmbedder(device="cpu"))
+        self.tokenizer = AbstractTokenizer()
+        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_path, subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained(self.model_path, subfolder="text_encoder")
         self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
              
@@ -48,12 +51,42 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
         if config.trainer.get("attention_slicing") == True:
             if hasattr(self.unet, "enable_attention_slicing"):
                 self.unet.enable_attention_slicing()
+                
+        if config.get("sampling"):
+            self.pipeline = StableDiffusionPipeline(
+                vae=self.vae, 
+                text_encoder=self.text_encoder, 
+                tokenizer=self._tokenizer,  
+                unet=self.unet, 
+                scheduler=self.noise_scheduler, 
+                safety_checker=None,
+                feature_extractor=None,
+                requires_safety_checker=False
+            )
+            self.pipeline.set_progress_bar_config(disable=True)
         
         # finally setup ema
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
             
         self.dataset.set_tokenizer(self.tokenizer)
-            
+        
     def encode_tokens(self, prompt):
-        return prompt
+        text_inputs = self._tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=self._tokenizer.model_max_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+        
+        text_input_ids = text_inputs.input_ids
+        attention_mask = None
+        if hasattr(self.text_encoder.config, "use_attention_mask") and self.text_encoder.config.use_attention_mask:
+            attention_mask = text_inputs.attention_mask.to(self.device)
+
+        text_embeddings = self.text_encoder(
+            text_input_ids.to(self.device),
+            attention_mask=attention_mask,
+        )        
+        return text_embeddings
