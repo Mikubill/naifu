@@ -49,9 +49,7 @@ class SampleCallback(Callback):
             negative_prompt=negative_prompts,
             generator=generator,
         ).images
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        del generator
 
         for j, image in enumerate(images):
             image.save(save_dir / f"nd_sample_e{trainer.current_epoch}_s{trainer.global_step}_{j}.png")

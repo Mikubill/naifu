@@ -14,7 +14,9 @@ trainer:
   use_ema: true
   use_hivemind: false
   use_xformers: false
+  lr_scale: linear
   attention_slicing: false
+  vae_slicing: false
   
 checkpoint:
   monitor: 'epoch'

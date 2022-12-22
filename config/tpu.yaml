@@ -10,12 +10,13 @@ trainer:
   clip_skip: 2
   seed: 1138
   precision: fp32
-  use_ema: false
   half_encoder: false
+  use_ema: false
   use_hivemind: false
   use_xformers: false
-  attention_slicing: false
   lr_scale: linear
+  attention_slicing: false
+  vae_slicing: false
 
 checkpoint:
   monitor: 'epoch'
