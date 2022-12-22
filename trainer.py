@@ -34,7 +34,9 @@ def main(args):
     # for experiment only
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
-    # model =LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+    # from experiment.lora import LoRADiffusionModel
+    # model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+    # strategy = "ddp"
     
     callbacks = []
     if config.monitor.huggingface_repo != "":
