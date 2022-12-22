@@ -16,6 +16,7 @@ trainer:
   use_xformers: false
   lr_scale: linear
   attention_slicing: false
+  vae_slicing: false
 
 checkpoint:
   monitor: 'epoch'

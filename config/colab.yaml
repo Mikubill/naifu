@@ -10,16 +10,16 @@ trainer:
   clip_skip: 2
   seed: 1138
   precision: fp32
-  use_ema: false
   half_encoder: true
+  use_ema: false
   use_hivemind: false
   lr_scale: linear
   attention_slicing: false
+  vae_slicing: false
 
   # note: only works with init_batch_size > 1
   use_xformers: false
 
-  
 checkpoint:
   monitor: 'epoch'
   dirpath: checkpoint

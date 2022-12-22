@@ -169,7 +169,7 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
     
     def encode_pixels(self, pixels):
-        if self.config.trainer.get("slice_vae"):
+        if self.config.trainer.get("vae_slicing"):
             result = []
             for nx in range(pixels.shape[0]):
                 px = pixels[nx, ...].unsqueeze(0)
