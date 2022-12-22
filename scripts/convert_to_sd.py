@@ -5,6 +5,7 @@
 import argparse
 import os.path as osp
 from pathlib import Path
+import torch.nn as nn
 import re
 
 import torch
@@ -274,6 +275,23 @@ def convert_text_enc_state_dict_v20(text_enc_dict):
 def convert_text_enc_state_dict(text_enc_dict):
     return text_enc_dict
 
+def weight_apply_lora(model, loras, alpha=1.0):
+    target_replace_module = ["CrossAttention", "Attention", "GEGLU"]
+    
+    for _module in model.modules():
+        if _module.__class__.__name__ not in target_replace_module:
+            continue 
+        for child in _module.modules():
+            if child.__class__.__name__ == "Linear":
+
+                weight = child.weight
+                up_weight = loras.pop(0).detach().to(weight.device)
+                down_weight = loras.pop(0).detach().to(weight.device)
+
+                # W <- W + U * D
+                weight = weight + alpha * (up_weight @ down_weight).type(weight.dtype)
+                child.weight = nn.Parameter(weight)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -283,6 +301,8 @@ if __name__ == "__main__":
     parser.add_argument("--unet-only", action="store_true", help="Only save unet in weights.")
     parser.add_argument("--use-ema", action="store_true", help="Use ema-unet instead of last-unet.")
     parser.add_argument("--base", default="CompVis/stable-diffusion-v1-4", type=str, help="Path to the base model.")
+    parser.add_argument("--use-lora", action="store_true", help="Apply lora weight to model.")
+    parser.add_argument("--lora-alpha", default=1.0, type=float)
 
     args = parser.parse_args()
 
@@ -308,6 +328,12 @@ if __name__ == "__main__":
             unet_ema = ExponentialMovingAverage(unet.parameters(), decay=0.995)
             unet_ema.load_state_dict(ema_weights)
             unet_ema.copy_to(unet.parameters())
+            unet_state_dict = unet.state_dict()
+            
+        if args.use_lora:
+            unet = UNet2DConditionModel.from_config(args.base, subfolder="unet")
+            unet.load_state_dict(unet_state_dict)
+            weight_apply_lora(unet, state_dict["lora"], args.lora_alpha)
             unet_state_dict = unet.state_dict()
     else:
         unet_state_dict = torch.load(osp.join(args.src, "unet", "diffusion_pytorch_model.bin"), map_location="cpu")
