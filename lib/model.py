@@ -215,6 +215,8 @@ class StableDiffusionModel(pl.LightningModule):
             raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
         loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        if torch.isnan(loss).any() or torch.isinf(loss).any():
+            raise FloatingPointError("Error infinite or NaN loss detected")
         
         # Logging to TensorBoard by default
         self.log("train_loss", loss)
