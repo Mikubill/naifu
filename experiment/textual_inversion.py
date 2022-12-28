@@ -67,8 +67,7 @@ class CustomEmbeddingsCallback(Callback):
                 name, vec = self.create_emb(entry, size, model)
             else:
                 name, vec = self.load_emb(entry)
-
-            self.embs[name] = torch.nn.Parameter(vec, requires_grad=name in trainable_concepts or self.config.train_all)                
+            self.embs[name] = vec              
                     
         self.trainable_concepts = trainable_concepts
         self.clip_keywords = [' '.join(s) for s in self.make_token_names(self.embs)]
@@ -160,7 +159,7 @@ class CustomEmbeddingsCallback(Callback):
         mask = torch.zeros_like(emb_layer.weight.data, dtype=int)
         offset = len(mask) - n_added
         for name, vec in self.embs.items():
-            if name in self.trainable_concepts:
+            if name in self.trainable_concepts or self.config.train_all:
                 mask[offset:offset+len(vec)] = 1
             offset += len(vec)
             
@@ -189,8 +188,8 @@ class CustomEmbeddingsCallback(Callback):
         if self.trainer.every_n_epochs == -1:
             return super().on_train_epoch_end(trainer, pl_module)
         
-        # if trainer.current_epoch % self.config.trainer.every_n_epochs == 0 and trainer.current_epoch > 0:
-        self.save_emb(trainer.global_step, pl_module)
+        if trainer.current_epoch % self.config.trainer.every_n_epochs == 0 and trainer.current_epoch > 0:
+            self.save_emb(trainer.global_step, pl_module)
 
     def on_train_start(self, trainer, pl_module):
         self.setup_embs(pl_module)
