@@ -92,8 +92,8 @@ class CustomEmbeddingsCallback(Callback):
             if counter.get(n) == None and n in self.trainable_concepts:
                 notused.append(n)
                 
-        if len(n) > 0:        
-            print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: [{n}]")
+        if len(notused) > 0:        
+            print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: {notused}")
                     
         
     def parse_prompt(self, prompt: str):
