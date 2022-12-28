@@ -234,7 +234,7 @@ class CustomEmbeddingsCallback(Callback):
         self.setup_embs(pl_module)
 
     def on_train_start(self, trainer, pl_module):
-        self.preliminary_check()
+        self.preliminary_check(pl_module)
         param_to_optimize = [
             {"params": pl_module.unet.parameters()}, 
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
