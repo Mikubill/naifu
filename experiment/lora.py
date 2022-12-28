@@ -87,14 +87,9 @@ def save_lora_weight(model):
 class LoRADiffusionModel(StableDiffusionModel):
     def __init__(self, model_path, config, batch_size):
         super().__init__(model_path, config, batch_size)
-        self.config = config
-        self.model_path = model_path
-        self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
-        self.lr = self.config.optimizer.params.lr
-        self.batch_size = batch_size 
         
-    def setup(self, stage):
-        super().setup(stage)
+    def init_model(self):
+        super().init_model()
         self.unet.requires_grad_(False)
         self.params_to_optim, _ = inject_trainable_lora(self.unet, self.config.lora.rank)
         
