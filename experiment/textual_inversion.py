@@ -180,6 +180,9 @@ class CustomEmbeddingsCallback(Callback):
         tokenizer.prepare_for_tokenization = prepare_for_tokenization.__get__(tokenizer, CLIPTokenizer)
         
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):    
+        if self.config.trainer.max_epochs > 0 and trainer.current_epoch > self.config.trainer.max_epochs:
+            return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+            
         if self.trainer.every_n_steps == -1:
             return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         
@@ -187,6 +190,12 @@ class CustomEmbeddingsCallback(Callback):
             self.save_emb(trainer.global_step, pl_module)
         
     def on_train_epoch_end(self, trainer, pl_module):
+        if self.config.trainer.max_epochs > 0:
+            if trainer.current_epoch == self.config.trainer.max_epochs:
+                pl_module.text_encoder.get_input_embeddings().weight.register_hook(lambda grad: torch.zeros_like(grad))
+            elif trainer.current_epoch > self.config.trainer.max_epochs:
+                return super().on_train_epoch_end(trainer, pl_module)
+        
         if self.trainer.every_n_epochs == -1:
             return super().on_train_epoch_end(trainer, pl_module)
         
