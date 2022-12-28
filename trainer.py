@@ -30,13 +30,28 @@ def main(args):
         
         
     model = load_model(args.model_path, config)
+
+    # for ddp-optimize only
+    # from torch.distributed.algorithms.ddp_comm_hooks import post_localSGD_hook as post_localSGD
+    # strategy = pl.strategies.DDPStrategy(
+    #     find_unused_parameters=False,
+    #     gradient_as_bucket_view=True,
+    #     ddp_comm_state=post_localSGD.PostLocalSGDState(
+    #         process_group=None,
+    #         subgroup=None,
+    #         start_localSGD_iter=8,
+    #     ),
+    #     ddp_comm_hook=post_localSGD.post_localSGD_hook,
+    #     model_averaging_period=4,
+    # )
     
     # for experiment only
     # from experiment.models import MultiEncoderDiffusionModel
     # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     # from experiment.lora import LoRADiffusionModel
     # model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
-    # strategy = "ddp"
+    # from experiment.kwlenc import MixinModel
+    # model = MixinModel(args.model_path, config, config.trainer.init_batch_size)
     
     callbacks = []
     if config.monitor.huggingface_repo != "":
@@ -51,6 +66,10 @@ def main(args):
     if config.monitor.wandb_id != "":
         logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
+        
+    if config.get("custom_embeddings"):
+        from experiment.textual_inversion import CustomEmbeddingsCallback
+        callbacks.append(CustomEmbeddingsCallback(config.custom_embeddings))
         
     sp =  config.get("sampling")
     if sp != None and sp.enabled:

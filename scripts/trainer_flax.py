@@ -2,8 +2,6 @@ import logging
 import math
 import os
 
-from experiment.utils import AbstractTokenizer
-from experiment.encoder import FrozenOpenCLIPEmbedder
 import torch
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
@@ -71,15 +69,40 @@ def main():
     world_size = jax.local_device_count()
     dataset_cls = AspectRatioDataset if config.arb.enabled else ImageStore
     total_train_batch_size = config.trainer.init_batch_size * jax.local_device_count()
-        
+
+    weight_dtype = jnp.float32
+    if config.trainer.precision == "fp16":
+        weight_dtype = jnp.float16
+    elif config.trainer.precision == "bf16":
+        weight_dtype = jnp.bfloat16
+
+    # Load models and create wrapper for stable diffusion
+    tokenizer = CLIPTokenizer.from_pretrained(config.trainer.model_path, subfolder="tokenizer")
+    noise_scheduler = FlaxDDPMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
+    text_encoder = FlaxCLIPTextModel.from_pretrained(config.trainer.model_path, subfolder="text_encoder", dtype=weight_dtype, from_pt=True)
+    vae, vae_params = FlaxAutoencoderKL.from_pretrained(config.trainer.model_path, subfolder="vae", dtype=weight_dtype, from_pt=True)
+    unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(config.trainer.model_path, subfolder="unet", dtype=weight_dtype, from_pt=True)
+
+  
     # init Dataset
     dataset = dataset_cls(
         size=config.trainer.resolution,
         seed=config.trainer.seed,
         rank=local_rank,
         init=not config.arb.enabled,
+        tokenizer=tokenizer,
         **config.dataset
     )
+    
+    def collate_fn(examples):
+        input_ids, pixel_value = dataset.collate_fn(examples)
+        batch = {
+            "pixel_values": pixel_value,
+            "input_ids": input_ids,
+        }
+        batch = {k: v.numpy() for k, v in batch.items()}
+        return batch
+
         
     # init sampler
     data_sampler = AspectRatioSampler(
@@ -92,29 +115,13 @@ def main():
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        collate_fn=dataset.collate_fn,
+        collate_fn=collate_fn,
         sampler=data_sampler,
         num_workers=config.dataset.num_workers,
         batch_size=1 if data_sampler else total_train_batch_size,
         persistent_workers=True,
     )
-
-    weight_dtype = jnp.float32
-    if config.trainer.precision == "fp16":
-        weight_dtype = jnp.float16
-    elif config.trainer.precision == "bf16":
-        weight_dtype = jnp.bfloat16
-
-    # Load models and create wrapper for stable diffusion
-    text_encoder_internal = FrozenOpenCLIPEmbedder(device="cpu")
-    tokenizer_internal = AbstractTokenizer()
     
-    tokenizer = CLIPTokenizer.from_pretrained(config.trainer.model_path, subfolder="tokenizer")
-    noise_scheduler = FlaxDDPMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
-    text_encoder = FlaxCLIPTextModel.from_pretrained(config.trainer.model_path, subfolder="text_encoder", dtype=weight_dtype, from_pt=True)
-    vae, vae_params = FlaxAutoencoderKL.from_pretrained(config.trainer.model_path, subfolder="vae", dtype=weight_dtype, from_pt=True)
-    unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(config.trainer.model_path, subfolder="unet", dtype=weight_dtype, from_pt=True)
-
     # Optimization
     learning_rate = config.optimizer.params.lr * total_train_batch_size
     if config.trainer.lr_scale == "sqrt":
@@ -130,7 +137,6 @@ def main():
     adamw = optax.adamw(learning_rate=lr_scheduler)
     optimizer = optax.chain(optax.clip_by_global_norm(config.lightning.gradient_clip_val), adamw)
     state = train_state.TrainState.create(apply_fn=unet.__call__, params=unet_params, tx=optimizer)
-    dataset.set_tokenizer(tokenizer_internal)
     
     # Initialize our training
     rng = jax.random.PRNGKey(config.trainer.seed)
@@ -141,9 +147,10 @@ def main():
         dropout_rng, sample_rng, new_train_rng = jax.random.split(train_rng, 3)
 
         def compute_loss(params):
-            encoder_hidden_states, pixels = batch
             # Convert images to latent space
-            vae_outputs = vae.apply({"params": vae_params}, pixels, deterministic=True, method=vae.encode)
+            vae_outputs = vae.apply(
+                {"params": vae_params}, batch["pixel_values"], deterministic=True, method=vae.encode
+            )
             latents = vae_outputs.latent_dist.sample(sample_rng)
             
             # (NHWC) -> (NCHW)
@@ -161,11 +168,26 @@ def main():
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+            
+            # Get the text embedding for conditioning
+            encoder_hidden_states = text_encoder(
+                batch["input_ids"],
+                params=text_encoder_params,
+                train=False,
+            )[0]
 
             # Predict the noise residual and compute loss
             unet_outputs = unet.apply({"params": params}, noisy_latents, timesteps, encoder_hidden_states, train=True)
             noise_pred = unet_outputs.sample
-            loss = (noise - noise_pred) ** 2
+            
+            if noise_scheduler.config.prediction_type == "epsilon":
+                target = noise
+            elif noise_scheduler.config.prediction_type == "v_prediction":
+                target = noise_scheduler.get_velocity(latents, noise, timesteps)
+            else:
+                raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+            
+            loss = (target - noise_pred) ** 2
             loss = loss.mean()
 
             return loss
@@ -201,19 +223,16 @@ def main():
         train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
         # train
         for batch in dataloader:
-            batch[0] = text_encoder_internal(batch[0])
-            batch = shard([jnp.array(batch[0]), jnp.array(batch[1])])
+            batch = shard(batch)
             state, train_metric, train_rngs = p_train_step(state, vae_params, batch, train_rngs)
+            print(train_metric)
             train_metrics.append(train_metric)
             train_step_progress_bar.update(1)
-
             global_step += 1
-            if global_step >= args.max_train_steps:
-                break
 
         train_metric = jax_utils.unreplicate(train_metrics)
         train_step_progress_bar.close()
-        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+        epochs.write(f"Epoch... ({epoch + 1}/{config.lightning.max_epochs} | Loss: {train_metrics})")
 
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
@@ -229,7 +248,7 @@ def main():
         )
 
         pipeline.save_pretrained(
-            args.output_dir,
+            config.trainer.model_path + "_trained",
             params={
                 "text_encoder": get_params_to_save(text_encoder_params),
                 "vae": get_params_to_save(vae_params),
@@ -237,7 +256,7 @@ def main():
             },
         )
 
-        if args.push_to_hub:
+        if config.monitor.huggingface_repo != "":
             repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
 
 
