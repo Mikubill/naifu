@@ -79,7 +79,6 @@ class CustomEmbeddingsCallback(Callback):
         self.trainable_concepts = trainable_concepts
         self.clip_keywords = [' '.join(s) for s in self.make_token_names(self.embs)]
         self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
-        self.hook_clip(model.text_encoder, model.tokenizer)
         
     def preliminary_check(self, model):
         counter = {}
@@ -233,6 +232,7 @@ class CustomEmbeddingsCallback(Callback):
         self.setup_embs(pl_module)
 
     def on_train_start(self, trainer, pl_module):
+        self.hook_clip(pl_module.text_encoder, pl_module.tokenizer)
         self.preliminary_check(pl_module)
         param_to_optimize = [
             {"params": pl_module.unet.parameters()}, 
