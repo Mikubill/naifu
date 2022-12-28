@@ -34,6 +34,7 @@ class ImageStore(Dataset):
         augment=None,
         process_tags=True,
         tokenizer=None,
+        important_tags=[],
         **kwargs
     ):
         self.size = size
@@ -44,6 +45,7 @@ class ImageStore(Dataset):
         self.tokenizer=tokenizer
         self.rank = rank
         self.dataset = img_path
+        self.important_tags = important_tags
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
@@ -142,16 +144,12 @@ class ImageStore(Dataset):
             if tag in self.yandere_tags:
                 if self.yandere_tags[tag]["type"] == 6:
                     skip_image = True
-            
-        #     if self.yandere_tags[tag]["type"] in [2, 4, 5]:
-        #         counts.append(int(self.yandere_tags[tag]["count"]))
-                
-        # if len(self.yandere_tags) > 0 and max(counts) < 50:
-        #     skip_image = True
                       
         for tag in tag_dict.keys():
             # For danbooru tags.
             parts = tag.split(":", 1)
+            if parts[0] in self.important_tags and random.random() < keep_important:
+                base_chosen.append(tag)
             if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
                 base_chosen.append(tag)
             if len(parts[-1]) > 1 and parts[-1][0] in ["1", "2", "3", "4", "5", "6"] and parts[-1][1:] in ["boy", "boys", "girl", "girls"]:
