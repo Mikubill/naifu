@@ -32,19 +32,12 @@ class StableDiffusionModel(pl.LightningModule):
         self.lr = self.config.optimizer.params.lr
         self.batch_size = batch_size 
         self.save_hyperparameters(config)
+        self.init_model()
         
-    def prepare_data(self):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                Path(dlpath).mkdir(exist_ok=True)
-                download(entry, dlpath)
-                self.config.dataset.img_path[k] = dlpath
-            
-    def setup(self, stage):
+    def init_model(self):
         config = self.config
         scheduler_cls = DDIMScheduler
-        
+            
         if (Path(self.model_path) / "model.ckpt").is_file():
             # use autoconvert
             self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = load_sd_checkpoint(self.model_path)   
@@ -95,7 +88,16 @@ class StableDiffusionModel(pl.LightningModule):
                 requires_safety_checker=False
             )
             self.pipeline.set_progress_bar_config(disable=True)
+        
+    def prepare_data(self):
+        for k, entry in enumerate(self.config.dataset.img_path):
+            if entry.startswith("https://") or entry.startswith("http://"):
+                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
+                Path(dlpath).mkdir(exist_ok=True)
+                download(entry, dlpath)
+                self.config.dataset.img_path[k] = dlpath
             
+    def setup(self, stage):
         for k, entry in enumerate(self.config.dataset.img_path):
             if entry.startswith("https://") or entry.startswith("http://"):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")

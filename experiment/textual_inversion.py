@@ -49,6 +49,11 @@ class CustomEmbeddingsCallback(Callback):
         assert Path(config.weights_path).is_dir(), f"No such file or directory: {config.weights_path}"
         self.save_path = Path(config.trainer.save_path) if config.trainer.save_path != None else Path(config.weights_path) / "checkpoints" 
         self.save_path.mkdir(exist_ok=True)
+        
+        if self.config.get("use_wandb"):
+            import wandb
+            self.model_artifact = wandb.Artifact("embeddings", type='model')
+            self.model_artifact.add_dir(self.save_path)
       
     def setup_embs(self, model):
         vec_match = re.compile(r":(\d+)v$")
@@ -75,6 +80,23 @@ class CustomEmbeddingsCallback(Callback):
         self.clip_keywords = [' '.join(s) for s in self.make_token_names(self.embs)]
         self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
         self.hook_clip(model.text_encoder, model.tokenizer)
+        
+    def preliminary_check(self, model):
+        counter = {}
+        map(lambda name: counter.setdefault(name, 0), self.embs.keys())
+        for entry in model.dataset.entries:
+            for name in self.embs.keys():
+                if name in entry[1]: # prompt
+                    counter[name] += 1
+        
+        notused = []
+        for n, v in counter.items():
+            if v == 0 and n in self.trainable_concepts:
+                notused.append(n)
+                
+        if len(n) > 0:        
+            print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: [{n}]")
+                    
         
     def parse_prompt(self, prompt: str):
         """Parse a prompt string into a list of embedding names and a list of tokens.
@@ -144,6 +166,10 @@ class CustomEmbeddingsCallback(Callback):
                 embedding = Embedding(params[:length], entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
             params = params[length:]
+         
+        if self.config.use_wandb:   
+            import wandb
+            wandb.log_artifact(self.model_artifact, aliases=[f'step {step}'])
         
     def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
@@ -203,9 +229,12 @@ class CustomEmbeddingsCallback(Callback):
         
         if trainer.current_epoch % self.config.trainer.every_n_epochs == 0 and trainer.current_epoch > 0:
             self.save_emb(trainer.global_step, pl_module)
+            
+    def setup(self, trainer, pl_module, stage: str):
+        self.setup_embs(pl_module)
 
     def on_train_start(self, trainer, pl_module):
-        self.setup_embs(pl_module)
+        self.preliminary_check()
         param_to_optimize = [
             {"params": pl_module.unet.parameters()}, 
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
