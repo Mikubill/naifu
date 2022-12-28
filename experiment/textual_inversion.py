@@ -83,15 +83,14 @@ class CustomEmbeddingsCallback(Callback):
         
     def preliminary_check(self, model):
         counter = {}
-        map(lambda name: counter.setdefault(name, 0), self.embs.keys())
         for entry in model.dataset.entries:
             for name in self.embs.keys():
                 if name in entry[1]: # prompt
-                    counter[name] += 1
+                    counter[name] = 1
         
         notused = []
         for n, v in counter.items():
-            if v == 0 and n in self.trainable_concepts:
+            if counter.get(n) == None and n in self.trainable_concepts:
                 notused.append(n)
                 
         if len(n) > 0:        
