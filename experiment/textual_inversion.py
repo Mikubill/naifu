@@ -54,6 +54,7 @@ class CustomEmbeddingsCallback(Callback):
             import wandb
             self.model_artifact = wandb.Artifact("embeddings", type='model')
             self.model_artifact.add_dir(self.save_path)
+            wandb.log_artifact(self.model_artifact)
       
     def setup_embs(self, model):
         vec_match = re.compile(r":(\d+)v$")
@@ -164,10 +165,6 @@ class CustomEmbeddingsCallback(Callback):
                 embedding = Embedding(params[:length], entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
             params = params[length:]
-         
-        if self.config.use_wandb:   
-            import wandb
-            wandb.log_artifact(self.model_artifact, aliases=[f'step {step}'])
         
     def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
