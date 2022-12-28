@@ -3,6 +3,7 @@ import torch
 from pathlib import Path
 from pytorch_lightning import Callback
 from transformers import CLIPTokenizer, CLIPTextModel
+from pytorch_lightning.utilities import rank_zero_only
 
 class Embedding:
     def __init__(self, vec, name, step=None):
@@ -48,7 +49,7 @@ class CustomEmbeddingsCallback(Callback):
         assert Path(config.weights_path).is_dir(), f"No such file or directory: {config.weights_path}"
         self.save_path = Path(config.trainer.save_path) if config.trainer.save_path != None else Path(config.weights_path) / "checkpoints" 
         self.save_path.mkdir(exist_ok=True)
-        
+      
     def setup_embs(self, model):
         vec_match = re.compile(r":(\d+)v$")
         concepts = self.config.concepts.freeze + self.config.concepts.trainable
@@ -132,6 +133,7 @@ class CustomEmbeddingsCallback(Callback):
             all_tokens.append(tokens)
         return all_tokens
     
+    @rank_zero_only 
     def save_emb(self, step, model):
         lengths = [(k, v.shape[0]) for k, v in self.embs.items()]
         params = model.text_encoder.get_input_embeddings().weight.data
