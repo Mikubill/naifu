@@ -5,6 +5,7 @@ custom_embeddings:
   weights_path: 
   load_all: false
   train_all: false
+  use_wandb: false
   trainer:
     save_path: 
     lr: 1e-3

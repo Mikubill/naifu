@@ -67,7 +67,7 @@ def main(args):
         logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
         
-    if config.get("custom_embeddings"):
+    if config.get("custom_embeddings") != None and config.custom_embeddings.enabled:
         from experiment.textual_inversion import CustomEmbeddingsCallback
         callbacks.append(CustomEmbeddingsCallback(config.custom_embeddings))
         
