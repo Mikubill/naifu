@@ -8,6 +8,7 @@ custom_embeddings:
   trainer:
     save_path: 
     lr: 1e-3
+    max_epochs: -1
     every_n_epochs: 1
     every_n_steps: 200
   concepts: 
