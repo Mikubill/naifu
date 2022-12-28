@@ -4,7 +4,7 @@ from huggingface_hub.constants import ENDPOINT
 from omegaconf import OmegaConf
 from pytorch_lightning import Callback
 
-
+import copy
 import torch
 from pathlib import Path
 from pytorch_lightning.utilities import rank_zero_only
@@ -40,15 +40,18 @@ class SampleCallback(Callback):
         
         negative_prompts = list(self.config.negative_prompts) if OmegaConf.is_list(self.config.negative_prompts) else self.config.negative_prompts
         prompts = list(self.config.prompts) if OmegaConf.is_list(self.config.prompts) else self.config.prompts
-        images = pipeline(
-            prompt=prompts,
-            height=self.config.height,
-            width=self.config.width,
-            num_inference_steps=self.config.steps,
-            guidance_scale=self.config.cfg_scale,
-            negative_prompt=negative_prompts,
-            generator=generator,
-        ).images
+        prompt_to_gen = copy.deepcopy(prompts)
+        images = []
+        while len(prompt_to_gen) > 0:
+            images.extend(pipeline(
+                prompt=prompt_to_gen.pop(0),
+                height=self.config.height,
+                width=self.config.width,
+                num_inference_steps=self.config.steps,
+                guidance_scale=self.config.cfg_scale,
+                negative_prompt=negative_prompts.pop(0),
+                generator=generator,
+            ).images)
         del generator
 
         for j, image in enumerate(images):
