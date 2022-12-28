@@ -11,8 +11,8 @@ from lib.model import StableDiffusionModel, get_class
 # t5_text: google/flan-t5-base
     
 class MixinModel(StableDiffusionModel):        
-    def setup(self, stage):
-        super().setup(stage)
+    def init_model(self):
+        super().init_mdoel()
         self.unet_prior = [UNet2DConditionModel.from_pretrained("/root/workspace/animesfw/unet")]
         assert self.noise_scheduler.config.prediction_type == "epsilon"
         

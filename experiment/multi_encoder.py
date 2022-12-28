@@ -23,7 +23,7 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
         self.lr = self.config.optimizer.params.lr
         self.batch_size = batch_size 
         
-    def setup(self, stage):      
+    def init_model(self):      
         config = self.config 
         scheduler_cls = get_class(config.scheduler.name)
         self.noise_scheduler = scheduler_cls(**config.scheduler.params)
@@ -68,8 +68,6 @@ class MultiEncoderDiffusionModel(StableDiffusionModel):
         # finally setup ema
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-            
-        self.dataset.set_tokenizer(self.tokenizer)
         
     def encode_tokens(self, prompt):
         text_inputs = self._tokenizer(
