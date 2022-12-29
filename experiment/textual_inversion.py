@@ -50,12 +50,6 @@ class CustomEmbeddingsCallback(Callback):
         assert Path(config.weights_path).is_dir(), f"No such file or directory: {config.weights_path}"
         self.save_path = Path(config.trainer.save_path) if config.trainer.save_path != None else Path(config.weights_path) / "checkpoints" 
         self.save_path.mkdir(exist_ok=True)
-        
-        if self.config.get("use_wandb"):
-            import wandb
-            self.model_artifact = wandb.Artifact("embeddings", type='model')
-            self.model_artifact.add_dir(self.save_path)
-            wandb.log_artifact(self.model_artifact)
       
     def setup_embs(self, model):
         vec_match = re.compile(r":(\d+)v$")
@@ -81,6 +75,12 @@ class CustomEmbeddingsCallback(Callback):
         self.trainable_concepts = trainable_concepts
         self.clip_keywords = [' '.join(s) for s in self.make_token_names(self.embs)]
         self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
+        
+        self.use_wandb = False
+        if self.config.get("use_wandb"):
+            import wandb
+            self.use_wandb = True
+            self.wandb_run = wandb.init(reinit=False)
         
     def preliminary_check(self, model):
         counter = {}
@@ -155,21 +155,27 @@ class CustomEmbeddingsCallback(Callback):
         return all_tokens
     
     @rank_zero_only 
-    def save_emb(self, step, model):
+    def save_emb(self, step, epoch, model):
+        if self.use_wandb:
+            import wandb
+            model_artifact = wandb.Artifact(f"embeddings-{self.wandb_run.id}", type='model', metadata={
+                'epochs_trained': epoch,
+                'steps_trained': step
+            })
         lengths = [(k, v.shape[0]) for k, v in self.embs.items()]
         params = model.text_encoder.get_input_embeddings().weight.data
-        params = params[-sum([p[1] for p in lengths]):].detach().cpu()
+        params = params[-sum([p[1] for p in lengths]):].detach().clone().cpu()
         for item in lengths:
             entry, length = item
             if entry in self.trainable_concepts:
-                embedding = Embedding(params[:length], entry, step=step)
+                embedding = Embedding(params[:length].clone(), entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
+                if self.use_wandb:
+                    model_artifact.add_file(self.save_path / f"{entry}_s{step}.pt")
             params = params[length:]
             
-        if self.config.get("use_wandb"):
-            import wandb
-            self.model_artifact.wait()
-            wandb.log_artifact(self.model_artifact)
+        if self.use_wandb:
+            wandb.log_artifact(model_artifact, aliases=['latest', 'last', f'epoch {epoch}', f'step {step}'])
         
     def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
@@ -215,7 +221,7 @@ class CustomEmbeddingsCallback(Callback):
             return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         
         if trainer.global_step % self.config.trainer.every_n_steps == 0 and trainer.global_step > 0:
-            self.save_emb(trainer.global_step, pl_module)
+            self.save_emb(trainer.global_step, trainer.current_epoch, pl_module)
         
     def on_train_epoch_end(self, trainer, pl_module):
         if self.config.trainer.max_epochs > 0:
@@ -228,7 +234,7 @@ class CustomEmbeddingsCallback(Callback):
             return super().on_train_epoch_end(trainer, pl_module)
         
         if trainer.current_epoch % self.config.trainer.every_n_epochs == 0 and trainer.current_epoch > 0:
-            self.save_emb(trainer.global_step, pl_module)
+            self.save_emb(trainer.global_step, trainer.current_epoch, pl_module)
             
     def setup(self, trainer, pl_module, stage: str):
         self.setup_embs(pl_module)
