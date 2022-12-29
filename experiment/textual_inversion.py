@@ -176,19 +176,23 @@ class CustomEmbeddingsCallback(Callback):
             
         if self.use_wandb:
             wandb.log_artifact(model_artifact, aliases=['latest', 'last', f'epoch {epoch}', f'step {step}'])
-        
-    def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
+            
+    def setup_clip(self, clip, tokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
         token_names = self.make_token_names(self.embs)
         token_names = [t for sublist in token_names for t in sublist]  # flatten nested list
 
         # add emb tokens to tokenizer
         n_added = tokenizer.add_tokens(token_names)
-        delta_embeddings = torch.cat([item for item in self.embs.values()], dim=0)
         assert n_added == sum([len(item) for item in self.embs.values()]), f"Unexpected number of tokens added: {n_added}. Try make the emb names are less nasty."
 
         # append TI embeddings to CLIP embedding table
         clip.resize_token_embeddings(len(tokenizer))
+        
+    def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
+        n_added = sum([len(item) for item in self.embs.values()])
+        delta_embeddings = torch.cat([item for item in self.embs.values()], dim=0)
+        
         emb_layer = clip.get_input_embeddings()
         emb_layer.weight.data[-n_added:] = delta_embeddings
         
@@ -238,6 +242,7 @@ class CustomEmbeddingsCallback(Callback):
             
     def setup(self, trainer, pl_module, stage: str):
         self.setup_embs(pl_module)
+        self.setup_clip(pl_module.text_encoder, pl_module.tokenizer)
 
     def on_train_start(self, trainer, pl_module):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer)
@@ -254,3 +259,5 @@ class CustomEmbeddingsCallback(Callback):
         ]
         optimizer = trainer.optimizers[0].__class__(param_to_optimize, **pl_module.config.optimizer.params)
         trainer.optimizers = [optimizer]
+        
+        
