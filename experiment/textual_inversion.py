@@ -76,8 +76,11 @@ class CustomEmbeddingsCallback(Callback):
         self.trainable_concepts = trainable_concepts
         self.clip_keywords = [' '.join(s) for s in self.make_token_names(self.embs)]
         self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
-        
         self.use_wandb = False
+        self.init_wandb()
+    
+    @rank_zero_only
+    def init_wandb(self):
         if self.config.get("use_wandb"):
             import wandb
             self.use_wandb = True
