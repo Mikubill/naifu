@@ -137,18 +137,10 @@ class LoRADiffusionModel(StableDiffusionModel):
         if self.config.lightning.auto_lr_find:
             self.config.optimizer.params.lr = self.lr
             
-        # Scale LR OPs
-        f = self.trainer.accumulate_grad_batches * self.config.trainer.init_batch_size * self.trainer.num_nodes * self.trainer.num_devices
-        if self.config.trainer.lr_scale == "linear":
-            self.config.optimizer.params.lr *= f
+        new_lr, scaled = self.get_scaled_lr(self.config.optimizer.params.lr)
+        if scaled:
+            self.config.optimizer.params.lr = new_lr
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
-        elif self.config.trainer.lr_scale == "sqrt":
-            self.config.optimizer.params.lr *= math.sqrt(f)
-            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
-        elif self.config.trainer.lr_scale == "none":
-            pass
-        else:
-            raise ValueError(self.config.lr_scale)
         
         optimizer = get_class(self.config.optimizer.name)(
             itertools.chain(*self.params_to_optim), 

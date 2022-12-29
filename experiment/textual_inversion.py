@@ -1,3 +1,4 @@
+import math
 import re
 import torch
 from pathlib import Path
@@ -236,6 +237,12 @@ class CustomEmbeddingsCallback(Callback):
     def on_train_start(self, trainer, pl_module):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer)
         self.preliminary_check(pl_module)
+        
+        new_lr, scaled = self.get_scaled_lr(self.config.trainer.lr)
+        if scaled:
+            self.config.trainer.lr = new_lr
+            rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
+        
         param_to_optimize = [
             {"params": pl_module.unet.parameters()}, 
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
