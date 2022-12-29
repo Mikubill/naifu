@@ -246,16 +246,18 @@ class CustomEmbeddingsCallback(Callback):
         self.setup_embs(pl_module)
         self.setup_clip(pl_module.text_encoder, pl_module.tokenizer)
         self.init_weight = True
+        original_configure_optimizers = pl_module.configure_optimizers
         outer = self
         
         def configure_optimizers(self):
-            return outer.hook_optimizers(self)
+            optimizers, _ = original_configure_optimizers()
+            return outer.hook_optimizers(self, optimizers)
         pl_module.configure_optimizers = configure_optimizers.__get__(pl_module, StableDiffusionModel)
         
     def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:
         self.init_weight = False
 
-    def hook_optimizers(self, pl_module):
+    def hook_optimizers(self, pl_module, optimizers):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         self.preliminary_check(pl_module)
         
@@ -264,15 +266,15 @@ class CustomEmbeddingsCallback(Callback):
             self.config.trainer.lr = new_lr
             rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
         
-        param_to_optimize = [
-            {"params": pl_module.unet.parameters()}, 
+        param_to_optimize = optimizers[0].param_groups
+        param_to_optimize.append(
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
-        ]
+        )
         optimizer = get_class(pl_module.config.optimizer.name)(
             param_to_optimize, **pl_module.config.optimizer.params
         )
         scheduler = get_class(pl_module.config.lr_scheduler.name)(
-            optimizer=optimizer,
-            **pl_module.config.lr_scheduler.params
+            optimizer=optimizer, **pl_module.config.lr_scheduler.params
         )
+
         return [[optimizer], [scheduler]]
