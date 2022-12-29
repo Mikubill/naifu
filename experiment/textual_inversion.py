@@ -1,5 +1,6 @@
 import math
 import re
+from lib.model import StableDiffusionModel, get_class
 import torch
 from pathlib import Path
 from pytorch_lightning import Callback
@@ -189,12 +190,13 @@ class CustomEmbeddingsCallback(Callback):
         # append TI embeddings to CLIP embedding table
         clip.resize_token_embeddings(len(tokenizer))
         
-    def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
+    def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer, init_weight=True):
         n_added = sum([len(item) for item in self.embs.values()])
-        delta_embeddings = torch.cat([item for item in self.embs.values()], dim=0)
-        
         emb_layer = clip.get_input_embeddings()
-        emb_layer.weight.data[-n_added:] = delta_embeddings
+        
+        if init_weight:
+            delta_embeddings = torch.cat([item for item in self.embs.values()], dim=0)
+            emb_layer.weight.data[-n_added:] = delta_embeddings
         
         mask = torch.zeros_like(emb_layer.weight.data, dtype=int)
         offset = len(mask) - n_added
@@ -243,9 +245,18 @@ class CustomEmbeddingsCallback(Callback):
     def setup(self, trainer, pl_module, stage: str):
         self.setup_embs(pl_module)
         self.setup_clip(pl_module.text_encoder, pl_module.tokenizer)
+        self.init_weight = True
+        outer = self
+        
+        def configure_optimizers(self):
+            return outer.hook_optimizers(self)
+        pl_module.configure_optimizers = configure_optimizers.__get__(pl_module, StableDiffusionModel)
+        
+    def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:
+        self.init_weight = False
 
-    def on_train_start(self, trainer, pl_module):
-        self.hook_clip(pl_module.text_encoder, pl_module.tokenizer)
+    def hook_optimizers(self, pl_module):
+        self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         self.preliminary_check(pl_module)
         
         new_lr, scaled = pl_module.get_scaled_lr(self.config.trainer.lr)
@@ -257,7 +268,11 @@ class CustomEmbeddingsCallback(Callback):
             {"params": pl_module.unet.parameters()}, 
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
         ]
-        optimizer = trainer.optimizers[0].__class__(param_to_optimize, **pl_module.config.optimizer.params)
-        trainer.optimizers = [optimizer]
-        
-        
+        optimizer = get_class(pl_module.config.optimizer.name)(
+            param_to_optimize, **pl_module.config.optimizer.params
+        )
+        scheduler = get_class(pl_module.config.lr_scheduler.name)(
+            optimizer=optimizer,
+            **pl_module.config.lr_scheduler.params
+        )
+        return [[optimizer], [scheduler]]
