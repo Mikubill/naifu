@@ -75,7 +75,7 @@ class CustomEmbeddingsCallback(Callback):
                 size = int(size[0]) if len(size) > 0 else 2
                 name, vec = self.create_emb(entry, size, model)
             else:
-                name, vec = self.load_emb(fp)
+                name, vec = self.load_emb(fp, model)
             self.embs[name] = vec              
                     
         self.trainable_concepts = trainable_concepts
@@ -121,8 +121,7 @@ class CustomEmbeddingsCallback(Callback):
         return emb_name, vec
 
     @staticmethod
-    def load_emb(path):
-        
+    def load_emb(path, model):
         filename = path.stem 
         data = torch.load(path, map_location='cpu')
         
@@ -143,7 +142,7 @@ class CustomEmbeddingsCallback(Callback):
         else:
             raise Exception(f"Couldn't identify {filename} as neither textual inversion embedding nor diffuser concept.")
 
-        vec = emb.detach().to("cuda", dtype=torch.float32)
+        vec = emb.detach().to(model.device, dtype=torch.float32)
         print(f"Loaded: {path} \t[{vec.shape[0]},{vec.shape[1]}]")
         return filename, vec
 
