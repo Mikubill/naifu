@@ -11,9 +11,9 @@ custom_embeddings:
     lr: 1e-3
     max_epochs: -1
     every_n_epochs: 1
-    every_n_steps: 200
+    every_n_steps: -1
   concepts: 
-    freeze: [aoaoko, minato_aqua, bbss] 
+    freeze: [aoaoko, aqua, bbss] 
     trainable: [momoko, ao, crosschan, nyanko:2v, rcins:11v] 
 
 trainer:
