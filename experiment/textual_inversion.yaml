@@ -78,6 +78,7 @@ dataset:
   debug_arb: false
   num_workers: 3
   process_tags: true
+  important_tags: []
   augment:
     enabled: false
     debug: false
