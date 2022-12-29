@@ -165,6 +165,11 @@ class CustomEmbeddingsCallback(Callback):
                 embedding = Embedding(params[:length], entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
             params = params[length:]
+            
+        if self.config.get("use_wandb"):
+            import wandb
+            self.model_artifact.wait()
+            wandb.log_artifact(self.model_artifact)
         
     def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
