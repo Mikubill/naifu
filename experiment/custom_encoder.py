@@ -81,5 +81,6 @@ class CustomEncoderDiffusionModel(StableDiffusionModel):
         text_embeddings = self.text_encoder(
             text_input_ids.to(self.device),
             attention_mask=attention_mask,
+            output_hidden_states=True
         )        
-        return text_embeddings
+        return text_embeddings.last_hidden_state
