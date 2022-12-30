@@ -46,8 +46,8 @@ def main(args):
     # )
     
     # for experiment only
-    # from experiment.models import MultiEncoderDiffusionModel
-    # model = MultiEncoderDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+    # from experiment.attn_realign import AttnRealignModel
+    # model = AttnRealignModel(args.model_path, config, config.trainer.init_batch_size)
     # from experiment.lora import LoRADiffusionModel
     # model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
     # from experiment.kwlenc import MixinModel
@@ -96,7 +96,6 @@ def main(args):
         model=model,
         ckpt_path=args.resume if args.resume else None
     )
-
 
 if __name__ == "__main__":
     args = parse_args()

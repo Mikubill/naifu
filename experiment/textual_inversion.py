@@ -62,7 +62,7 @@ class CustomEmbeddingsCallback(Callback):
             
         for n, v in enumerate(concepts):
             entry = vec_match.sub("", v)
-            if self.embs.get(entry):
+            if self.embs.get(entry) is not None:
                 continue
             fp = Path(weights_path / f"{entry}.pt")
             if not fp.is_file():
@@ -85,7 +85,7 @@ class CustomEmbeddingsCallback(Callback):
             import wandb
             self.use_wandb = True
             self.wandb_run = wandb.init(reinit=False)
-        
+    
     def preliminary_check(self, model):
         counter = {}
         for entry in model.dataset.entries:
@@ -101,7 +101,6 @@ class CustomEmbeddingsCallback(Callback):
         if len(notused) > 0:        
             print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: {notused}")
                     
-        
     def parse_prompt(self, prompt: str):
         """Parse a prompt string into a list of embedding names and a list of tokens.
         """
