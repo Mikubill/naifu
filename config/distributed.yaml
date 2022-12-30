@@ -14,7 +14,7 @@ trainer:
   use_ema: false
   use_hivemind: true
   use_xformers: false
-  lr_scale: linear
+  lr_scale: sqrt
   attention_slicing: false
   vae_slicing: false
 

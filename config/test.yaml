@@ -6,14 +6,14 @@ trainer:
   init_batch_size: 1
   resolution: 512
   center_crop: false
-  gradient_checkpointing: false
+  gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
   precision: fp32
   half_encoder: false
   use_ema: false
   use_hivemind: false
-  lr_scale: linear
+  lr_scale: sqrt
   attention_slicing: false
   vae_slicing: false
   
