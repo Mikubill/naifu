@@ -101,8 +101,8 @@ class LoRADiffusionModel(StableDiffusionModel):
         
     def training_step(self, batch, batch_idx):
         input_ids, pixels = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids)
-        latents = self.encode_pixels(pixels)
+        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+        latents = self.encode_pixels(pixels).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -114,10 +114,10 @@ class LoRADiffusionModel(StableDiffusionModel):
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps).to(self.weight_dtype)
+        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states.to(self.weight_dtype)).sample
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
         
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
