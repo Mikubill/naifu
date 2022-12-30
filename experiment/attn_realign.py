@@ -9,18 +9,17 @@ from lib.model import get_class
 from experiment.custom_encoder import CustomEncoderDiffusionModel
 from pytorch_lightning.utilities import rank_zero_only
 
-def freeze_and_extract_params(*models):
+def unfreeze_and_extract_params(*models):
     params_to_optim = []
     first_stage_target =  ["CrossAttention"]
     second_stage_target = ["CrossAttention", "Attention", "GEGLU", "CLIPAttention"]
     third_stage_target = [] # full gradient train
     for module in itertools.chain.from_iterable([model.modules() for model in models]):
-        if module.__class__.__name__ not in first_stage_target:
-            module.requires_grad_(False)
-        else:
-            module.requires_grad_(True)
+        if module.__class__.__name__ in first_stage_target:
+            for param in module.parameters():
+                param.require_grad = True
             params_to_optim.append(module.parameters())
-            print(f"trainable: {module}")
+    print(f"Trainable layers: {len(params_to_optim)}")
     return params_to_optim
 
     
@@ -38,7 +37,7 @@ class AttnRealignModel(CustomEncoderDiffusionModel):
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
             
         params_to_optimize = (
-            itertools.chain.from_iterable(freeze_and_extract_params(self.unet, self.text_encoder)) 
+            itertools.chain.from_iterable(unfreeze_and_extract_params(self.unet)) 
         )
         optimizer = get_class(self.config.optimizer.name)(
             params_to_optimize, **self.config.optimizer.params
