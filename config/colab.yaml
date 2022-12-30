@@ -9,7 +9,7 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  precision: fp32
+  precision: fp16
   half_encoder: true
   use_ema: false
   use_hivemind: false
@@ -18,7 +18,7 @@ trainer:
   vae_slicing: true
 
   # note: only works with init_batch_size > 1
-  use_xformers: false
+  use_xformers: true
 
 checkpoint:
   monitor: 'epoch'
@@ -36,7 +36,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: 16
+  precision: 32
   log_every_n_steps: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0

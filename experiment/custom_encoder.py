@@ -29,8 +29,8 @@ class CustomEncoderDiffusionModel(StableDiffusionModel):
         self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
              
-        self.unet.to(self.weight_dtype)
-        if config.trainer.half_encoder or self.weight_dtype == torch.float16:
+        self.unet.to(torch.float16 if config.trainer.precision == "fp16" else torch.float32)
+        if config.trainer.half_encoder:
             self.vae.to(torch.float16)
 
         self.vae.requires_grad_(False)

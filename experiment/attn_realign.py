@@ -59,8 +59,8 @@ class AttnRealignModel(CustomEncoderDiffusionModel):
         
     def training_step(self, batch, batch_idx):
         input_ids, pixels = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids)
-        latents = self.encode_pixels(pixels)
+        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+        latents = self.encode_pixels(pixels).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
