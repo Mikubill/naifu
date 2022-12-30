@@ -28,7 +28,6 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
         self.model_path = model_path
-        self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
         self.lr = self.config.optimizer.params.lr
         self.batch_size = batch_size 
         self.save_hyperparameters(config)
@@ -50,9 +49,9 @@ class StableDiffusionModel(pl.LightningModule):
             self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="text_encoder")
             self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
             self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
-             
-        self.unet.to(self.weight_dtype)
-        if config.trainer.half_encoder or self.weight_dtype == torch.float16:
+         
+        self.unet.to(torch.float16 if config.trainer.precision == "fp16" else torch.float32)
+        if config.trainer.half_encoder:
             self.vae.to(torch.float16)
             self.text_encoder.to(torch.float16)
 
@@ -171,11 +170,12 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
     
     def encode_pixels(self, pixels):
+        pixels = pixels.to(self.vae.dtype)
         if self.config.trainer.get("vae_slicing"):
             result = []
             for nx in range(pixels.shape[0]):
                 px = pixels[nx, ...].unsqueeze(0)
-                latent_dist = self.vae.encode(px.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
+                latent_dist = self.vae.encode(px).latent_dist
                 latents = latent_dist.sample() * 0.18215
                 result.append(latents)
         
@@ -183,15 +183,15 @@ class StableDiffusionModel(pl.LightningModule):
             return result
         
         # Convert images to latent space
-        latent_dist = self.vae.encode(pixels.to(dtype=torch.float16 if self.config.trainer.half_encoder else self.weight_dtype)).latent_dist
+        latent_dist = self.vae.encode(pixels).latent_dist
         latents = latent_dist.sample() * 0.18215
         return latents
         
             
     def training_step(self, batch, batch_idx):
         input_ids, pixels = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids)
-        latents = self.encode_pixels(pixels)
+        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+        latents = self.encode_pixels(pixels).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -279,7 +279,7 @@ class StableDiffusionModel(pl.LightningModule):
     
     def on_train_start(self):
         if self.config.trainer.use_ema: 
-            self.ema.to(self.device, dtype=self.weight_dtype)
+            self.ema.to(self.device, dtype=self.unet.dtype)
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:

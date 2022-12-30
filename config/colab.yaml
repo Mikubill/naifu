@@ -13,7 +13,7 @@ trainer:
   half_encoder: true
   use_ema: false
   use_hivemind: false
-  lr_scale: linear
+  lr_scale: sqrt
   attention_slicing: false
   vae_slicing: true
 
