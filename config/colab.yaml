@@ -9,13 +9,13 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  precision: fp16
+  precision: fp32
   half_encoder: true
   use_ema: false
   use_hivemind: false
   lr_scale: linear
   attention_slicing: false
-  vae_slicing: false
+  vae_slicing: true
 
   # note: only works with init_batch_size > 1
   use_xformers: false
