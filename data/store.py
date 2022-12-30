@@ -117,7 +117,8 @@ class ImageStore(Dataset):
             return tags, False
         
         if isinstance(tags, str):
-            tags = tags.split(" ")
+            tags = tags.split(",")
+            tags = [tag.strip() for tag in tags]
         final_tags = {}
 
         tag_dict = {tag: True for tag in tags}
