@@ -14,14 +14,9 @@ from transformers import CLIPTextModel, CLIPTokenizer
 # clip_text: openai/clip-vit-large-patch14
 # t5_text: google/flan-t5-base
     
-class MultiEncoderDiffusionModel(StableDiffusionModel):
+class CustomEncoderDiffusionModel(StableDiffusionModel):
     def __init__(self, model_path, config, batch_size):
         super().__init__(model_path, config, batch_size)
-        self.config = config
-        self.model_path = model_path
-        self.weight_dtype = torch.float16 if config.trainer.precision == "fp16" else torch.float32
-        self.lr = self.config.optimizer.params.lr
-        self.batch_size = batch_size 
         
     def init_model(self):      
         config = self.config 
