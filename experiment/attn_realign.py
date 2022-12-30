@@ -19,6 +19,9 @@ def unfreeze_and_extract_params(*models):
             for param in module.parameters():
                 param.require_grad = True
             params_to_optim.append(module.parameters())
+        else:
+            for param in module.parameters():
+                param.require_grad = False
     print(f"Trainable layers: {len(params_to_optim)}")
     return params_to_optim
 
@@ -35,7 +38,7 @@ class AttnRealignModel(CustomEncoderDiffusionModel):
         if scaled:
             self.config.optimizer.params.lr = new_lr
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
-            
+        
         params_to_optimize = (
             itertools.chain.from_iterable(unfreeze_and_extract_params(self.unet)) 
         )
