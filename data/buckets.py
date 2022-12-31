@@ -312,5 +312,5 @@ class AspectRatioSampler(torch.utils.data.Sampler):
             yield [{"size": size, "instance": item} for item in batch]
 
     def __len__(self):
-        return len(self.buckets) // self.num_replicas
+        return self.buckets.batch_total
 
