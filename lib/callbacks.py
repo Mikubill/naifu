@@ -85,7 +85,7 @@ class HuggingFaceHubCallback(Callback):
         self.every_n_steps=every_n_steps
         self.every_n_epochs=every_n_epochs
 
-    def setup(self, trainer, pl_module):
+    def setup(self, trainer, pl_module, stage):
         self.repo = Repository(
             tempfile.TemporaryDirectory().name,
             clone_from=self.repo_url,
