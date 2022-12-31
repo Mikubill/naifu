@@ -69,7 +69,6 @@ class HuggingFaceHubCallback(Callback):
         use_auth_token=True,
         git_user=None,
         git_email=None,
-        private=True,
         every_n_steps=None,
         every_n_epochs=1,
         **kwargs
@@ -80,11 +79,11 @@ class HuggingFaceHubCallback(Callback):
         self.use_auth_token = use_auth_token if use_auth_token != "" else True
         self.git_user = git_user
         self.git_email = git_email
-        self.private = private
         self.repo = None
         self.every_n_steps=every_n_steps
         self.every_n_epochs=every_n_epochs
 
+    @rank_zero_only 
     def setup(self, trainer, pl_module, stage):
         self.repo = Repository(
             tempfile.TemporaryDirectory().name,
@@ -93,17 +92,18 @@ class HuggingFaceHubCallback(Callback):
             git_user=self.git_user,
             git_email=self.git_email,
             revision=None, 
-            private=self.private,
         )
-        
+
+    @rank_zero_only 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if not self.every_n_steps:
             return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         
         if trainer.global_step % self.every_n_steps == 0 and trainer.global_step > 0:
             with self.repo.commit(f"Add/Update Model: Step {trainer.global_step}", blocking=False, auto_lfs_prune=True):
-                trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt")  
-
+                trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt")      
+    
+    @rank_zero_only 
     def on_train_epoch_end(self, trainer, pl_module):
         if not self.every_n_epochs:
             return super().on_train_epoch_end(self, trainer, pl_module)
