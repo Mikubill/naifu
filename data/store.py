@@ -139,12 +139,8 @@ class ImageStore(Dataset):
             if len(self.yandere_tags) <= 0 or tag not in self.yandere_tags:
                 continue
             
-            if self.yandere_tags[tag]["type"] >= 1 and random.random() < keep_important:
+            if self.yandere_tags[tag]["type"] > 1 and random.random() < keep_important:
                 base_chosen.append(tag)
-
-            if tag in self.yandere_tags:
-                if self.yandere_tags[tag]["type"] == 6:
-                    skip_image = True
                       
         for tag in tag_dict.keys():
             # For danbooru tags.
@@ -157,7 +153,6 @@ class ImageStore(Dataset):
                 base_chosen.append(tag)
             if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
                 base_chosen.append(tag)
-        
 
         tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
         base_chosen_set = set(base_chosen)
@@ -180,7 +175,7 @@ class ImageStore(Dataset):
                 tag = tag[5:]
             final_tags[tag] = True
 
-        for bad_tag in ["comic", "panels", "everyone", "sample_watermark", "text_focus", "tagme"]:
+        for bad_tag in ["comic", "panels", "everyone", "sample_watermark", "text_focus", "text", "tagme"]:
             if bad_tag in pure_tag_dict:
                 skip_image = True
         if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
