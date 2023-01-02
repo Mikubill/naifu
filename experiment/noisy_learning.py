@@ -13,6 +13,8 @@ from tqdm.auto import tqdm
 from diffusers import UNet2DConditionModel
 from torch.utils.data import Dataset, DataLoader
 from experiment.custom_encoder import CustomEncoderDiffusionModel
+from lib.utils import get_local_rank, get_world_size
+from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 
 def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64):
     min_dim, max_dim = dim_range
@@ -42,32 +44,43 @@ def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), 
     return sorted(buckets, key=lambda sz: sz[0] * 4096 - sz[1])
 
 class TagDataset(Dataset):
-    def __init__(self, annotations_file):
+    def __init__(self, annotations_file, config):
         self.base_path = Path(annotations_file)
         # with open("danbooru-tags.json") as file:
         #     self.tag_stat = json.loads(file.read())
         
         entries = []
-        for entry in tqdm(self.base_path.iterdir()):
+        for entry in tqdm(self.base_path.glob('**/*')):
             if entry.is_file():
                 entries.append(entry)
+        self.config = config
         self.process_files(entries)
         
     def process_files(self, files):
         self.entries = []
-        progress = tqdm(desc=f"Loading tags")
+        progress = tqdm(desc=f"Loading tags", disable=get_local_rank(self.config) not in [0, -1])
         for entry in files:
             subentry = []
-            with open(entry) as file:
-                for line in file:
-                    b = json.loads(line)
-                    if entry["rating"] != "e":
-                        subentry.append(self.parser(entry))
-                    progress.update()
+            try:
+                if get_local_rank(self.config) in [0, -1]:
+                    progress.desc = f"Loading {entry}"
+                with open(entry) as file:
+                    lines = file.readlines()
+            except Exception as e:
+                if get_local_rank(self.config) in [0, -1]:
+                    print(e)
+                continue
+                
+            for line in lines:
+                b = json.loads(line)
+                if b["rating"] != "e" and b["rating"] != "q":
+                    subentry.append(self.parser(b))
+                progress.update()
             self.entries.extend(subentry)
+        random.shuffle(self.entries)
             
     def parser(self, entry): 
-        return entry
+        return ", ".join([tag["name"] for tag in entry["tags"]])
     #     entry["quality_tag"] = ""
         
     #     # catch-all
@@ -92,7 +105,10 @@ class TagDataset(Dataset):
         return len(self.entries)
 
     def __getitem__(self, idx):
-        return "Tags: " + ", ".join([tag["name"] for tag in self.entries[idx]["tags"]])
+        if random.random() < 0.5:
+            return "Tags: " + self.entries[idx]
+        else:
+            return "Tags: masterpiece, high quality, " + self.entries[idx]
     
 class MBaseLearningModel(CustomEncoderDiffusionModel):     
     def __init__(self, model_path, config, batch_size):
@@ -100,38 +116,55 @@ class MBaseLearningModel(CustomEncoderDiffusionModel):
         
     def init_model(self):
         super().init_model()
-        self.base_model = [UNet2DConditionModel.from_pretrained("/root/dataset/animesfw/unet")]
+        self.base_model = UNet2DConditionModel.from_pretrained("/root/dataset/animesfw/unet")
+        self.base_tokenizer = CLIPTokenizer.from_pretrained("/root/dataset/animesfw/tokenizer")
+        self.base_encoder = CLIPTextModel.from_pretrained("/root/dataset/animesfw/text_encoder")
+        self.base_model.requires_grad_(False)
+        self.base_encoder.requires_grad_(False)
+        self.text_encoder.requires_grad_(False)
+        self.base_model.enable_xformers_memory_efficient_attention()
+        self.base_model.enable_gradient_checkpointing()
         self.buckets = list(gen_buckets())
     
     def setup(self, stage):
         # rsync://176.9.41.242:873/danbooru2021/metadata.json.tar.xz
-        self.dataset = TagDataset("/root/dataset/metadata")
+        self.dataset = TagDataset("/root/dataset/metadata", self.config)
+    
+    def on_save_checkpoint(self, checkpoint):
+        super().on_save_checkpoint(checkpoint)
+        del checkpoint["state_dict"]["base_model"]
+        del checkpoint["state_dict"]["base_encoder"]
+        del checkpoint["state_dict"]["base_tokenizer"]
     
     def train_dataloader(self):
         self.train_dataloader = DataLoader(
             self.dataset,
+            collate_fn=self.collate_fn,
             num_workers=self.config.dataset.num_workers,
             batch_size=self.batch_size,
+            shuffle=True,
             persistent_workers=True,
         )
         return self.train_dataloader
+    
+    def collate_fn(self, input_ids):
+        token_ids_1 = self._tokenizer(input_ids, padding="max_length", max_length=self._tokenizer.model_max_length, truncation=True, return_tensors="pt")
+        token_ids_2 = self.base_tokenizer(input_ids, padding=True, truncation=True, return_tensors="pt").input_ids
+        return token_ids_1, token_ids_2
         
     def training_step(self, batch, batch_idx):
-        input_ids = batch
-        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        bucket = random.sample(self.buckets)
+        token_ids_1, token_ids_2 = batch
+        hidden_states_down = self.text_encoder(token_ids_1.input_ids, attention_mask=token_ids_1.attention_mask, output_hidden_states=True).last_hidden_state.to(self.unet.dtype)
+        hidden_states_up = self.base_encoder(token_ids_2, output_hidden_states=True).last_hidden_state.to(self.unet.dtype)
+        
+        bsz = hidden_states_down.shape[0]
+        bucket = [[512, 512]] # random.sample(self.buckets, 1)
+        noise = torch.randn(bsz, 4, bucket[0][0] // 8, bucket[0][1] // 8, device=self.device, dtype=self.unet.dtype)
 
-        # Sample noise that we'll add to the latents
-        noise = torch.randn(bucket)
-        bsz = batch.shape[0]
-            
-        # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=self.device)
-        timesteps = timesteps.long()
-
-        # Predict the noise residual
-        noise_pred = self.unet(noise, timesteps, encoder_hidden_states).sample
-        noise_pred_prev = self.base_model[0](noise, timesteps, encoder_hidden_states).sample
+        # timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), dtype=torch.int64, device=self.device)
+        timesteps = torch.randint(0, 2, (bsz,), dtype=torch.int64, device=self.device)
+        noise_pred = self.unet(noise, timesteps, hidden_states_down).sample
+        noise_pred_prev = self.base_model(noise, timesteps, hidden_states_up).sample
 
         loss = F.mse_loss(noise_pred.float(), noise_pred_prev.float(), reduction="mean")
         # Logging to TensorBoard by default
