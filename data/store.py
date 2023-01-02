@@ -139,7 +139,7 @@ class ImageStore(Dataset):
             if len(self.yandere_tags) <= 0 or tag not in self.yandere_tags:
                 continue
             
-            if int(self.yandere_tags[tag]["type"]) in [2, 3, 4, 5] and random.random() < keep_important:
+            if int(self.yandere_tags[tag]["type"]) in [1, 3, 4, 5] and random.random() < keep_important:
                 base_chosen.append(tag)
                       
         for tag in tag_dict.keys():
