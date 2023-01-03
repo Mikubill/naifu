@@ -23,6 +23,8 @@ def main(args):
     tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
     if config.lightning.accelerator in ["gpu", "cpu"] and not tune:
         strategy = "ddp_find_unused_parameters_false"
+        
+    if config.arb.enabled:
         config.lightning.replace_sampler_ddp = False
         
     if config.trainer.use_hivemind:
