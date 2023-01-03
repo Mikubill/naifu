@@ -9,6 +9,7 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
+
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
@@ -54,7 +55,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/mmk"
+    - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
   center_crop: false
   ucg: 0.1
   debug_arb: false
