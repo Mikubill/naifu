@@ -62,7 +62,7 @@ class CustomEmbeddingsCallback(Callback):
             
         for n, v in enumerate(concepts):
             entry = vec_match.sub("", v)
-            if self.embs.get(entry) != None:
+            if self.embs.get(entry) is not None:
                 continue
             fp = Path(weights_path / f"{entry}.pt")
             if not fp.is_file():

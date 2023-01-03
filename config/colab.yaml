@@ -9,7 +9,7 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  half_encoder: true
+  half_encoder: false
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
@@ -35,8 +35,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: 32
-  strategy: dp
+  precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
@@ -56,13 +55,16 @@ arb:
 
 dataset:
   img_path: 
-    - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
+    - "/root/workspace/mmk"
   center_crop: false
   ucg: 0.1
   debug_arb: false
   num_workers: 3
   process_tags: true
+  cache_latents: true
   important_tags: []
+
+  # not works with cache_latents=True
   augment:
     enabled: false
     debug: false

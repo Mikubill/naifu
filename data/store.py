@@ -1,13 +1,9 @@
-
-import functools
 import itertools
 import json
 import os
 import random
 import torch
-import tarfile
 import tempfile
-import requests
 
 from lib.augment import AugmentTransforms
 from pathlib import Path
@@ -15,6 +11,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
+from lib.utils import get_local_rank
 
 
 class ImageStore(Dataset):
@@ -45,6 +42,7 @@ class ImageStore(Dataset):
         self.tokenizer=tokenizer
         self.rank = rank
         self.dataset = img_path
+        self.use_latent_cache = False
         self.important_tags = important_tags
         self.image_transforms = transforms.Compose(
             [
@@ -94,6 +92,14 @@ class ImageStore(Dataset):
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
+        
+    def cache_latents(self, vae, store=None, config=None):
+        self.use_latent_cache = True
+        self.latnets_cache = {}
+        for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
+            image = self.image_transforms(self.read_img(entry))
+            latent = vae.encode(image.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
+            self.latents_cache[str(entry)] = latent.detach().squeeze(0).cpu()
 
     def tokenize(self, prompt):
         '''
@@ -106,7 +112,7 @@ class ImageStore(Dataset):
             max_length=self.max_length,
         ).input_ids 
 
-    def read_img(self, filepath):            
+    def read_img(self, filepath):          
         img = Image.open(filepath)
         if not img.mode == "RGB":
             img = img.convert("RGB")
@@ -198,9 +204,13 @@ class ImageStore(Dataset):
     def __getitem__(self, index):
         example = {}
         instance_path, instance_prompt = self.entries[index % self._length]
-        instance_image = self.read_img(instance_path)
-
-        example["images"] = self.image_transforms(instance_image)
+        
+        if self.use_latent_cache:
+            example["images"] = self.latents_cache[str(instance_path)]
+        else:
+            instance_image = self.read_img(instance_path)
+            example["images"] = self.image_transforms(instance_image)
+            
         example["prompt_ids"] = self.tokenize(instance_prompt)
         return example
 
@@ -213,7 +223,28 @@ class AspectRatioDataset(ImageStore):
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
-
+            
+    def cache_latents(self, vae, store, config):
+        self.use_latent_cache = True
+        self.latents_cache = {}
+        progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
+        for entry in store.buckets.keys():
+            size = store.resolutions[entry]
+            imgs = store.buckets[entry][:]
+            for img in imgs:
+                img_data = self.read_img(img)
+                img_data_actual = torch.stack([self.transformer(img_data, size, config.dataset.center_crop)]).float()
+                img_data_base = torch.stack([self.transformer(img_data, config.arb.base_res, True)]).float()
+                latent = vae.encode(img_data_actual.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
+                latent_base = vae.encode(img_data_base.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
+                self.latents_cache[str(img)] = {
+                    "latent": latent.detach().squeeze(0).cpu(),
+                    "latent_base": latent_base.detach().squeeze(0).cpu(),
+                    "size": size
+                }
+                progress_bar.update()
+        progress_bar.close()
+        
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
@@ -273,13 +304,18 @@ class AspectRatioDataset(ImageStore):
             return {}
 
         prompt, _ = self.process_tags(self.prompt_cache[item_id])
-        image = self.augment.transform(self.read_img(item_id), roll)
-
         if random.random() < self.ucg:
             prompt = ''
+        
+        if not self.use_latent_cache:
+            image = self.augment.transform(self.read_img(item_id), roll)
+            image = self.transformer(image, size)
+        else:
+            entry = self.latents_cache[str(item_id)]
+            image = entry["latent"] if (entry["size"] == size).all() else entry["latent_base"]
 
         example = {
-            f"images": self.transformer(image, size),
+            f"images": image,
             f"prompt_ids": self.tokenize(prompt)
         }
         return example

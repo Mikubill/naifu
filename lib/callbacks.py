@@ -26,7 +26,7 @@ class SampleCallback(Callback):
             return super().on_train_epoch_end(trainer, pl_module)
         
         if trainer.current_epoch % self.config.every_n_epochs == 0:
-            return self.sample(trainer, pl_module.pipeline)
+            self.sample(trainer, pl_module.pipeline)
         
     @torch.inference_mode()
     @rank_zero_only 
@@ -37,6 +37,7 @@ class SampleCallback(Callback):
         save_dir = Path(self.config.save_dir) 
         save_dir.mkdir(parents=True, exist_ok=True)
         generator = torch.Generator(device=pipeline.device).manual_seed(self.config.seed)
+        pipeline.to(pipeline.device)
         
         negative_prompts = list(self.config.negative_prompts) if OmegaConf.is_list(self.config.negative_prompts) else self.config.negative_prompts
         prompts = list(self.config.prompts) if OmegaConf.is_list(self.config.prompts) else self.config.prompts
