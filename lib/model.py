@@ -50,7 +50,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
             self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
          
-        self.unet.to(torch.float16 if config.trainer.precision == "fp16" else torch.float32)
+        self.unet.to(torch.float32)
         if config.trainer.half_encoder:
             self.vae.to(torch.float16)
             self.text_encoder.to(torch.float16)

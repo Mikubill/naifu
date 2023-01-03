@@ -19,9 +19,6 @@ def main(args):
     if args.model_path == None:
         args.model_path = config.trainer.model_path
     
-    if config.trainer.precision == "fp16" and config.lightning.precision == 16:
-        raise ValueError("Pure fp16 mode is not fully supported at this time. Please consider other configurations (trainer.precision and lightning.precision).")
-    
     strategy = None
     tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
     if config.lightning.accelerator in ["gpu", "cpu"] and not tune:
@@ -77,11 +74,13 @@ def main(args):
     sp =  config.get("sampling")
     if sp != None and sp.enabled:
         callbacks.append(SampleCallback(sp, logger))
+        
+    if config.lightning.get("strategy") is None:
+        config.lightning.strategy = strategy
     
     callbacks.append(ModelCheckpoint(**config.checkpoint))
     trainer = pl.Trainer(
         logger=logger, 
-        strategy=strategy, 
         callbacks=callbacks,
         **config.lightning
     )
