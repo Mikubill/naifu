@@ -237,7 +237,7 @@ def create_unet_diffusers_config(original_config, image_size: int = 512):
     return config
 
 
-def create_vae_diffusers_config(original_config, image_size: int):
+def create_vae_diffusers_config(original_config, image_size: int = 512):
     """
     Creates a config for the diffusers based on the config of the LDM model.
     """
