@@ -201,6 +201,11 @@ if __name__ == "__main__":
             text_model = convert_ldm_clip_checkpoint(converted_text_encoder)
         else:
             text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+            base_shape = text_model.get_input_embeddings().weight.shape
+            if base_shape != converted_text_encoder["text_model.embeddings.token_embedding.weight"].shape:
+                print("Reshaping extended token_embeddings...")
+                converted_text_encoder["text_model.embeddings.token_embedding.weight"] = converted_text_encoder["text_model.embeddings.token_embedding.weight"][:base_shape[0], :base_shape[1]]
+            
             text_model.load_state_dict(converted_text_encoder)
         # safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
         # feature_extractor = AutoFeatureExtractor.from_pretrained("CompVis/stable-diffusion-safety-checker")
