@@ -9,7 +9,6 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  half_encoder: false
   use_ema: true
   use_hivemind: false
   use_xformers: false
