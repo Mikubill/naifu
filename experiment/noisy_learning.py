@@ -58,16 +58,16 @@ class TagDataset(Dataset):
         
     def process_files(self, files):
         self.entries = []
-        progress = tqdm(desc=f"Loading tags", disable=get_local_rank(self.config) not in [0, -1])
+        progress = tqdm(desc=f"Loading tags", disable=get_local_rank() not in [0, -1])
         for entry in files:
             subentry = []
             try:
-                if get_local_rank(self.config) in [0, -1]:
+                if get_local_rank() in [0, -1]:
                     progress.desc = f"Loading {entry}"
                 with open(entry) as file:
                     lines = file.readlines()
             except Exception as e:
-                if get_local_rank(self.config) in [0, -1]:
+                if get_local_rank() in [0, -1]:
                     print(e)
                 continue
                 

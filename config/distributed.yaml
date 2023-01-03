@@ -9,13 +9,13 @@ trainer:
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-  half_encoder: true
+  half_encoder: false
   use_ema: false
   use_hivemind: true
   use_xformers: false
   lr_scale: sqrt
   attention_slicing: false
-  vae_slicing: false
+  vae_slicing: true
 
 checkpoint:
   monitor: 'epoch'

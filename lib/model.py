@@ -102,8 +102,8 @@ class StableDiffusionModel(pl.LightningModule):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
                 self.config.dataset.img_path[k] = dlpath
             
-        local_rank = get_local_rank(self.config)
-        world_size = get_world_size(self.config)
+        local_rank = get_local_rank()
+        world_size = get_world_size()
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
         # init Dataset
@@ -186,12 +186,12 @@ class StableDiffusionModel(pl.LightningModule):
         latent_dist = self.vae.encode(pixels).latent_dist
         latents = latent_dist.sample() * 0.18215
         return latents
-        
             
     def training_step(self, batch, batch_idx):
-        input_ids, pixels = batch[0], batch[1]
+        input_ids, latents = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        latents = self.encode_pixels(pixels).to(self.unet.dtype)
+        if not self.dataset.use_latent_cache:
+            latents = self.encode_pixels(latents).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -280,6 +280,17 @@ class StableDiffusionModel(pl.LightningModule):
     def on_train_start(self):
         if self.config.trainer.use_ema: 
             self.ema.to(self.device, dtype=self.unet.dtype)
+            
+        if self.config.dataset.get("cache_latents") == True:
+            self.dataset.cache_latents(
+                self.vae, 
+                self.data_sampler.buckets if self.config.arb.enabled else None,
+                self.config
+            )
+            
+    def on_train_epoch_start(self) -> None:
+        if self.config.dataset.get("cache_latents") == True:
+            self.vae.to("cpu")
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
