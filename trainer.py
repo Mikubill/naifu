@@ -71,11 +71,10 @@ def main(args):
         from experiment.textual_inversion import CustomEmbeddingsCallback
         callbacks.append(CustomEmbeddingsCallback(config.custom_embeddings))
         
-    sp =  config.get("sampling")
-    if sp != None and sp.enabled:
-        callbacks.append(SampleCallback(sp, logger))
+    if config.get("sampling") != None and config.sampling.enabled:
+        callbacks.append(SampleCallback(config.sampling, logger))
         
-    if config.lightning.get("strategy") is None:
+    if config.lightning.get("strategy") == None:
         config.lightning.strategy = strategy
     
     callbacks.append(ModelCheckpoint(**config.checkpoint))

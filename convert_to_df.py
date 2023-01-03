@@ -16,7 +16,7 @@
 
 import argparse
 import os
-
+import re
 import torch
 
 
@@ -36,7 +36,7 @@ from diffusers import (
     StableDiffusionPipeline,
     UNet2DConditionModel,
 )
-from transformers import BertTokenizerFast, CLIPTokenizer
+from transformers import BertTokenizerFast, CLIPTokenizer, CLIPTextModel
 from lib.utils import (
     convert_ldm_openclip_checkpoint,
     create_unet_diffusers_config,
@@ -85,6 +85,15 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--image_size",
+        default=None,
+        type=int,
+        help=(
+            "The image size that the model was trained on. Use 512 for Stable Diffusion v1.X and Stable Siffusion v2"
+            " Base. Use 768 for Stable Diffusion v2."
+        ),
+    )
+    parser.add_argument(
         "--dump_path",
         "--dst",
         default=None,
@@ -104,8 +113,9 @@ if __name__ == "__main__":
     original_config = OmegaConf.load(args.original_config_file)
 
     checkpoint = torch.load(args.checkpoint_path)
+    is_train_ckpt = "optimizer_states" in checkpoint
     checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-
+    
     num_train_timesteps = original_config.model.params.timesteps
     beta_start = original_config.model.params.linear_start
     beta_end = original_config.model.params.linear_end
@@ -153,30 +163,45 @@ if __name__ == "__main__":
         raise ValueError(f"Scheduler of type {args.scheduler_type} doesn't exist!")
 
     # Convert the UNet2DConditionModel model.
-    unet_config = create_unet_diffusers_config(original_config)
-    converted_unet_checkpoint = convert_ldm_unet_checkpoint(
-        checkpoint, unet_config, path=args.checkpoint_path, extract_ema=args.extract_ema
-    )
+    unet_config = create_unet_diffusers_config(original_config, args.image_size)
+    if not is_train_ckpt:
+        converted_unet_checkpoint = convert_ldm_unet_checkpoint(
+            checkpoint, unet_config, path=args.checkpoint_path, extract_ema=args.extract_ema
+        )
+    else:
+        converted_unet_checkpoint = {k.removeprefix("unet."): v for k, v in checkpoint.items() if k.startswith("unet.")}
 
     unet = UNet2DConditionModel(**unet_config)
     unet.load_state_dict(converted_unet_checkpoint)
 
     # Convert the VAE model.
+    vae_config = create_vae_diffusers_config(original_config, args.image_size)
     if args.vae_path:
-        vae_config = create_vae_diffusers_config(original_config)
         converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config, vae=args.vae_path)
     else:
-        vae_config = create_vae_diffusers_config(original_config)
-        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+        if not is_train_ckpt:
+            converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+        else:
+            converted_vae_checkpoint = {k.removeprefix("vae."): v for k, v in checkpoint.items() if k.startswith("vae.")}
 
     vae = AutoencoderKL(**vae_config)
     vae.load_state_dict(converted_vae_checkpoint)
 
     # Convert the text model.
     text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
+    
+    if not is_train_ckpt:
+        converted_text_encoder = checkpoint
+    else:
+        converted_text_encoder = {k.removeprefix("text_encoder."): v for k, v in checkpoint.items() if k.startswith("text_encoder.")}
+
     if text_model_type == "FrozenCLIPEmbedder":
-        text_model = convert_ldm_clip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        if not is_train_ckpt:
+            text_model = convert_ldm_clip_checkpoint(converted_text_encoder)
+        else:
+            text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+            text_model.load_state_dict(converted_text_encoder)
         # safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-safety-checker")
         # feature_extractor = AutoFeatureExtractor.from_pretrained("CompVis/stable-diffusion-safety-checker")
         pipe = StableDiffusionPipeline(
@@ -190,8 +215,12 @@ if __name__ == "__main__":
             requires_safety_checker=False,
         )
     elif text_model_type == "FrozenOpenCLIPEmbedder":
-        text_model = convert_ldm_openclip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
+        if not is_train_ckpt:
+            text_model = convert_ldm_openclip_checkpoint(converted_text_encoder)
+        else:
+            text_model = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2", subfolder="text_encoder")
+            text_model.load_state_dict(converted_text_encoder)
         pipe = StableDiffusionPipeline(
             vae=vae,
             text_encoder=text_model,
@@ -204,7 +233,7 @@ if __name__ == "__main__":
         )
     else:
         text_config = create_ldm_bert_config(original_config)
-        text_model = convert_ldm_bert_checkpoint(checkpoint, text_config)
+        text_model = convert_ldm_bert_checkpoint(converted_text_encoder, text_config)
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         pipe = LDMTextToImagePipeline(
             vqvae=vae,
