@@ -187,7 +187,7 @@ def conv_attn_to_linear(checkpoint):
             if checkpoint[key].ndim > 2:
                 checkpoint[key] = checkpoint[key][:, :, 0]
 
-def create_unet_diffusers_config(original_config, image_size: int):
+def create_unet_diffusers_config(original_config, image_size: int = 512):
     """
     Creates a config for the diffusers based on the config of the LDM model.
     """
