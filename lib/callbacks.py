@@ -59,7 +59,7 @@ class SampleCallback(Callback):
             image.save(save_dir / f"nd_sample_e{trainer.current_epoch}_s{trainer.global_step}_{j}.png")
         
         if self.config.use_wandb and self.logger:
-            self.logger.log_image(key="samples", images=images, caption=prompts)
+            self.logger.log_image(key="samples", images=images, caption=prompts, step=trainer.global_step)
 
 # Modified: https://github.com/nateraw/hf-hub-lightning/blob/main/hf_hub_lightning/callback.py
 
