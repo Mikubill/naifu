@@ -71,11 +71,6 @@ def main():
     total_train_batch_size = config.trainer.init_batch_size * jax.local_device_count()
 
     weight_dtype = jnp.float32
-    if config.trainer.precision == "fp16":
-        weight_dtype = jnp.float16
-    elif config.trainer.precision == "bf16":
-        weight_dtype = jnp.bfloat16
-
     # Load models and create wrapper for stable diffusion
     tokenizer = CLIPTokenizer.from_pretrained(config.trainer.model_path, subfolder="tokenizer")
     noise_scheduler = FlaxDDPMScheduler.from_pretrained(config.trainer.model_path, subfolder="scheduler")
