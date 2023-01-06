@@ -170,7 +170,7 @@ class CustomEmbeddingsCallback(Callback):
         params = params[-sum([p[1] for p in lengths]):].detach().clone().cpu()
         for item in lengths:
             entry, length = item
-            if entry in self.trainable_concepts:
+            if entry in self.trainable_concepts or self.config.train_all:
                 embedding = Embedding(params[:length].clone(), entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
                 if self.use_wandb:
