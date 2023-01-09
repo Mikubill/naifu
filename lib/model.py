@@ -54,6 +54,9 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
+        if config.trainer.get("train_text_encoder"):
+            self.text_encoder.requires_grad_(True)
+        
         if config.trainer.gradient_checkpointing: 
             self.unet.enable_gradient_checkpointing()
             
@@ -239,9 +242,13 @@ class StableDiffusionModel(pl.LightningModule):
         if scaled:
             self.config.optimizer.params.lr = new_lr
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
-        
+            
+        params_to_optim = [{'params': self.unet.parameters()}]
+        if self.config.trainer.get("train_text_encoder") == True:
+            params_to_optim.append({'params': self.text_encoder.parameters()})
+
         optimizer = get_class(self.config.optimizer.name)(
-            self.unet.parameters(), **self.config.optimizer.params
+            params_to_optim, **self.config.optimizer.params
         )
         scheduler = get_class(self.config.lr_scheduler.name)(
             optimizer=optimizer,

@@ -12,6 +12,7 @@ trainer:
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
+  train_text_encoder: false
   attention_slicing: false
   vae_slicing: false
   
