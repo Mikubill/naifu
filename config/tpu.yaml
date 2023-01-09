@@ -13,6 +13,7 @@ trainer:
   use_hivemind: false
   use_xformers: false
   lr_scale: linear
+  train_text_encoder: false
   attention_slicing: false
   vae_slicing: false
 

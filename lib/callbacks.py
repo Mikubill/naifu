@@ -102,7 +102,7 @@ class HuggingFaceHubCallback(Callback):
         
         if trainer.global_step % self.every_n_steps == 0 and trainer.global_step > 0:
             with self.repo.commit(f"add/update model: step {trainer.global_step}", blocking=False, auto_lfs_prune=True):
-                trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt")      
+                trainer.save_checkpoint(f"model-e{trainer.current_epoch}-s{trainer.global_step}.ckpt", weights_only=True)  
     
     @rank_zero_only 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -111,4 +111,4 @@ class HuggingFaceHubCallback(Callback):
         
         if trainer.current_epoch % self.every_n_epochs == 0:
             with self.repo.commit(f"add/update model: epoch {trainer.current_epoch}", blocking=False, auto_lfs_prune=True):
-                trainer.save_checkpoint(f"model-e{trainer.current_epoch}.ckpt")
+                trainer.save_checkpoint(f"model-e{trainer.current_epoch}.ckpt", weights_only=True)
