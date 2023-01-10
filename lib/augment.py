@@ -42,11 +42,11 @@ class AugmentTransforms():
 
     def rotate_with_crop(self, image: Image, angle):
         x, y = image.size
-        X, Y = rotatedRectWithMaxArea(x, y, math.radians(random.randint(-angle, angle)))
+        ang = random.randint(-angle, angle)
+        X, Y = rotatedRectWithMaxArea(x, y, math.radians(ang))
         dx, dy = (x - X) // 2, (y - Y) // 2
-        return image.rotate(angle, expand=False, fillcolor=(255,255,255), resample=3).crop(
-            (dx, dy, dx + X, dy + Y)
-        )
+        xl, yl = (x + X) // 2, (y + Y) // 2
+        return image.rotate(ang, expand=False, fillcolor=(255,255,255), resample=3).crop((dx, dy, xl, yl))
 
     def flip(self, image, x):
         return image.transpose(Image.FLIP_LEFT_RIGHT)
