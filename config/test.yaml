@@ -56,6 +56,9 @@ arb:
 dataset:
   img_path: 
     - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
+
+    # use multiplier:
+    # - [/tmp/dataset-0, 10]
   center_crop: false
   ucg: 0.1
   debug_arb: false

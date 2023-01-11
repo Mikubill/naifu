@@ -82,8 +82,14 @@ class ImageStore(Dataset):
     def update_store(self):   
         self.entries = []
         bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
+        folders = []
+        for entry in self.dataset:
+            if self.allow_duplicates and not isinstance(entry, str):
+                folders.extend([entry[0] for _ in range(entry[1])])
+            else:
+                folders.append(entry)
         
-        for entry in self.dataset:            
+        for entry in folders:            
             for x in Path(entry).rglob("*"):
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
