@@ -64,6 +64,7 @@ dataset:
   process_tags: true
   cache_latents: true
   important_tags: []
+  allow_duplicates: false
 
   # not works with cache_latents=True
   augment:

@@ -62,6 +62,7 @@ dataset:
   num_workers: 3
   process_tags: true
   important_tags: []
+  allow_duplicates: false
   augment:
     enabled: false
     debug: false

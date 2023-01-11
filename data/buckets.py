@@ -301,7 +301,8 @@ class AspectRatioSampler(torch.utils.data.Sampler):
         id_size_map = {}
 
         for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1] or tuning):
-            with Image.open(entry) as img:
+            fp = entry[entry.index("@")+1:] if self.config.dataset.get("allow_duplicates") else entry
+            with Image.open(fp) as img:
                 size = img.size
             id_size_map[entry] = size
 
