@@ -89,6 +89,8 @@ class StableDiffusionModel(pl.LightningModule):
         
     def prepare_data(self):
         for k, entry in enumerate(self.config.dataset.img_path):
+            if not isinstance(entry, str):
+                continue
             if entry.startswith("https://") or entry.startswith("http://"):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
                 Path(dlpath).mkdir(exist_ok=True)
@@ -97,6 +99,8 @@ class StableDiffusionModel(pl.LightningModule):
             
     def setup(self, stage):
         for k, entry in enumerate(self.config.dataset.img_path):
+            if not isinstance(entry, str):
+                continue
             if entry.startswith("https://") or entry.startswith("http://"):
                 dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
                 self.config.dataset.img_path[k] = dlpath
