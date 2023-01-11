@@ -52,6 +52,7 @@ def main(args):
     # model = AttnRealignModel(args.model_path, config, config.trainer.init_batch_size)
     # from experiment.lora import LoRADiffusionModel
     # model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+    # strategy = "ddp" if strategy == "ddp_find_unused_parameters_false" else strategy
     # from experiment.kwlenc import MixinModel
     # model = MixinModel(args.model_path, config, config.trainer.init_batch_size)
     

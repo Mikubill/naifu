@@ -4,6 +4,7 @@ import os
 import random
 import torch
 import tempfile
+import os, binascii
 
 from lib.augment import AugmentTransforms
 from pathlib import Path
@@ -32,6 +33,7 @@ class ImageStore(Dataset):
         process_tags=True,
         tokenizer=None,
         important_tags=[],
+        allow_duplicates=False,
         **kwargs
     ):
         self.size = size
@@ -43,6 +45,7 @@ class ImageStore(Dataset):
         self.rank = rank
         self.dataset = img_path
         self.use_latent_cache = False
+        self.allow_duplicates = allow_duplicates
         self.important_tags = important_tags
         self.image_transforms = transforms.Compose(
             [
@@ -74,19 +77,25 @@ class ImageStore(Dataset):
             content = f.read()
             new_prompt = content
 
-        return x, new_prompt
+        return str(x), new_prompt
 
     def update_store(self):   
         self.entries = []
         bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
         
         for entry in self.dataset:            
-            for x in Path(entry).iterdir():
+            for x in Path(entry).rglob("*"):
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
                 img, prompt = self.prompt_resolver(x)
                 _, skip = self.process_tags(prompt)
-                if skip: continue
+                if skip:
+                    continue
+                
+                if self.allow_duplicates:
+                    prefix = binascii.hexlify(os.urandom(5))
+                    img = f"{prefix}@{img}"
+                
                 self.entries.append((img, prompt))
                 bar.update(1)
 
@@ -95,11 +104,11 @@ class ImageStore(Dataset):
         
     def cache_latents(self, vae, store=None, config=None):
         self.use_latent_cache = True
-        self.latnets_cache = {}
+        self.latents_cache = {}
         for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
-            image = self.image_transforms(self.read_img(entry))
+            image = torch.stack([self.image_transforms(self.read_img(entry[0]))])
             latent = vae.encode(image.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
-            self.latents_cache[str(entry)] = latent.detach().squeeze(0).cpu()
+            self.latents_cache[entry[0]] = latent.detach().squeeze(0).cpu()
 
     def tokenize(self, prompt):
         '''
@@ -112,7 +121,9 @@ class ImageStore(Dataset):
             max_length=self.max_length,
         ).input_ids 
 
-    def read_img(self, filepath):          
+    def read_img(self, filepath):  
+        if self.allow_duplicates and "@" in filepath:
+            filepath = filepath[filepath.index("@")+1:]    
         img = Image.open(filepath)
         if not img.mode == "RGB":
             img = img.convert("RGB")
@@ -206,7 +217,7 @@ class ImageStore(Dataset):
         instance_path, instance_prompt = self.entries[index % self._length]
         
         if self.use_latent_cache:
-            example["images"] = self.latents_cache[str(instance_path)]
+            example["images"] = self.latents_cache[instance_path]
         else:
             instance_image = self.read_img(instance_path)
             example["images"] = self.image_transforms(instance_image)
