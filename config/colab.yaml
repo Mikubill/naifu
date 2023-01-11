@@ -88,7 +88,7 @@ lr_scheduler:
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
-    warmup_strategy: "cos"
+    strategy: "cos"
   params:
     T_max: 20
     eta_min: 1e-7
@@ -101,7 +101,7 @@ monitor:
   store_checkpoints: true
 
 sampling:
-  enabled: true
+  enabled: false
   use_wandb: true
   every_n_steps: -1
   every_n_epochs: 1
