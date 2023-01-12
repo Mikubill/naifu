@@ -34,6 +34,12 @@ class SampleCallback(Callback):
         if not any(self.config.prompts):
             return
         
+        if trainer.config.get("lora"):
+            if pipeline.unet.dtype == torch.float16:
+                pipeline.unet.to(pipeline.device, dtype=torch.float32)
+            if pipeline.text_encoder.dtype == torch.float16:
+                pipeline.text_encoder.to(pipeline.device, dtype=torch.float32)
+        
         save_dir = Path(self.config.save_dir) 
         save_dir.mkdir(parents=True, exist_ok=True)
         generator = torch.Generator(device=pipeline.device).manual_seed(self.config.seed)
