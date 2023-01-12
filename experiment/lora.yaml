@@ -7,7 +7,7 @@ lora:
   train_text_encoder: true
   unet_lr: 5e-4
   encoder_lr: 1e-3
-  lowvram: true
+  lowvram: false
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
