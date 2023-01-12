@@ -7,82 +7,81 @@ import torch.utils.checkpoint
 from lib.model import StableDiffusionModel, get_class
 from pytorch_lightning.utilities import rank_zero_only
 
-# (wip) LoRA: https://github.com/cloneofsimo/lora
-target_replace_module = ["CrossAttention", "Attention", "GEGLU"]
-
-class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4):
-        super().__init__()
-        assert r <= min(in_features, out_features), f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
-
-        self.linear = nn.Linear(in_features, out_features, bias)
-        self.lora_down = nn.Linear(in_features, r, bias=False)
-        self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.scale = 1.0
-
-        nn.init.normal_(self.lora_down.weight, std=1/r)
-        nn.init.zeros_(self.lora_up.weight)
-        
-    def load_linear_weight(self, weight, bias=None):
-        self.linear.weight = weight
-        if bias is not None:
-            self.linear.bias = bias
-        
-    def forward(self, input):
-        return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
+class LoRABaseModel(torch.nn.Module):
     
-def inject_trainable_lora(model, r=4):
-    require_grad_params = []
-    names = []
+    def __init__(self, unet, text_encoder, multiplier=1.0, r=4):
 
-    for module in model.modules():
-        if module.__class__.__name__ not in target_replace_module:
-            continue 
-        for name, child in module.named_modules():
-            if child.__class__.__name__ == "Linear":
-                loraLinear = LoraInjectedLinear(child.in_features, child.out_features, child.bias is not None, r)
-                loraLinear.load_linear_weight(child.weight, child.bias)
-                
-                require_grad_params.append(loraLinear.lora_up.parameters())
-                require_grad_params.append(loraLinear.lora_down.parameters())
-                loraLinear.lora_up.weight.requires_grad = True
-                loraLinear.lora_down.weight.requires_grad = True
-                
-                module._modules[name] = loraLinear 
-                names.append(name)
-                
-    return require_grad_params, names
+        super().__init__()
+        require_grad_params = []
+        names = []
+        self.multiplier = multiplier
+        self.r = r
+        
+        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"])
+        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"])
+        
+        print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
+        print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
+        
+        names = set()
+        for lora in self.text_encoder_loras + self.unet_loras:
+            assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
+            names.add(lora.lora_name)
+            
+    def create_modules(self, prefix, model, target_replace_module):
+        blocks = []
+        for name, module in model.named_modules():
+            if module.__class__.__name__ not in target_replace_module:
+                continue 
+            for child_name, child_module in module.named_modules():
+                if child_module.__class__.__name__ == "Linear" or (child_module.__class__.__name__ == "Conv2d" and child_module.kernel_size == (1, 1)):
+                    
+                    lora_name = prefix + '.' + name + '.' + child_name
+                    lora_name = lora_name.replace('.', '_')
+                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r)
+                    blocks.append(lora_module)
+        return blocks
+    
+    def inject(self, unet=True, text_encoder=True):
+        if not unet:
+            self.unet_loras = []
+        if not text_encoder:
+            self.text_encoder_loras = []
+            
+        for lora in self.text_encoder_loras + self.unet_loras:
+            lora.inject()
+            self.add_module(lora.lora_name, lora)
+            
 
-def extract_lora_ups_down(model):
-    loras = []
-    for module in model.modules():
-        if module.__class__.__name__ not in target_replace_module:
-            continue 
-        for _child_module in module.modules():
-            if _child_module.__class__.__name__ == "LoraInjectedLinear":
-                loras.append((_child_module.lora_up, _child_module.lora_down))
-    if len(loras) == 0:
-        raise ValueError("No lora injected.")
-    return loras
+class LoRAModule(torch.nn.Module):
+    
+    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4):
+        super().__init__()
+        self.lora_name = lora_name    
+        if base_layer.__class__.__name__ == 'Conv2d':
+            in_dim = base_layer.in_channels
+            out_dim = base_layer.out_channels
+            self.lora_down = torch.nn.Conv2d(in_dim, lora_dim, (1, 1), bias=False)
+            self.lora_up = torch.nn.Conv2d(lora_dim, out_dim, (1, 1), bias=False)
+        else:
+            in_dim = base_layer.in_features
+            out_dim = base_layer.out_features
+            self.lora_down = torch.nn.Linear(in_dim, lora_dim, bias=False)
+            self.lora_up = torch.nn.Linear(lora_dim, out_dim, bias=False)
+        
+        self.multiplier = multiplier
+        self.base_layer = base_layer
+        torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        torch.nn.init.zeros_(self.lora_up.weight)
+    
+    def inject(self):
+        # inject and init weights
+        self.org_forward = self.base_layer.forward
+        self.base_layer.forward = self.forward
+        del self.base_layer
 
-def load_lora_weight(model, loras=None):
-    if loras == None:       
-        return
-    for module in model.modules():
-        if module.__class__.__name__ not in target_replace_module:
-            continue 
-        for _, child in module.named_modules():
-            if child.__class__.__name__ == "LoraInjectedLinear":
-                child.lora_up.weight = loras.pop(0)
-                child.lora_down.weight = loras.pop(0)
-
-def save_lora_weight(model):
-    weights = []
-    for _up, _down in extract_lora_ups_down(model):
-        weights.append(_up.weight)
-        weights.append(_down.weight)
-
-    return weights
+    def forward(self, x):
+        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier
 
 class LoRADiffusionModel(StableDiffusionModel):
     def __init__(self, model_path, config, batch_size):
@@ -91,14 +90,14 @@ class LoRADiffusionModel(StableDiffusionModel):
     def init_model(self):
         super().init_model()
         self.unet.requires_grad_(False)
-        self.params_to_optim, _ = inject_trainable_lora(self.unet, self.config.lora.rank)
+        self.text_encoder.requires_grad_(False)
+        self.lora = LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
+        self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
+        self.lora.requires_grad_(True)
         
     def on_save_checkpoint(self, checkpoint):
-        checkpoint["state_dict"]["lora"] = save_lora_weight(self.unet)
-        
-    def on_load_checkpoint(self, checkpoint):
-        load_lora_weight(self.unet, checkpoint["state_dict"]["lora"])
-        
+        checkpoint["state_dict"] = {k: v for k, v in checkpoint["state_dict"].items() if k.startswith("lora.")}
+    
     def training_step(self, batch, batch_idx):
         input_ids, pixels = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
@@ -134,16 +133,29 @@ class LoRADiffusionModel(StableDiffusionModel):
         return loss
     
     def configure_optimizers(self):
-        if self.config.lightning.auto_lr_find:
-            self.config.optimizer.params.lr = self.lr
-            
-        new_lr, scaled = self.get_scaled_lr(self.config.optimizer.params.lr)
-        if scaled:
-            self.config.optimizer.params.lr = new_lr
-            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
+        
+        enumerate_params = lambda loras: itertools.chain.from_iterable([lora.parameters() for lora in loras])
+        params_to_optim = []
+        if self.config.lora.train_unet:
+            new_unet_lr, scaled = self.get_scaled_lr(self.config.lora.unet_lr)
+            if scaled:
+                print(f"Using scaled unet LR (LoRA): {new_unet_lr}")
+            params_to_optim.append({
+                'params': enumerate_params(self.lora.unet_loras),
+                'lr': new_unet_lr
+            })
+                
+        if scaled and self.config.lora.train_text_encoder:
+            new_encoder_lr, scaled = self.get_scaled_lr(self.config.lora.encoder_lr)
+            if scaled:
+                print(f"Using scaled text_encoder LR (LoRA): {new_encoder_lr}")
+            params_to_optim.append({
+                'params': enumerate_params(self.lora.text_encoder_loras),
+                'lr': new_encoder_lr
+            })
         
         optimizer = get_class(self.config.optimizer.name)(
-            itertools.chain(*self.params_to_optim), 
+            params_to_optim, 
             **self.config.optimizer.params
         )
         scheduler = get_class(self.config.lr_scheduler.name)(

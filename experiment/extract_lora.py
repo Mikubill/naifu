@@ -12,5 +12,6 @@ if __name__ == "__main__":
 
     state_dict = torch.load(args.src, map_location="cpu")
     state_dict = state_dict["state_dict"] if "state_dict" in state_dict else state_dict
+    lorasd = {k.replace("lora.", ""): v for k, v in state_dict.items()}
     
-    torch.save(state_dict["lora"], "lora.pt")
+    torch.save(lorasd, args.dst)
