@@ -30,8 +30,13 @@ def main(args):
     if config.trainer.use_hivemind:
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
-        
-    model = load_model(args.model_path, config)
+    
+    if config.get("lora"):
+        from experiment.lora import LoRADiffusionModel
+        model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+        strategy = "ddp" if strategy == "ddp_find_unused_parameters_false" else strategy
+    else:
+        model = load_model(args.model_path, config)
 
     # for ddp-optimize only
     # from torch.distributed.algorithms.ddp_comm_hooks import post_localSGD_hook as post_localSGD
@@ -50,9 +55,6 @@ def main(args):
     # for experiment only
     # from experiment.attn_realign import AttnRealignModel
     # model = AttnRealignModel(args.model_path, config, config.trainer.init_batch_size)
-    # from experiment.lora import LoRADiffusionModel
-    # model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
-    # strategy = "ddp" if strategy == "ddp_find_unused_parameters_false" else strategy
     # from experiment.kwlenc import MixinModel
     # model = MixinModel(args.model_path, config, config.trainer.init_batch_size)
     

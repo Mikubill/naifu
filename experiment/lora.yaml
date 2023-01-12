@@ -2,6 +2,11 @@ name: test-run
 
 lora:
   rank: 4
+  multipier: 1.0
+  train_unet: true
+  train_text_encoder: true
+  unet_lr: 5e-6
+  encoder_lr: 5e-4
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
