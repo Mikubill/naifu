@@ -94,9 +94,10 @@ class LoRADiffusionModel(StableDiffusionModel):
         self.lora = LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
-        
+
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
         if self.config.lora.lowvram:
-            self.config.sampling.enabled = False
             self.unet.to(self.device, dtype=torch.float16)
             self.lora.to(self.device, dtype=torch.float32)
             self.text_encoder.to(self.device, dtype=torch.float16)
