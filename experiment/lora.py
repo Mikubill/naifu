@@ -95,13 +95,20 @@ class LoRADiffusionModel(StableDiffusionModel):
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
         
+        if self.config.lora.lowvram:
+            self.config.sampling.enabled = False
+            self.unet.to(self.device, dtype=torch.float16)
+            self.lora.to(self.device, dtype=torch.float32)
+            self.text_encoder.to(self.device, dtype=torch.float16)
+        
     def on_save_checkpoint(self, checkpoint):
         checkpoint["state_dict"] = {k: v for k, v in checkpoint["state_dict"].items() if k.startswith("lora.")}
     
     def training_step(self, batch, batch_idx):
-        input_ids, pixels = batch[0], batch[1]
+        input_ids, latents = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        latents = self.encode_pixels(pixels).to(self.unet.dtype)
+        if not self.dataset.use_latent_cache:
+            latents = self.encode_pixels(latents).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
