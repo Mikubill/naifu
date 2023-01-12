@@ -5,8 +5,8 @@ lora:
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 5e-6
-  encoder_lr: 5e-4
+  unet_lr: 5e-4
+  encoder_lr: 1e-3
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
@@ -26,7 +26,7 @@ trainer:
   vae_slicing: false
 
   # note: only works with init_batch_size > 1
-  use_xformers: false
+  use_xformers: true
 
 checkpoint:
   monitor: 'epoch'
