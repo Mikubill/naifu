@@ -145,7 +145,7 @@ class LoRADiffusionModel(StableDiffusionModel):
                 'lr': new_unet_lr
             })
                 
-        if scaled and self.config.lora.train_text_encoder:
+        if self.config.lora.train_text_encoder:
             new_encoder_lr, scaled = self.get_scaled_lr(self.config.lora.encoder_lr)
             if scaled:
                 print(f"Using scaled text_encoder LR (LoRA): {new_encoder_lr}")
