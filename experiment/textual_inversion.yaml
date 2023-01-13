@@ -6,6 +6,7 @@ custom_embeddings:
   load_all: false
   train_all: false
   use_wandb: false
+  freeze_unet: false
   trainer:
     save_path: 
     lr: 1e-3
