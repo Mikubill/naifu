@@ -262,13 +262,22 @@ class CustomEmbeddingsCallback(Callback):
     def hook_optimizers(self, pl_module, optimizers):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         self.preliminary_check(pl_module)
+
+        if self.config.freeze_unet:
+            pl_module.unet.requires_grad_(False)
         
         new_lr, scaled = pl_module.get_scaled_lr(self.config.trainer.lr)
         if scaled:
             self.config.trainer.lr = new_lr
             rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
         
-        param_to_optimize = optimizers[0].param_groups
+        assert len(optimizers) == 1, "Expect only one optimizer in StableDiffusionModel"
+        if not self.config.freeze_unet:
+            param_to_optimize = optimizers[0].param_groups
+        else:
+            param_to_optimize = []
+            del optimizers[0]
+
         param_to_optimize.append(
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
         )
