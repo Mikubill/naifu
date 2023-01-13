@@ -15,7 +15,7 @@ trainer:
   init_batch_size: 2
   resolution: 512
   center_crop: false
-  gradient_checkpointing: false
+  gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
   precision: fp32
@@ -24,7 +24,7 @@ trainer:
   use_hivemind: false
   lr_scale: linear
   attention_slicing: false
-  vae_slicing: false
+  vae_slicing: true
 
   # note: only works with init_batch_size > 1
   use_xformers: true
@@ -94,7 +94,7 @@ lr_scheduler:
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
-    warmup_strategy: "cos"
+    strategy: "cos"
   params:
     T_max: 20
     eta_min: 1e-7
