@@ -84,8 +84,10 @@ def main(args):
         
     if config.lightning.get("strategy") == None:
         config.lightning.strategy = strategy
-    
-    callbacks.append(ModelCheckpoint(**config.checkpoint))
+
+    if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
+        callbacks.append(ModelCheckpoint(**config.checkpoint))
+
     trainer = pl.Trainer(
         logger=logger, 
         callbacks=callbacks,
