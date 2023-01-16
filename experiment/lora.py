@@ -91,6 +91,9 @@ class LoRADiffusionModel(StableDiffusionModel):
         super().init_model()
         self.unet.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
+        if self.config.lora.get("scale_multipier"):
+            lora_alpha = self.config.lora.get("lora_alpha") or 1.0
+            self.config.lora.multipier = lora_alpha / self.config.lora.rank
         self.lora = LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)

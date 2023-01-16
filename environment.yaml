@@ -36,7 +36,6 @@ dependencies:
     - google-auth-oauthlib==0.4.6
     - grpcio==1.51.1
     - grpcio-tools==1.48.2
-    - hivemind==1.1.4
     - huggingface-hub==0.11.1
     - importlib-metadata==5.1.0
     - lightning-lite==1.8.5
@@ -83,7 +82,6 @@ dependencies:
     - torchmetrics==0.11.0
     - tqdm==4.64.1
     - transformers==4.25.1
-    - uvloop==0.17.0
     - varint==1.0.2
     - wandb==0.13.6
     - wcwidth==0.2.5
