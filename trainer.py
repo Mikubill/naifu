@@ -93,7 +93,13 @@ def main(args):
 
     if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
         callbacks.append(ModelCheckpoint(**config.checkpoint))
+        enable_checkpointing = True
+    else:
+        enable_checkpointing = False
 
+    if config.lightning.get("enable_checkpointing") == None:
+        config.lightning.strategy = enable_checkpointing
+    
     trainer = pl.Trainer(
         logger=logger, 
         callbacks=callbacks,
