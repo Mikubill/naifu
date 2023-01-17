@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from lib.model import StableDiffusionModel, get_class
-from pytorch_lightning.utilities import rank_zero_only
 
 class LoRABaseModel(torch.nn.Module):
     
@@ -83,15 +82,27 @@ class LoRAModule(torch.nn.Module):
     def forward(self, x):
         return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier
 
+
 class LoRADiffusionModel(StableDiffusionModel):
     def __init__(self, model_path, config, batch_size):
         super().__init__(model_path, config, batch_size)
         
     def init_model(self):
         super().init_model()
+        if self.config.lora.get("scale_multipier"):
+            lora_alpha = self.config.lora.get("lora_alpha") or 1.0
+            self.config.lora.multipier = lora_alpha / self.config.lora.rank
+        
+        if self.config.trainer.gradient_checkpointing:
+            self.unet.train()
+            if self.config.lora.train_text_encoder:
+                self.text_encoder.gradient_checkpointing_enable()
+                self.text_encoder.train()
+
         self.unet.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
-        self.lora = LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
+            
+        self.lora =  LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
 
