@@ -98,9 +98,6 @@ class LoRADiffusionModel(StableDiffusionModel):
             if self.config.lora.train_text_encoder:
                 self.text_encoder.gradient_checkpointing_enable()
                 self.text_encoder.train()
-
-        self.unet.requires_grad_(False)
-        self.text_encoder.requires_grad_(False)
             
         self.lora =  LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
