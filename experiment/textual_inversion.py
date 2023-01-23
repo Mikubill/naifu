@@ -170,7 +170,7 @@ class CustomEmbeddingsCallback(Callback):
         params = params[-sum([p[1] for p in lengths]):].detach().clone().cpu()
         for item in lengths:
             entry, length = item
-            if entry in self.trainable_concepts:
+            if entry in self.trainable_concepts or self.config.train_all:
                 embedding = Embedding(params[:length].clone(), entry, step=step)
                 embedding.save(self.save_path / f"{entry}_s{step}.pt")
                 if self.use_wandb:
@@ -200,17 +200,20 @@ class CustomEmbeddingsCallback(Callback):
             delta_embeddings = torch.cat([item for item in self.embs.values()], dim=0)
             emb_layer.weight.data[-n_added:] = delta_embeddings
         
-        mask = torch.zeros_like(emb_layer.weight.data, dtype=int)
-        offset = len(mask) - n_added
-        for name, vec in self.embs.items():
-            if name in self.trainable_concepts or self.config.train_all:
-                mask[offset:offset+len(vec)] = 1
-            offset += len(vec)
+        if self.trainable_concepts or self.config.train_all:
+            mask = torch.zeros_like(emb_layer.weight.data, dtype=torch.bool)
+            offset = len(mask) - n_added
+            for name, vec in self.embs.items():
+                if name in self.trainable_concepts or self.config.train_all:
+                    mask[offset:offset+len(vec)] = True
+                offset += len(vec)
             
-        mask = mask.bool()
-        emb_layer.weight.register_hook(lambda grad: grad.where(mask, mask))
-        emb_layer.requires_grad_(True)
-            
+            mask.to(emb_layer.weight.device)
+            emb_layer.weight.register_hook(lambda grad: grad.where(mask, mask))
+            emb_layer.requires_grad_(True)
+        else:
+            emb_layer.requires_grad_(False)
+
         # hook tokenizer to replace emb tokens with their corresponding CLIP tokens
         original_prepare_for_tokenization = tokenizer.prepare_for_tokenization
         outer = self
@@ -249,12 +252,16 @@ class CustomEmbeddingsCallback(Callback):
         self.setup_clip(pl_module.text_encoder, pl_module.tokenizer)
         self.init_weight = True
         original_configure_optimizers = pl_module.configure_optimizers
-        outer = self
         
+        outer = self
         def configure_optimizers(self):
             optimizers, _ = original_configure_optimizers()
             return outer.hook_optimizers(self, optimizers)
-        pl_module.configure_optimizers = configure_optimizers.__get__(pl_module, StableDiffusionModel)
+        
+        if self.trainable_concepts or self.config.train_all:
+            pl_module.configure_optimizers = configure_optimizers.__get__(pl_module, StableDiffusionModel)
+        else:
+            self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         
     def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:
         self.init_weight = False
@@ -262,13 +269,22 @@ class CustomEmbeddingsCallback(Callback):
     def hook_optimizers(self, pl_module, optimizers):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         self.preliminary_check(pl_module)
+
+        if self.config.freeze_unet:
+            pl_module.unet.requires_grad_(False)
         
         new_lr, scaled = pl_module.get_scaled_lr(self.config.trainer.lr)
         if scaled:
             self.config.trainer.lr = new_lr
             rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
         
-        param_to_optimize = optimizers[0].param_groups
+        assert len(optimizers) == 1, "Expect only one optimizer in StableDiffusionModel"
+        if not self.config.freeze_unet:
+            param_to_optimize = optimizers[0].param_groups
+        else:
+            param_to_optimize = []
+            del optimizers[0]
+
         param_to_optimize.append(
             {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
         )

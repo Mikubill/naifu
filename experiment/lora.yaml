@@ -79,8 +79,8 @@ dataset:
     debug: false
     dropout: 0.7
     methods:
-      adjust_brightness: 1.1
-      adjust_contrast: 1.1
+      adjust_brightness: 0.1
+      adjust_contrast: 0.1
       # rotate_with_crop: 5
 
 optimizer:
