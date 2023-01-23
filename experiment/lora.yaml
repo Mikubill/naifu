@@ -6,7 +6,7 @@ lora:
   train_unet: true
   train_text_encoder: true
   unet_lr: 5e-4
-  encoder_lr: 1e-3
+  encoder_lr: 1e-4
   lowvram: false
   lora_alpha: 1.0
   scale_multipier: false
@@ -67,7 +67,7 @@ arb:
 
 dataset:
   img_path: 
-    - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
+    - "/root/workspace/nahida"
   center_crop: false
   ucg: 0.1
   debug_arb: false
@@ -118,11 +118,13 @@ sampling:
   steps: 20
   cfg_scale: 9
   negative_prompts: 
-    - "lowres, bad anatomy, text, error, extra digit, cropped"
-    - "lowres, low quality"
+    - "lowres, low quality, worst quality"
+    - "lowres, low quality, worst quality"
+    - "lowres, low quality, worst quality"
   prompts: 
-    - "a girl running fast on the country lane"
-    - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
+    - "nahida, 1girl, masterpiece"
+    - "nahida, 1girl, solo, food, fruit, lemon, masterpiece"
+    - "nahida"
 
 encoder:
   # Leave blank to load from model
