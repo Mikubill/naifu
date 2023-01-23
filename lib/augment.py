@@ -49,17 +49,21 @@ class AugmentTransforms():
         return image.rotate(ang, expand=False, fillcolor=(255,255,255), resample=3).crop((dx, dy, xl, yl))
 
     def flip(self, image, x):
-        return image.transpose(Image.FLIP_LEFT_RIGHT)
+        if random.random() < x:
+            return image.transpose(Image.FLIP_LEFT_RIGHT)
+        return image
 
     def adjust_contrast(self, image, factor):
         enh_con = ImageEnhance.Contrast(image)
         return enh_con.enhance(factor)
 
     def adjust_brightness(self, image, brightness):
+        brightness = 1 + random.randint(-brightness, brightness)
         enh_bri = ImageEnhance.Brightness(image)
         return enh_bri.enhance(brightness)
 
     def adjust_color(self, image, color):
+        color = 1 + random.randint(-color, color)
         enh_col = ImageEnhance.Color(image)
         return enh_col.enhance(color)
 
