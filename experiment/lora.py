@@ -8,16 +8,14 @@ from lib.model import StableDiffusionModel, get_class
 
 class LoRABaseModel(torch.nn.Module):
     
-    def __init__(self, unet, text_encoder, multiplier=1.0, r=4):
+    def __init__(self, unet, text_encoder, config):
 
         super().__init__()
-        require_grad_params = []
         names = []
-        self.multiplier = multiplier
-        self.r = r
+        self.multiplier, self.r, alpha = config.multipier, config.rank, config.lora_alpha
         
-        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"])
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"])
+        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha)
+        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"], alpha)
         
         print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
         print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
@@ -27,7 +25,7 @@ class LoRABaseModel(torch.nn.Module):
             assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
             names.add(lora.lora_name)
             
-    def create_modules(self, prefix, model, target_replace_module):
+    def create_modules(self, prefix, model, target_replace_module, alpha):
         blocks = []
         for name, module in model.named_modules():
             if module.__class__.__name__ not in target_replace_module:
@@ -37,8 +35,9 @@ class LoRABaseModel(torch.nn.Module):
                     
                     lora_name = prefix + '.' + name + '.' + child_name
                     lora_name = lora_name.replace('.', '_')
-                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r)
+                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r, alpha)
                     blocks.append(lora_module)
+                    
         return blocks
     
     def inject(self, unet=True, text_encoder=True):
@@ -54,9 +53,11 @@ class LoRABaseModel(torch.nn.Module):
 
 class LoRAModule(torch.nn.Module):
     
-    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4):
+    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1):
         super().__init__()
         self.lora_name = lora_name    
+        self.lora_dim = lora_dim
+        
         if base_layer.__class__.__name__ == 'Conv2d':
             in_dim = base_layer.in_channels
             out_dim = base_layer.out_channels
@@ -70,6 +71,11 @@ class LoRAModule(torch.nn.Module):
         
         self.multiplier = multiplier
         self.base_layer = base_layer
+        
+        alpha = lora_dim if alpha is None or alpha == 0 else alpha
+        self.scale = alpha / self.lora_dim
+        self.register_buffer('alpha', torch.tensor(alpha))   
+        
         torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
         torch.nn.init.zeros_(self.lora_up.weight)
     
@@ -80,7 +86,7 @@ class LoRAModule(torch.nn.Module):
         del self.base_layer
 
     def forward(self, x):
-        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier
+        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
 
 
 class LoRADiffusionModel(StableDiffusionModel):
@@ -89,17 +95,15 @@ class LoRADiffusionModel(StableDiffusionModel):
         
     def init_model(self):
         super().init_model()
-        if self.config.lora.get("scale_multipier"):
-            lora_alpha = self.config.lora.get("lora_alpha") or 1.0
-            self.config.lora.multipier = lora_alpha / self.config.lora.rank
+        
+        self.unet.train()
+        if self.config.lora.train_text_encoder:
+            self.text_encoder.train()
         
         if self.config.trainer.gradient_checkpointing:
-            self.unet.train()
-            if self.config.lora.train_text_encoder:
-                self.text_encoder.gradient_checkpointing_enable()
-                self.text_encoder.train()
+            self.text_encoder.gradient_checkpointing_enable()
             
-        self.lora =  LoRABaseModel(self.unet, self.text_encoder, self.config.lora.multipier, self.config.lora.rank)
+        self.lora =  LoRABaseModel(self.unet, self.text_encoder, self.config.lora)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
 

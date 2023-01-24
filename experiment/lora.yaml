@@ -1,25 +1,24 @@
 name: test-run
 
 lora:
-  rank: 4
+  rank: 8
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
   unet_lr: 5e-4
-  encoder_lr: 1e-4
+  encoder_lr: 3e-4
   lowvram: false
-  lora_alpha: 1.0
-  scale_multipier: false
+  lora_alpha: 4
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  model_path: "../animesfw"
+  model_path: "/root/workspace/storage/models/orangemix"
   init_batch_size: 2
   resolution: 512
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
-  seed: 1138
+  seed: 154325
   precision: fp32
   half_encoder: true
   use_ema: false
@@ -72,7 +71,7 @@ dataset:
   ucg: 0.1
   debug_arb: false
   num_workers: 3
-  process_tags: true
+  process_tags: false
   cache_latents: false
   augment:
     enabled: false
@@ -112,7 +111,7 @@ sampling:
   every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
-  seed: 1139
+  seed: 52345
   height: 512
   width: 512
   steps: 20
@@ -122,8 +121,8 @@ sampling:
     - "lowres, low quality, worst quality"
     - "lowres, low quality, worst quality"
   prompts: 
-    - "nahida, 1girl, masterpiece"
-    - "nahida, 1girl, solo, food, fruit, lemon, masterpiece"
+    - "nahida, 1girl, masterpiece, flat chest"
+    - "nahida, 1girl, solo, food, fruit, lemon, masterpiece, flat chest"
     - "nahida"
 
 encoder:
