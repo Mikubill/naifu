@@ -98,7 +98,7 @@ def main(args):
         enable_checkpointing = False
 
     if config.lightning.get("enable_checkpointing") == None:
-        config.lightning.gradient_checkpointing = enable_checkpointing
+        config.lightning.enable_checkpointing = enable_checkpointing
     
     trainer = pl.Trainer(
         logger=logger, 
