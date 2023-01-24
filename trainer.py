@@ -88,7 +88,7 @@ def main(args):
     if config.get("sampling") != None and config.sampling.enabled:
         callbacks.append(SampleCallback(config.sampling, logger))
         
-    if config.lightning.get("strategy") == None:
+    if config.lightning.get("strategy") is None:
         config.lightning.strategy = strategy
 
     if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
@@ -98,7 +98,7 @@ def main(args):
         enable_checkpointing = False
 
     if config.lightning.get("enable_checkpointing") == None:
-        config.lightning.strategy = enable_checkpointing
+        config.lightning.gradient_checkpointing = enable_checkpointing
     
     trainer = pl.Trainer(
         logger=logger, 
