@@ -121,7 +121,7 @@ sampling:
     - "lowres, low quality, worst quality"
     - "lowres, low quality, worst quality"
   prompts: 
-    - "nahida, 1girl, masterpiece, flat chest"
+    - "nahida, 1girl, loli, masterpiece, flat chest"
     - "nahida, 1girl, solo, food, fruit, lemon, masterpiece, flat chest"
     - "nahida"
 
