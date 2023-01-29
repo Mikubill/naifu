@@ -34,10 +34,7 @@ def main(args):
     if config.get("lora"):
         from experiment.lora import LoRADiffusionModel
         model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
-        if config.trainer.gradient_checkpointing:
-            strategy = "dp" 
-        elif strategy == "ddp_find_unused_parameters_false":
-            strategy = "ddp" 
+        strategy = config.lightning.strategy = None
     else:
         model = load_model(args.model_path, config)
 
