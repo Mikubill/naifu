@@ -9,13 +9,32 @@ custom_embeddings:
   freeze_unet: false
   trainer:
     save_path: 
-    lr: 1e-3
     max_epochs: -1
     every_n_epochs: 1
     every_n_steps: -1
   concepts: 
     freeze: [aoaoko, aqua, bbss] 
     trainable: [momoko, ao, crosschan, nyanko:2v, rcins:11v] 
+
+  optimizer:
+    name: experiment.pseudo_lazy_adamw.PseudoLazyAdamW
+    disable_lr_scaling: true
+    params:
+      lr: 2e-4
+      weight_decay: 1e-2
+      eps: 1e-8
+  lr_scheduler:
+    name: torch.optim.lr_scheduler.CosineAnnealingLR
+    warmup: 
+      enabled: false
+      init_lr: 2e-8
+      num_warmup: 50
+      strategy: "cos"
+    params:
+      T_max: -1
+      eta_min: 1e-6
+      last_epoch: -1
+
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
