@@ -100,11 +100,11 @@ class PseudoLazyAdamW(Optimizer):
 
                 step_size = group["lr"]
                 if group["correct_bias"]:  # No bias correction for Bert
-                    bias_correction1 = 1.0 - beta1 ** state["perentry_step"]
-                    bias_correction2 = 1.0 - beta2 ** state["perentry_step"]
+                    bias_correction1 = 1.0 - beta1 ** state["perentry_step"][mask]
+                    bias_correction2 = 1.0 - beta2 ** state["perentry_step"][mask]
                     step_size = step_size * torch.sqrt(bias_correction2) / bias_correction1
 
-                p.data[mask] = p.data[mask]-torch.einsum('ij,i->ij',_exp_avg / denom, step_size[mask])
+                p.data[mask] = p.data[mask]-torch.einsum('ij,i->ij',_exp_avg / denom, step_size)
 
                 # Just adding the square of the weights to the loss function is *not*
                 # the correct way of using L2 regularization/weight decay with Adam,
