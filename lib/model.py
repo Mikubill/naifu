@@ -33,6 +33,8 @@ class StableDiffusionModel(pl.LightningModule):
         self.save_hyperparameters(config)
         self.init_model()
         
+        self.automatic_optimization = False
+        
     def init_model(self):
         config = self.config
         scheduler_cls = DDIMScheduler
@@ -224,7 +226,21 @@ class StableDiffusionModel(pl.LightningModule):
         
         # Logging to TensorBoard by default
         self.log("train_loss", loss)
-        return loss
+        
+        optimizers = self.optimizers()
+        optimizers = optimizers if isinstance(optimizers, list) else [optimizers]
+        accumulate_grad_batches = self.trainer.accumulate_grad_batches
+        current_step = self.trainer.global_step
+        
+        if (current_step + 1) % accumulate_grad_batches == 0:
+            for opt in optimizers:
+                opt.zero_grad(set_to_none=True)
+    
+        self.manual_backward(loss)
+
+        if (current_step + 1) % accumulate_grad_batches == 0:
+            for opt in optimizers:
+                opt.step()
     
     def get_scaled_lr(self, base):
         # Scale LR OPs
