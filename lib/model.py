@@ -318,6 +318,12 @@ class StableDiffusionModel(pl.LightningModule):
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
             self.ema.update()
+
+    def on_train_epoch_end(self, *args, **kwargs) -> None:
+        schedulers = self.lr_schedulers()
+        schedulers = schedulers if isinstance(schedulers, list) else [schedulers]
+        for scheduler in schedulers:
+            scheduler.step()
             
     def on_save_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
