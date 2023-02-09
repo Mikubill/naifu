@@ -72,7 +72,7 @@ class PseudoLazyAdamW(Optimizer):
 
                 state = self.state[p]
                 mask = torch.any(grad != 0, axis=-1)
-                
+
                 # State initialization
                 if len(state) == 0:
 
@@ -82,8 +82,6 @@ class PseudoLazyAdamW(Optimizer):
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(p.data)
 
-                
-                
                 grad = grad[mask]
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 beta1, beta2 = group["betas"]
@@ -104,7 +102,7 @@ class PseudoLazyAdamW(Optimizer):
                     bias_correction2 = 1.0 - beta2 ** state["perentry_step"][mask]
                     step_size = step_size * torch.sqrt(bias_correction2) / bias_correction1
 
-                p.data[mask] = p.data[mask]-torch.einsum('ij,i->ij',_exp_avg / denom, step_size)
+                p.data[mask] = p.data[mask] - torch.einsum('ij,i->ij', _exp_avg / denom, step_size)
 
                 # Just adding the square of the weights to the loss function is *not*
                 # the correct way of using L2 regularization/weight decay with Adam,
@@ -115,6 +113,6 @@ class PseudoLazyAdamW(Optimizer):
                 # of the weights to the loss with plain (non-momentum) SGD.
                 # Add weight decay at the end (fixed version)
                 if group["weight_decay"] > 0.0:
-                    p.data[mask] = p.data[mask].add_(p.data, alpha=(-group["lr"] * group["weight_decay"]))
+                    p.data[mask] = p.data[mask].add(p.data[mask], alpha=(-group["lr"] * group["weight_decay"]))
 
         return loss
