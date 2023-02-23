@@ -51,6 +51,8 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
          
         self.unet.to(self.device, dtype=torch.float32)
+        self.unet.train()
+        
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
