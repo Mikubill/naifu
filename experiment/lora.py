@@ -99,6 +99,9 @@ class LoRADiffusionModel(StableDiffusionModel):
         self.unet.train()
         if self.config.lora.train_text_encoder:
             self.text_encoder.train()
+            
+        self.text_encoder.requires_grad_(False)
+        self.unet.requires_grad_(False)
         
         if self.config.trainer.gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()
