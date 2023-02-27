@@ -9,7 +9,7 @@ lora:
   unet_lr: 5e-4
   encoder_lr: 2e-4
   lowvram: false
-  lora_alpha: 24
+  lora_alpha: 16
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
@@ -90,15 +90,13 @@ optimizer:
     eps: 1e-7
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.CosineAnnealingLR
+  name: torch.optim.lr_scheduler.ConstantLR
   warmup: 
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
     warmup_strategy: "cos"
   params:
-    T_max: 20
-    eta_min: 5e-6
     last_epoch: -1
 
 monitor:
@@ -121,7 +119,7 @@ sampling:
   negative_prompts: 
     - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
-    - "masterpiece, best quality, 1girl, kitagawa_marin"
+    - "masterpiece, best quality, 1girl, nahida"
 
 encoder:
   # Leave blank to load from model
