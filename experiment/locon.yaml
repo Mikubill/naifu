@@ -7,7 +7,7 @@ lora:
   train_unet: true
   train_text_encoder: true
   unet_lr: 5e-4
-  encoder_lr: 5e-4
+  encoder_lr: 2e-4
   lowvram: false
   lora_alpha: 24
 
@@ -46,7 +46,7 @@ lightning:
   devices: -1
   auto_select_gpus: true
   # limit_train_batches: 100
-  max_epochs: 30
+  max_epochs: 80
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
@@ -66,7 +66,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/kitagawa_marin_dataset"
+    - "/root/workspace/nahida"
   center_crop: false
   ucg: 0.0
   debug_arb: false
@@ -90,13 +90,15 @@ optimizer:
     eps: 1e-7
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.ConstantLR
+  name: torch.optim.lr_scheduler.CosineAnnealingLR
   warmup: 
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
     warmup_strategy: "cos"
   params:
+    T_max: 20
+    eta_min: 5e-6
     last_epoch: -1
 
 monitor:
