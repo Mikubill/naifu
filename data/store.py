@@ -72,6 +72,7 @@ class ImageStore(Dataset):
     def prompt_resolver(self, x: str):
         img_item = (x, "")
         fp = os.path.splitext(x)[0]
+        return str(x), "1girl, kitagawa_marin"
 
         with open(fp + ".txt") as f:
             content = f.read()
