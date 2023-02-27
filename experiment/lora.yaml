@@ -1,14 +1,14 @@
 name: test-run
 
 lora:
-  rank: 32
+  rank: 16
   multipier: 1.0
   train_unet: true
-  train_text_encoder: false
+  train_text_encoder: true
   unet_lr: 5e-4
   encoder_lr: 2e-4
   lowvram: false
-  lora_alpha: 16
+  lora_alpha: 8
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
