@@ -32,8 +32,12 @@ def main(args):
         strategy = init_hivemind(config)
     
     if config.get("lora"):
-        from experiment.lora import LoRADiffusionModel
-        model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+        if config.lora.get("use_locon"):
+            from experiment.locon import LoConDiffusionModel
+            model = LoConDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+        else:
+            from experiment.lora import LoRADiffusionModel
+            model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
         strategy = config.lightning.strategy = None
     else:
         model = load_model(args.model_path, config)
