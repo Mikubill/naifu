@@ -1,14 +1,15 @@
 name: test-run
 
 lora:
-  rank: 16
+  rank: 24
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 5e-4
+  unet_lr: 2e-4
   encoder_lr: 2e-4
   lowvram: false
-  lora_alpha: 8
+  lora_alpha: 1
+  override_prompt: ""
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
@@ -35,8 +36,8 @@ checkpoint:
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-loss{train_loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 3
-  save_top_k: 3
+  every_n_epochs: 4
+  save_top_k: 1
   mode: 'max'
   save_last: true
 
@@ -45,7 +46,7 @@ lightning:
   devices: -1
   auto_select_gpus: true
   # limit_train_batches: 100
-  max_epochs: 30
+  max_epochs: 20
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
@@ -65,7 +66,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/kitagawa_marin_dataset"
+    - "/root/workspace/ONIMAI"
   center_crop: false
   ucg: 0.0
   debug_arb: false
