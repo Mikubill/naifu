@@ -6,14 +6,15 @@ lora:
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 5e-4
+  unet_lr: 2e-4
   encoder_lr: 2e-4
-  lowvram: false
-  lora_alpha: 8
+  lowvram: true
+  lora_alpha: 1
+  override_prompt: ""
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  model_path: "/root/workspace/storage/models/orangemix"
+  model_path: "/root/workspace/animesfw"
   init_batch_size: 2
   resolution: 512
   center_crop: false
@@ -66,7 +67,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/nahida"
+    - "/root/workspace/ONIMAI"
   center_crop: false
   ucg: 0.0
   debug_arb: false
@@ -119,7 +120,7 @@ sampling:
   negative_prompts: 
     - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
-    - "masterpiece, best quality, 1girl, nahida"
+    - "masterpiece, best quality, 1girl, oyama mahiro"
 
 encoder:
   # Leave blank to load from model
