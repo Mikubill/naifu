@@ -87,6 +87,7 @@ class LoConModule(torch.nn.Module):
         self.base_layer.forward = self.forward
         del self.base_layer
 
+    @torch.enable_grad() 
     def forward(self, x):
         return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
 
@@ -108,9 +109,10 @@ class LoConDiffusionModel(StableDiffusionModel):
         if self.config.trainer.gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()
             
-        self.lora =  LoConBaseModel(self.unet, self.text_encoder, self.config.lora)
+        self.lora = LoConBaseModel(self.unet, self.text_encoder, self.config.lora)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
+        self.text_encoder.text_model.embeddings.requires_grad_(True)
 
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
@@ -123,8 +125,10 @@ class LoConDiffusionModel(StableDiffusionModel):
         checkpoint["state_dict"] = {k: v for k, v in checkpoint["state_dict"].items() if k.startswith("lora.")}
     
     def training_step(self, batch, batch_idx):
-        input_ids, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+        with torch.set_grad_enabled(self.config.lora.train_text_encoder):
+            input_ids, latents = batch[0], batch[1]
+            encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+            
         if not self.dataset.use_latent_cache:
             latents = self.encode_pixels(latents).to(self.unet.dtype)
 
