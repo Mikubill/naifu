@@ -5,7 +5,7 @@ lora:
   rank: 8
   conv_rank: 8
   lora_alpha: 1
-  conv_lora_alpha: 1
+  conv_alpha: 1
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
