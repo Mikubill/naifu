@@ -3,17 +3,19 @@ name: test-run
 lora:
   use_locon: true
   rank: 8
+  conv_rank: 8
+  lora_alpha: 1
+  conv_lora_alpha: 1
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 2e-4
-  encoder_lr: 2e-4
-  lowvram: true
-  lora_alpha: 1
+  unet_lr: 1e-4
+  encoder_lr: 1e-4
+  lowvram: false
   override_prompt: ""
 
 trainer:
-  model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  # model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   model_path: "/root/workspace/storage/models/orangemix"
   init_batch_size: 2
   resolution: 512
@@ -47,7 +49,7 @@ lightning:
   devices: -1
   auto_select_gpus: true
   # limit_train_batches: 100
-  max_epochs: 20
+  max_epochs: 40
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
@@ -67,24 +69,25 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/ONIMAI"
+    - "/root/workspace/pvc"
   center_crop: false
   ucg: 0.0
   debug_arb: false
-  num_workers: 3
+  num_workers: 2
   process_tags: false
-  cache_latents: false
+  important_tags: [pvc]
   augment:
     enabled: false
     debug: false
     dropout: 0.7
     methods:
-      adjust_brightness: 0.1
-      adjust_contrast: 0.1
+      adjust_brightness: 1.1
+      adjust_contrast: 1.1
       # rotate_with_crop: 5
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
+  # name: lion_pytorch.Lion
   params:
     lr: 5e-6
     weight_decay: 1e-2
