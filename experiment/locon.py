@@ -13,7 +13,7 @@ class LoConBaseModel(torch.nn.Module):
         super().__init__()
         names = []
         self.multiplier, self.r, alpha = config.multipier, config.rank, config.lora_alpha
-        self.conv_r, self.conv_alpha = getattr(config, "conv_rank", self.r), getattr(config, "conv_lora_alpha", alpha)
+        self.conv_r, self.conv_alpha = getattr(config, "conv_rank", self.r), getattr(config, "conv_alpha", alpha)
         
         self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha)
         self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"], alpha)
@@ -38,7 +38,11 @@ class LoConBaseModel(torch.nn.Module):
                     lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
                     blocks.append(lora_module)
                 elif child_module.__class__.__name__ == "Conv2d":
-                    lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha)
+                    k_size, *_ = child_module.kernel_size
+                    if k_size == 1:
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                    else:
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha)
                     blocks.append(lora_module)
                     
         return blocks
