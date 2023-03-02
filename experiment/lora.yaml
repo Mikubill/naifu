@@ -83,7 +83,7 @@ dataset:
       # rotate_with_crop: 5
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
     lr: 5e-6
     weight_decay: 1e-2
@@ -95,7 +95,7 @@ lr_scheduler:
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
-    warmup_strategy: "cos"
+    strategy: "cos"
   params:
     last_epoch: -1
 
