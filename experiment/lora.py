@@ -131,6 +131,11 @@ class LoRADiffusionModel(StableDiffusionModel):
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
+        
+        # https://www.crosslabs.org/blog/diffusion-with-offset-noise
+        if self.config.trainer.get("offset_noise"):
+            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1)
+        
         bsz = latents.shape[0]
             
         # Sample a random timestep for each image
