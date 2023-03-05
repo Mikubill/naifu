@@ -1,26 +1,42 @@
 name: test-run
 
+lora:
+  use_locon: true
+  rank: 8
+  conv_rank: 8
+  lora_alpha: 1
+  conv_alpha: 1
+  multipier: 1.0
+  train_unet: true
+  train_text_encoder: true
+  unet_lr: 1e-4
+  encoder_lr: 1e-4
+  lowvram: false
+  override_prompt: ""
+
 trainer:
-  model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
-  model_path: "model"
-  init_batch_size: 1
+  # model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
+  model_path: "/root/workspace/storage/models/orangemix"
+  init_batch_size: 2
   resolution: 512
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
-  seed: 1138
+  seed: 34
+  precision: fp32
+  half_encoder: true
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
-  train_text_encoder: false
   attention_slicing: false
-  vae_slicing: false
-  
-  # note: only works with init_batch_size > 1
-  use_xformers: false
+  vae_slicing: true
+
   offset_noise: false
   offset_noise_val: 0.1
-  
+
+  # note: only works with init_batch_size > 1
+  use_xformers: true
+
 checkpoint:
   monitor: 'epoch'
   dirpath: checkpoint
@@ -36,11 +52,10 @@ lightning:
   devices: -1
   auto_select_gpus: true
   # limit_train_batches: 100
-  max_epochs: 20
+  max_epochs: 40
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
-  gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
   move_metrics_to_cpu: true
@@ -57,43 +72,38 @@ arb:
 
 dataset:
   img_path: 
-    - "https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/mmk.tgz"
-
-    # use multiplier:
-    # - [/tmp/dataset-0, 10]
+    - "/root/workspace/pvc"
   center_crop: false
-  ucg: 0.1
+  ucg: 0.0
   debug_arb: false
-  num_workers: 3
-  process_tags: true
-  important_tags: []
-  allow_duplicates: false
+  num_workers: 2
+  process_tags: false
+  important_tags: [pvc]
   augment:
     enabled: false
     debug: false
     dropout: 0.7
     methods:
-      adjust_brightness: 0.1
-      adjust_contrast: 0.1
+      adjust_brightness: 1.1
+      adjust_contrast: 1.1
       # rotate_with_crop: 5
 
 optimizer:
   name: torch.optim.AdamW
+  # name: lion_pytorch.Lion
   params:
     lr: 5e-6
     weight_decay: 1e-2
-    eps: 1e-8
+    eps: 1e-7
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.CosineAnnealingLR
+  name: torch.optim.lr_scheduler.ConstantLR
   warmup: 
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
     strategy: "cos"
   params:
-    T_max: 20
-    eta_min: 1e-7
     last_epoch: -1
 
 monitor:
@@ -108,19 +118,18 @@ sampling:
   every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
-  seed: 1139
+  seed: 1432
   height: 512
   width: 512
-  steps: 20
+  steps: 28
   cfg_scale: 9
   negative_prompts: 
-    - "lowres, bad anatomy, text, error, extra digit, cropped"
-    - "lowres, low quality"
+    - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
-    - "a girl running fast on the country lane"
-    - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
+    - "masterpiece, best quality, 1girl, oyama mahiro"
 
 encoder:
   # Leave blank to load from model
   text: 
   vae: 
+  

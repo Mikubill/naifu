@@ -15,11 +15,6 @@ Currently implemented features:
 
 ## Usage
 
-<details>
-      <summary>deployment notes</summary>
-      There is no need to prepare datasets and models by default, the script will download automatically.
-</details>
-
 Clone repo
 
 ```bash
@@ -42,17 +37,48 @@ Start training.
 
 ```bash
 # test
-python trainer.py --model_path=/tmp/model --config config/test.yaml
+python trainer.py --config config/test.yaml
 
 # For multi-gpu
-python trainer.py --model_path=/tmp/model --config config/multi-gpu.yaml
+python trainer.py --config config/multi-gpu.yaml
 
 # Disitrubuted
-python trainer.py --model_path=/tmp/model --config config/distributed.yaml
+python trainer.py --config config/distributed.yaml
 ```
 
 Convert checkpoint files to use in SD-based webui
 
 ```bash
 python scripts/convert_to_sd.py --src /path/last.ckpt --dst /path/last.ckpt
+```
+
+## Experiments
+
+Train [LoRA](https://arxiv.org/abs/2106.09685)
+
+```bash
+python trainer.py --config experiment/lora.yaml
+
+## extract 
+python experiment/extract_lora.py --src last.ckpt --dst output_lora.pt
+```
+
+Train [LoCon](https://github.com/KohakuBlueleaf/LoCon)
+
+```bash
+python trainer.py --config experiment/locon.yaml
+
+## extract 
+python experiment/extract_lora.py --src last.ckpt --dst output_locon.pt
+```
+
+Train [Textual Inversion](https://textual-inversion.github.io)
+
+```bash
+python trainer.py --config experiment/textual_inversion.yaml
+```
+
+Convert any checkpoint to safetensors
+```bash
+python scripts/sd_to_safetensors.py --src input.ckpt --dst output.safetensors
 ```

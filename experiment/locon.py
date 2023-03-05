@@ -6,19 +6,20 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from lib.model import StableDiffusionModel, get_class
 
-class LoRABaseModel(torch.nn.Module):
+class LoConBaseModel(torch.nn.Module):
     
     def __init__(self, unet, text_encoder, config):
 
         super().__init__()
         names = []
         self.multiplier, self.r, alpha = config.multipier, config.rank, config.lora_alpha
+        self.conv_r, self.conv_alpha = getattr(config, "conv_rank", self.r), getattr(config, "conv_alpha", alpha)
         
         self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha)
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"], alpha)
-        
-        print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
-        print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
+        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"], alpha)
+            
+        print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
+        print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
         
         names = set()
         for lora in self.text_encoder_loras + self.unet_loras:
@@ -31,11 +32,17 @@ class LoRABaseModel(torch.nn.Module):
             if module.__class__.__name__ not in target_replace_module:
                 continue 
             for child_name, child_module in module.named_modules():
-                if child_module.__class__.__name__ == "Linear" or (child_module.__class__.__name__ == "Conv2d" and child_module.kernel_size == (1, 1)):
-                    
-                    lora_name = prefix + '.' + name + '.' + child_name
-                    lora_name = lora_name.replace('.', '_')
-                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                lora_name = prefix + '.' + name + '.' + child_name
+                lora_name = lora_name.replace('.', '_')
+                if child_module.__class__.__name__ == "Linear":
+                    lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                    blocks.append(lora_module)
+                elif child_module.__class__.__name__ == "Conv2d":
+                    k_size, *_ = child_module.kernel_size
+                    if k_size == 1:
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                    else:
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha)
                     blocks.append(lora_module)
                     
         return blocks
@@ -51,7 +58,7 @@ class LoRABaseModel(torch.nn.Module):
             self.add_module(lora.lora_name, lora)
             
 
-class LoRAModule(torch.nn.Module):
+class LoConModule(torch.nn.Module):
     
     def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1):
         super().__init__()
@@ -60,9 +67,12 @@ class LoRAModule(torch.nn.Module):
         
         if base_layer.__class__.__name__ == 'Conv2d':
             in_dim = base_layer.in_channels
+            k_size = base_layer.kernel_size
+            stride = base_layer.stride
+            padding = base_layer.padding
             out_dim = base_layer.out_channels
-            self.lora_down = torch.nn.Conv2d(in_dim, lora_dim, (1, 1), bias=False)
-            self.lora_up = torch.nn.Conv2d(lora_dim, out_dim, (1, 1), bias=False)
+            self.lora_down = nn.Conv2d(in_dim, lora_dim, k_size, stride, padding, bias=False)
+            self.lora_up = nn.Conv2d(lora_dim, out_dim, (1, 1), bias=False)
         else:
             in_dim = base_layer.in_features
             out_dim = base_layer.out_features
@@ -85,11 +95,12 @@ class LoRAModule(torch.nn.Module):
         self.base_layer.forward = self.forward
         del self.base_layer
 
+    @torch.enable_grad() 
     def forward(self, x):
         return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
 
 
-class LoRADiffusionModel(StableDiffusionModel):
+class LoConDiffusionModel(StableDiffusionModel):
     def __init__(self, model_path, config, batch_size):
         super().__init__(model_path, config, batch_size)
         
@@ -106,7 +117,7 @@ class LoRADiffusionModel(StableDiffusionModel):
         if self.config.trainer.gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()
             
-        self.lora = LoRABaseModel(self.unet, self.text_encoder, self.config.lora)
+        self.lora = LoConBaseModel(self.unet, self.text_encoder, self.config.lora)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
         self.text_encoder.text_model.embeddings.requires_grad_(True)

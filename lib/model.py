@@ -53,6 +53,8 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
          
         self.unet.to(self.device, dtype=torch.float32)
+        self.unet.train()
+        
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
@@ -200,6 +202,9 @@ class StableDiffusionModel(pl.LightningModule):
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
+        if self.config.trainer.get("offset_noise"):
+            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1)
+        
         bsz = latents.shape[0]
             
         # Sample a random timestep for each image

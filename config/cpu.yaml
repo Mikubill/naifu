@@ -17,6 +17,9 @@ trainer:
   attention_slicing: false
   vae_slicing: false
   
+  offset_noise: false
+  offset_noise_val: 0.1
+  
 checkpoint:
   monitor: 'epoch'
   dirpath: checkpoint

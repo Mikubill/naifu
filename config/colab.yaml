@@ -16,6 +16,8 @@ trainer:
   train_text_encoder: false
   attention_slicing: false
   vae_slicing: true
+  offset_noise: false
+  offset_noise_val: 0.1
 
   # note: only works with init_batch_size > 1
   use_xformers: true

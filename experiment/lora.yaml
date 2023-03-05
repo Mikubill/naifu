@@ -1,14 +1,15 @@
 name: test-run
 
 lora:
-  rank: 8
+  rank: 24
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 5e-4
-  encoder_lr: 3e-4
+  unet_lr: 2e-4
+  encoder_lr: 2e-4
   lowvram: false
-  lora_alpha: 4
+  lora_alpha: 1
+  override_prompt: ""
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
@@ -18,7 +19,7 @@ trainer:
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
-  seed: 154325
+  seed: 34
   precision: fp32
   half_encoder: true
   use_ema: false
@@ -26,6 +27,9 @@ trainer:
   lr_scale: sqrt
   attention_slicing: false
   vae_slicing: true
+
+  offset_noise: false
+  offset_noise_val: 0.1
 
   # note: only works with init_batch_size > 1
   use_xformers: true
@@ -35,8 +39,8 @@ checkpoint:
   dirpath: checkpoint
   filename: 'sample-nd-epoch{epoch:02d}-loss{train_loss:.2f}'
   auto_insert_metric_name: false
-  every_n_epochs: 3
-  save_top_k: 3
+  every_n_epochs: 4
+  save_top_k: 1
   mode: 'max'
   save_last: true
 
@@ -49,7 +53,6 @@ lightning:
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
-  gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
   move_metrics_to_cpu: true
@@ -66,9 +69,9 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/nahida"
+    - "/root/workspace/ONIMAI"
   center_crop: false
-  ucg: 0.1
+  ucg: 0.0
   debug_arb: false
   num_workers: 3
   process_tags: false
@@ -87,7 +90,7 @@ optimizer:
   params:
     lr: 5e-6
     weight_decay: 1e-2
-    eps: 1e-8
+    eps: 1e-7
 
 lr_scheduler:
   name: torch.optim.lr_scheduler.ConstantLR
@@ -111,19 +114,15 @@ sampling:
   every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
-  seed: 52345
+  seed: 1432
   height: 512
   width: 512
-  steps: 20
+  steps: 28
   cfg_scale: 9
   negative_prompts: 
-    - "lowres, low quality, worst quality"
-    - "lowres, low quality, worst quality"
-    - "lowres, low quality, worst quality"
+    - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
-    - "nahida, 1girl, loli, masterpiece, flat chest"
-    - "nahida, 1girl, solo, food, fruit, lemon, masterpiece, flat chest"
-    - "nahida"
+    - "masterpiece, best quality, 1girl, kitagawa_marin"
 
 encoder:
   # Leave blank to load from model
