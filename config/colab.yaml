@@ -16,6 +16,8 @@ trainer:
   train_text_encoder: false
   attention_slicing: false
   vae_slicing: true
+  offset_noise: false
+  offset_noise_val: 0.1
 
   # note: only works with init_batch_size > 1
   use_xformers: true
@@ -38,7 +40,7 @@ lightning:
   max_epochs: 20
   precision: 32
   log_every_n_steps: 1
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 4
   gradient_clip_val: 0.0
   auto_scale_batch_size: false
   auto_lr_find: false
