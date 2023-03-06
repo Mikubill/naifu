@@ -12,11 +12,11 @@ class LoConBaseModel(torch.nn.Module):
 
         super().__init__()
         names = []
-        self.multiplier, self.r, alpha = config.multipier, config.rank, config.lora_alpha
+        self.multiplier, self.r, alpha, dropout = config.multipier, config.rank, config.lora_alpha, config.get("dropout", 0.0)
         self.conv_r, self.conv_alpha = getattr(config, "conv_rank", self.r), getattr(config, "conv_alpha", alpha)
         
-        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha)
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"], alpha)
+        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha, dropout)
+        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"], alpha, dropout)
             
         print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
         print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
@@ -26,7 +26,7 @@ class LoConBaseModel(torch.nn.Module):
             assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
             names.add(lora.lora_name)
             
-    def create_modules(self, prefix, model, target_replace_module, alpha):
+    def create_modules(self, prefix, model, target_replace_module, alpha, dropout):
         blocks = []
         for name, module in model.named_modules():
             if module.__class__.__name__ not in target_replace_module:
@@ -35,14 +35,14 @@ class LoConBaseModel(torch.nn.Module):
                 lora_name = prefix + '.' + name + '.' + child_name
                 lora_name = lora_name.replace('.', '_')
                 if child_module.__class__.__name__ == "Linear":
-                    lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                    lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
                     blocks.append(lora_module)
                 elif child_module.__class__.__name__ == "Conv2d":
                     k_size, *_ = child_module.kernel_size
                     if k_size == 1:
-                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
                     else:
-                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha)
+                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha, dropout)
                     blocks.append(lora_module)
                     
         return blocks
@@ -60,10 +60,11 @@ class LoConBaseModel(torch.nn.Module):
 
 class LoConModule(torch.nn.Module):
     
-    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1):
+    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1, dropout=0):
         super().__init__()
         self.lora_name = lora_name    
         self.lora_dim = lora_dim
+        self.dropout = nn.Dropout(dropout) if dropout else nn.Identity()
         
         if base_layer.__class__.__name__ == 'Conv2d':
             in_dim = base_layer.in_channels
@@ -97,7 +98,7 @@ class LoConModule(torch.nn.Module):
 
     @torch.enable_grad() 
     def forward(self, x):
-        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
+        return self.org_forward(x) + self.dropout(self.lora_up(self.lora_down(x))) * self.multiplier * self.scale
 
 
 class LoConDiffusionModel(StableDiffusionModel):
