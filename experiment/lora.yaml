@@ -10,6 +10,7 @@ lora:
   lowvram: false
   lora_alpha: 1
   override_prompt: ""
+  dropout: 0.0
 
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
