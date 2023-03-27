@@ -12,10 +12,10 @@ class LoRABaseModel(torch.nn.Module):
 
         super().__init__()
         names = []
-        self.multiplier, self.r, alpha = config.multipier, config.rank, config.lora_alpha
+        self.multiplier, self.r, alpha, dropout = config.multipier, config.rank, config.lora_alpha, config.get("dropout", 0.0)
         
-        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha)
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"], alpha)
+        self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha, dropout)
+        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"], alpha, dropout)
         
         print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
         print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
@@ -25,7 +25,7 @@ class LoRABaseModel(torch.nn.Module):
             assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
             names.add(lora.lora_name)
             
-    def create_modules(self, prefix, model, target_replace_module, alpha):
+    def create_modules(self, prefix, model, target_replace_module, alpha, dropout):
         blocks = []
         for name, module in model.named_modules():
             if module.__class__.__name__ not in target_replace_module:
@@ -35,7 +35,7 @@ class LoRABaseModel(torch.nn.Module):
                     
                     lora_name = prefix + '.' + name + '.' + child_name
                     lora_name = lora_name.replace('.', '_')
-                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r, alpha)
+                    lora_module = LoRAModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
                     blocks.append(lora_module)
                     
         return blocks
@@ -53,10 +53,11 @@ class LoRABaseModel(torch.nn.Module):
 
 class LoRAModule(torch.nn.Module):
     
-    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1):
+    def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1, dropout=0):
         super().__init__()
         self.lora_name = lora_name    
         self.lora_dim = lora_dim
+        self.dropout = nn.Dropout(dropout) if dropout else nn.Identity()
         
         if base_layer.__class__.__name__ == 'Conv2d':
             in_dim = base_layer.in_channels
@@ -86,7 +87,7 @@ class LoRAModule(torch.nn.Module):
         del self.base_layer
 
     def forward(self, x):
-        return self.org_forward(x) + self.lora_up(self.lora_down(x)) * self.multiplier * self.scale
+        return self.org_forward(x) + self.dropout(self.lora_up(self.lora_down(x))) * self.multiplier * self.scale
 
 
 class LoRADiffusionModel(StableDiffusionModel):
@@ -134,7 +135,7 @@ class LoRADiffusionModel(StableDiffusionModel):
         
         # https://www.crosslabs.org/blog/diffusion-with-offset-noise
         if self.config.trainer.get("offset_noise"):
-            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1)
+            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
         
         bsz = latents.shape[0]
             
