@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from lib.model import StableDiffusionModel, get_class
+from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoRABaseModel(torch.nn.Module):
     
@@ -158,7 +158,11 @@ class LoRADiffusionModel(StableDiffusionModel):
         else:
             raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
-        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        if not self.config.trainer.get("min_snr"):
+            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        else:
+            gamma = self.config.trainer.get("min_snr_val")
+            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
         
         # Logging to TensorBoard by default
         self.log("train_loss", loss)
