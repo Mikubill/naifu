@@ -20,7 +20,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
-from lib.utils import get_local_rank, get_world_size
+from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -223,7 +223,12 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
-        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        if not self.config.trainer.get("min_snr"):
+            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        else:
+            gamma = self.config.trainer.get("min_snr_val")
+            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
+
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
         

@@ -19,6 +19,8 @@ trainer:
   vae_slicing: false
   offset_noise: false
   offset_noise_val: 0.1
+  min_snr: false
+  min_snr_val: 5
 
 checkpoint:
   monitor: 'epoch'
