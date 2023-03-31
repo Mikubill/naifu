@@ -689,3 +689,14 @@ def convert_ldm_clip_checkpoint(checkpoint):
         
     clip_model.load_state_dict(text_model_dict)
     return clip_model
+
+
+def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, gamma:float):
+    alphas = noise_scheduler.alphas_cumprod[timesteps]
+    prediction_type = noise_scheduler.config.prediction_type
+    snrs = alphas / (1 - alphas)
+    comp = torch.tensor(gamma) / snrs if prediction_type == "epsilon" else torch.tensor(gamma) / (snrs+1)
+    weights = torch.minimum(comp, torch.ones_like(comp))
+    losses = torch.nn.functional.mse_loss(eps_pred, eps, reduction="none").mean(dim=tuple(range(1, eps.ndim)))
+    loss = (losses * weights).mean()
+    return loss
