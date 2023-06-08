@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
+import diffusers
 from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoConBaseModel(torch.nn.Module):
@@ -16,7 +17,11 @@ class LoConBaseModel(torch.nn.Module):
         self.conv_r, self.conv_alpha = getattr(config, "conv_rank", self.r), getattr(config, "conv_alpha", alpha)
         
         self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha, dropout)
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"], alpha, dropout)
+        
+        unet_modules = ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"]
+        if diffusers.__version__ >= "0.15.0":
+            unet_modules = ["Transformer2DModel", "ResnetBlock2D", "Downsample2D", "Upsample2D"]
+        self.unet_loras = self.create_modules('lora_unet', unet, unet_modules, alpha, dropout)
             
         print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
         print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
@@ -29,21 +34,35 @@ class LoConBaseModel(torch.nn.Module):
     def create_modules(self, prefix, model, target_replace_module, alpha, dropout):
         blocks = []
         for name, module in model.named_modules():
-            if module.__class__.__name__ not in target_replace_module:
-                continue 
-            for child_name, child_module in module.named_modules():
-                lora_name = prefix + '.' + name + '.' + child_name
-                lora_name = lora_name.replace('.', '_')
-                if child_module.__class__.__name__ == "Linear":
-                    lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
-                    blocks.append(lora_module)
-                elif child_module.__class__.__name__ == "Conv2d":
-                    k_size, *_ = child_module.kernel_size
-                    if k_size == 1:
+            if module.__class__.__name__ in target_replace_module:
+                for child_name, child_module in module.named_modules():
+                    lora_name = prefix + '.' + name + '.' + child_name
+                    lora_name = lora_name.replace('.', '_')
+                    if child_module.__class__.__name__ == "Linear":
                         lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
+                    elif child_module.__class__.__name__ == "Conv2d":
+                        k_size, *_ = child_module.kernel_size
+                        if k_size == 1:
+                            lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
+                        else:
+                            lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha, dropout)
                     else:
-                        lora_module = LoConModule(lora_name, child_module, self.multiplier, self.conv_r, self.conv_alpha, dropout)
+                        continue
                     blocks.append(lora_module)
+            elif name in target_replace_module:
+                lora_name = prefix + '.' + name 
+                lora_name = lora_name.replace('.', '_')
+                if module.__class__.__name__ == "Linear":
+                    lora_module = LoConModule(lora_name, module, self.multiplier, self.r, alpha, dropout)
+                elif module.__class__.__name__ == "Conv2d":
+                    k_size, *_ = module.kernel_size
+                    if k_size == 1:
+                        lora_module = LoConModule(lora_name, module, self.multiplier, self.r, alpha, dropout)
+                    else:
+                        lora_module = LoConModule(lora_name, module, self.multiplier, self.conv_r, self.conv_alpha, dropout)
+                else:
+                    continue
+                blocks.append(lora_module)
                     
         return blocks
     
