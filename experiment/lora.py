@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from lib.model import StableDiffusionModel, get_class
+import diffusers
+from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoRABaseModel(torch.nn.Module):
     
@@ -15,7 +16,11 @@ class LoRABaseModel(torch.nn.Module):
         self.multiplier, self.r, alpha, dropout = config.multipier, config.rank, config.lora_alpha, config.get("dropout", 0.0)
         
         self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha, dropout)
-        self.unet_loras = self.create_modules('lora_unet', unet, ["Transformer2DModel", "Attention"], alpha, dropout)
+
+        unet_modules = ["Transformer2DModel", "Attention"]
+        if diffusers.__version__ >= "0.15.0":
+            unet_modules = ["Transformer2DModel"]
+        self.unet_loras = self.create_modules('lora_unet', unet, unet_modules, alpha, dropout)
         
         print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
         print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
@@ -158,7 +163,11 @@ class LoRADiffusionModel(StableDiffusionModel):
         else:
             raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
-        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        if not self.config.trainer.get("min_snr"):
+            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+        else:
+            gamma = self.config.trainer.get("min_snr_val")
+            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
         
         # Logging to TensorBoard by default
         self.log("train_loss", loss)
