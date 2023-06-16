@@ -12,7 +12,6 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from data.buckets import AspectRatioSampler
-from data.store import AspectRatioDataset, ImageStore
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 from omegaconf import OmegaConf
@@ -21,6 +20,8 @@ from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
+
+from data.new_store import Entry, AspectRatioDataset, worker_init_fn
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -91,60 +92,47 @@ class StableDiffusionModel(pl.LightningModule):
             )
             self.pipeline.set_progress_bar_config(disable=True)
         
-    def prepare_data(self):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                Path(dlpath).mkdir(exist_ok=True)
-                download(entry, dlpath)
-                self.config.dataset.img_path[k] = dlpath
+    # def prepare_data(self):
+    #     for k, entry in enumerate(self.config.dataset.img_path):
+    #         if not isinstance(entry, str):
+    #             continue
+    #         if entry.startswith("https://") or entry.startswith("http://"):
+    #             dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
+    #             Path(dlpath).mkdir(exist_ok=True)
+    #             download(entry, dlpath)
+    #             self.config.dataset.img_path[k] = dlpath
             
-    def setup(self, stage):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                self.config.dataset.img_path[k] = dlpath
+    # def setup(self, stage):
+    #     for k, entry in enumerate(self.config.dataset.img_path):
+    #         if not isinstance(entry, str):
+    #             continue
+    #         if entry.startswith("https://") or entry.startswith("http://"):
+    #             dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
+    #             self.config.dataset.img_path[k] = dlpath
             
         local_rank = get_local_rank()
         world_size = get_world_size()
-        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
         # init Dataset
-        self.dataset = dataset_cls(
-            size=self.config.trainer.resolution,
-            seed=self.config.trainer.seed,
-            rank=local_rank,
-            init=not self.config.arb.enabled,
+        self.dataset = AspectRatioDataset(
+            batch_size=self.config.trainer.batch_size,
             tokenizer=self.tokenizer,
+            rank = local_rank,
+            dtype = torch.float32,
             **self.config.dataset
         )
-        
-        # init sampler
-        self.data_sampler = None
-        if self.config.arb.enabled:
-            self.data_sampler = AspectRatioSampler(
-                bsz=self.batch_size,
-                config=self.config, 
-                rank=local_rank, 
-                dataset=self.dataset, 
-                world_size=world_size,
-            ) 
-        
+
     def train_dataloader(self):
-        if self.data_sampler:
-            self.data_sampler.update_bsz(self.batch_size)
-            
+
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
-            collate_fn=self.dataset.collate_fn,
-            sampler=self.data_sampler,
+            sampler=None,
             num_workers=self.config.dataset.num_workers,
-            batch_size=1 if self.data_sampler else self.batch_size,
-            persistent_workers=True,
+            batch_size=None,
+            persistent_workers=False,
+            worker_init_fn=worker_init_fn,
+            shuffle=False,
+            pin_memory=True,
         )
         return dataloader
     
@@ -194,11 +182,19 @@ class StableDiffusionModel(pl.LightningModule):
         latents = latent_dist.sample() * 0.18215
         return latents
             
-    def training_step(self, batch, batch_idx):
-        input_ids, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        if not self.dataset.use_latent_cache:
-            latents = self.encode_pixels(latents).to(self.unet.dtype)
+    def training_step(self, batch:Entry, batch_idx):
+        device = self.unet.device
+        batch.input_ids = batch.input_ids.to(device)
+        batch.pixel = batch.pixel.to(device)
+        if batch.mask is not None:
+            batch.mask = batch.mask.to(device)
+                    
+        encoder_hidden_states = self.encode_tokens(batch.input_ids).to(self.unet.dtype)
+        if not batch.is_latent:
+            latents = self.encode_pixels(batch.pixel).to(self.unet.dtype)
+        else:
+            latents = batch.pixel.to(self.unet.dtype)
+            latents.mul_(0.18215)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -215,7 +211,7 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample.float()
         
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
@@ -224,12 +220,17 @@ class StableDiffusionModel(pl.LightningModule):
             target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
         else:
             raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
-
+        target = target.float()
+        
+        if batch.mask is not None:
+            noise_pred = torch.einsum("bchw,bhw->bchw", noise_pred, batch.mask)
+            target = torch.einsum("bchw,bhw->bchw", target, batch.mask)
+        
         if not self.config.trainer.get("min_snr"):
-            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
+            loss = F.mse_loss(noise_pred, target, reduction="mean")  
         else:
             gamma = self.config.trainer.get("min_snr_val")
-            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
+            loss = min_snr_weighted_loss(noise_pred, target, timesteps, self.noise_scheduler, gamma=gamma)
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
@@ -251,10 +252,14 @@ class StableDiffusionModel(pl.LightningModule):
         if (current_step + 1) % accumulate_grad_batches == 0:
             for opt in optimizers:
                 opt.step()
+        
+        # Update dataset random state
+        self.dataset.rng.random()
+        self.dataset.first_time = False
     
     def get_scaled_lr(self, base):
         # Scale LR OPs
-        f = self.trainer.accumulate_grad_batches * self.config.trainer.init_batch_size * self.trainer.num_nodes * self.trainer.num_devices
+        f = self.trainer.accumulate_grad_batches * self.config.trainer.batch_size * self.trainer.num_nodes * self.trainer.num_devices
         if self.config.trainer.lr_scale == "linear":
             return base * f, True
         elif self.config.trainer.lr_scale == "sqrt":
@@ -376,7 +381,7 @@ def load_model(model_path, config):
         except FileNotFoundError:
             pass
 
-    return StableDiffusionModel(model_path, config, config.trainer.init_batch_size)
+    return StableDiffusionModel(model_path, config, config.trainer.batch_size)
 
 
 def load_sd_checkpoint(model_path):
