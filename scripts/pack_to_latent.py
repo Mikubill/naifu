@@ -81,7 +81,7 @@ def flip_entry(image:np.ndarray, mask:None|np.ndarray, flip:list[int]|np.ndarray
     images, masks = [], []
     for f in flip:
         _image = image
-        _mask = None
+        _mask = mask
         if f == -1:
             _image = cv2.flip(image, 1)
             if mask is not None:
