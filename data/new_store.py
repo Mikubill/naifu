@@ -19,7 +19,7 @@ import h5py as h5
 from dataclasses import dataclass
 
 from typing import Callable, Optional, Generator
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer # type: ignore
 import data.custom_prompt_processors as custom_prompt_processors
 import cv2
 from typing import Any
@@ -156,6 +156,7 @@ class StoreBase(Dataset):
             entry.mask = entry.mask[dh:dh+h, dw:dw+w]
         return entry
     
+    @torch.no_grad()
     def get_batch(self, indices:list[int]) -> Entry:
         entries = [self._get_entry(i) for i in indices]
         for e, i in zip(entries, indices):
@@ -167,10 +168,16 @@ class StoreBase(Dataset):
             assert e.is_latent == is_latent
             assert e.pixel.shape == shape, f"{e.pixel.shape} != {shape} for the same batch"
         if any_has_mask:
-            mask = torch.ones((len(entries), *shape[1:]), dtype=self.dtype)
+            b,h,w = len(entries), *shape[1:]
+            mask = torch.ones((b, h, w), dtype=self.dtype)
             for i, e in enumerate(entries):
                 if e.mask is not None:
                     mask[i] = e.mask
+            if not is_latent:
+                mask.unsqueeze_(dim=1)
+                mask = -torch.nn.functional.max_pool2d(-mask, kernel_size=8)
+                mask.squeeze_(dim=1)
+                mask.div_(255.0)
         else:
             mask = None
         pixel = torch.stack([e.pixel for e in entries], dim=0)
@@ -215,7 +222,6 @@ class StoreBase(Dataset):
             pixel = pixel.permute(2, 0, 1)
         mask = torch.from_numpy(mask).to(dtype=self.dtype) if mask is not None else None
         return Entry(is_latent, pixel, input_ids, mask)
-    
 
 
 class LatentStore(StoreBase):
@@ -477,7 +483,7 @@ class AspectRatioDataset(Dataset):
 def worker_init_fn(worker_id):
     worker_info = get_worker_info()
     dataset:AspectRatioDataset = worker_info.dataset # type: ignore
-    random.seed(worker_info.seed)
+    random.seed(worker_info.seed) # type: ignore
     dataset.store.fix_aspect_randomness(dataset.rng)
     dataset.assign_buckets()
     dataset.assign_batches()
