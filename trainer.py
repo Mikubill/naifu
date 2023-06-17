@@ -13,6 +13,10 @@ from pytorch_lightning.loggers import WandbLogger
 
 args = parse_args()
 config = OmegaConf.load(args.config)
+precision = 'high' if config.lightning.precision == 32 else 'medium'
+torch.set_float32_matmul_precision(precision)
+torch.backends.cuda.matmul.allow_tf32 = True # type: ignore
+torch.backends.cudnn.allow_tf32 = True # type: ignore
 
 def main(args):
     torch.manual_seed(config.trainer.seed)
