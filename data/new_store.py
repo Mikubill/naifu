@@ -475,13 +475,9 @@ class AspectRatioDataset(Dataset):
         return self.store.get_batch(img_idxs)
 
 def worker_init_fn(worker_id):
-    print(f"Worker {worker_id} initialized")
     worker_info = get_worker_info()
-    # print(worker_info)
     dataset:AspectRatioDataset = worker_info.dataset # type: ignore
-    # print(dataset.rng.random())
     random.seed(worker_info.seed)
-    print(f"Worker {worker_id} seed {worker_info.seed}")
     dataset.store.fix_aspect_randomness(dataset.rng)
     dataset.assign_buckets()
     dataset.assign_batches()

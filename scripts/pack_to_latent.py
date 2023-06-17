@@ -39,7 +39,7 @@ def rotatedRectWithMaxArea(h, w, angle):
     return int(hr), int(wr)
 
 
-def load_entry(p:Path, enable_mask = True, label_ext='.label'):
+def load_entry(p:Path, enable_mask = True, label_ext:str='.label'):
     _img = Image.open(p)
     with p.with_suffix(label_ext).open('r') as f:
         prompt = f.read()
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     assert len(rotate) == len(p_rotate), 'rotate and p_rotate must have the same length'
     assert len(flip) == len(p_flip), 'flip and p_flip must have the same length'
         
-    dataset = LatentEncodingDataset(root, rotate, p_rotate, flip, p_flip, base_size=base_size, dtype=dtype)
+    dataset = LatentEncodingDataset(root, rotate, p_rotate, flip, p_flip, base_size=base_size, dtype=dtype, label_ext=args.label_ext)
     dataloader = DataLoader(dataset, batch_size=None, shuffle=True, num_workers=num_workers)
     
     
@@ -282,5 +282,5 @@ if __name__ == '__main__':
                     g.create_dataset(f'{j}.pixel', data=latent.half().cpu().numpy(), compression=args.compress)
                     mask = masks[j]
                     if mask is not None:
-                        g.create_dataset(f'{j}.mask', data=masks[j].cpu().numpy(), compression=args.compress)
+                        g.create_dataset(f'{j}.mask', data=masks[j].half().cpu().numpy(), compression=args.compress)
             
