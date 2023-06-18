@@ -3,7 +3,7 @@ accelerate
 pytorch-lightning>=1.8.1, <2.0
 omegaconf==2.1.1
 lightning_lite
-transformers==4.25.1
+transformers>=4.25.1
 diffusers>=0.10.2
 bitsandbytes>=0.35.4
 wandb
@@ -14,6 +14,7 @@ timm
 safetensors
 torch-ema
 tensorboard
+
 # For hivemind
 # hivemind>=1.1.2
 # protobuf>=3.20.0
