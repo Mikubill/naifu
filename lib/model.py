@@ -259,7 +259,10 @@ class StableDiffusionModel(pl.LightningModule):
             
         params_to_optim = [{'params': self.unet.parameters()}]
         if self.config.trainer.get("train_text_encoder") == True:
-            params_to_optim.append({'params': self.text_encoder.parameters()})
+            text_encoder_group = {'params': self.text_encoder.parameters()}
+            if self.config.trainer.get("text_encoder_lr"):
+                text_encoder_group['lr'], te_scaled = self.get_scaled_lr(self.config.trainer.get("text_encoder_lr"))
+            params_to_optim.append(text_encoder_group)
 
         optimizer = get_class(self.config.optimizer.name)(
             params_to_optim, **self.config.optimizer.params

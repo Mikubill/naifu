@@ -1,7 +1,8 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
-
+import sys
 import torch
 import pytorch_lightning as pl
+from distutils.version import LooseVersion
 
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback, SampleCallback
@@ -23,6 +24,8 @@ def main(args):
     tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
     if config.lightning.accelerator in ["gpu", "cpu"] and not tune:
         strategy = "ddp_find_unused_parameters_false"
+        if config.trainer.get("train_text_encoder") == True:
+            strategy = "ddp"
         
     if config.arb.enabled:
         config.lightning.replace_sampler_ddp = False
@@ -41,7 +44,20 @@ def main(args):
         strategy = config.lightning.strategy = None
     else:
         model = load_model(args.model_path, config)
-
+    
+    major, minor, _ = torch.__version__.split('.')
+    if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
+        device = torch.cuda.get_device_properties(0)
+        compute_capability = float(f"{device.major}.{device.minor}")
+        if compute_capability >= 8.0:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision('medium')
+            
+    # import sys
+    # if int(major) >= 2 and sys.version_info < (3, 11):
+    #     model.unet = torch.compile(model.unet, mode="reduce-overhead", fullgraph=True)
+        
     # for ddp-optimize only
     # from torch.distributed.algorithms.ddp_comm_hooks import post_localSGD_hook as post_localSGD
     # strategy = pl.strategies.DDPStrategy(
