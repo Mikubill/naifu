@@ -49,10 +49,11 @@ def main(args):
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
         device = torch.cuda.get_device_properties(0)
         compute_capability = float(f"{device.major}.{device.minor}")
+        precision = 'high' if config.lightning.precision == 32 else 'medium'
         if compute_capability >= 8.0:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
-            torch.set_float32_matmul_precision('medium')
+            torch.set_float32_matmul_precision(precision)
             
     # import sys
     # if int(major) >= 2 and sys.version_info < (3, 11):
