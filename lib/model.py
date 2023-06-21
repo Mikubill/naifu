@@ -200,6 +200,10 @@ class StableDiffusionModel(pl.LightningModule):
         noise = torch.randn_like(latents)
         if self.config.trainer.get("offset_noise"):
             noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
+
+        # https://arxiv.org/abs/2301.11706
+        if self.config.trainer.get("input_perturbation"):
+            noise = noise + float(self.config.trainer.get("input_perturbation_val")) * torch.randn_like(noise)
         
         bsz = latents.shape[0]
             
