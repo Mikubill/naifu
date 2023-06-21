@@ -255,8 +255,8 @@ class CustomEmbeddingsCallback(Callback):
         
         outer = self
         def configure_optimizers(self):
-            optimizers, _ = original_configure_optimizers()
-            return outer.hook_optimizers(self, optimizers)
+            optimizers, schedulers = original_configure_optimizers()
+            return outer.hook_optimizers(self, optimizers, schedulers)
         
         if self.trainable_concepts or self.config.train_all:
             pl_module.configure_optimizers = configure_optimizers.__get__(pl_module, StableDiffusionModel)
@@ -266,33 +266,35 @@ class CustomEmbeddingsCallback(Callback):
     def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:
         self.init_weight = False
 
-    def hook_optimizers(self, pl_module, optimizers):
+    def hook_optimizers(self, pl_module, optimizers, schedulers):
         self.hook_clip(pl_module.text_encoder, pl_module.tokenizer, self.init_weight)
         self.preliminary_check(pl_module)
 
         if self.config.freeze_unet:
             pl_module.unet.requires_grad_(False)
         
-        new_lr, scaled = pl_module.get_scaled_lr(self.config.trainer.lr)
-        if scaled:
-            self.config.trainer.lr = new_lr
-            rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
+        if self.config.optimizer.disable_lr_scaling:
+            rank_zero_only(print(f"LR scaling for embeddings disabled. Using original LR: {self.config.optimizer.params.lr}"))
+        else:
+            new_lr, scaled = pl_module.get_scaled_lr(self.config.optimizer.params.lr)
+            if scaled:
+                self.config.optimizer.params.lr = new_lr
+                rank_zero_only(print(f"Using scaled embeddings LR: {self.config.optimizer.params.lr}"))
         
         assert len(optimizers) == 1, "Expect only one optimizer in StableDiffusionModel"
-        if not self.config.freeze_unet:
-            param_to_optimize = optimizers[0].param_groups
-        else:
-            param_to_optimize = []
-            del optimizers[0]
+        if self.config.freeze_unet:
+            optimizers.pop(0)
+            schedulers.pop(0)
 
-        param_to_optimize.append(
-            {'params': pl_module.text_encoder.get_input_embeddings().parameters(), 'lr': self.config.trainer.lr}
+        param_to_optimize = [{'params': pl_module.text_encoder.get_input_embeddings().parameters()}]
+        
+        ti_optimizer = get_class(self.config.optimizer.name)(
+            param_to_optimize, **self.config.optimizer.params
         )
-        optimizer = get_class(pl_module.config.optimizer.name)(
-            param_to_optimize, **pl_module.config.optimizer.params
+        ti_scheduler = get_class(self.config.lr_scheduler.name)(
+            optimizer=ti_optimizer, **self.config.lr_scheduler.params
         )
-        scheduler = get_class(pl_module.config.lr_scheduler.name)(
-            optimizer=optimizer, **pl_module.config.lr_scheduler.params
-        )
+        optimizers.append(ti_optimizer)
+        schedulers.append(ti_scheduler)
 
-        return [[optimizer], [scheduler]]
+        return [optimizers, schedulers]

@@ -27,9 +27,6 @@ def main(args):
         if config.trainer.get("train_text_encoder") == True:
             strategy = "ddp"
         
-    if config.arb.enabled:
-        config.lightning.replace_sampler_ddp = False
-        
     if config.trainer.use_hivemind:
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
@@ -37,10 +34,10 @@ def main(args):
     if config.get("lora"):
         if config.lora.get("use_locon"):
             from experiment.locon import LoConDiffusionModel
-            model = LoConDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+            model = LoConDiffusionModel(args.model_path, config, config.trainer.batch_size)
         else:
             from experiment.lora import LoRADiffusionModel
-            model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+            model = LoRADiffusionModel(args.model_path, config, config.trainer.batch_size)
         strategy = config.lightning.strategy = None
     else:
         model = load_model(args.model_path, config)
@@ -135,3 +132,4 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
+
