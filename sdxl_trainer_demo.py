@@ -29,7 +29,7 @@ def main():
         context_dim=2048,
         spatial_transformer_attn_type='softmax',
         legacy=False,
-    ).cuda().to(dtype=torch.bfloat16)
+    ).cuda()
     
     optimizer = transformers.optimization.Adafactor(model.parameters(), relative_step=True)  
     scaler = torch.cuda.amp.GradScaler(enabled=True)
@@ -44,7 +44,7 @@ def main():
         ctx = torch.randn(batch_size, 77, 2048).cuda()
         y = torch.randn(batch_size, ADM_IN_CHANNELS).cuda()
 
-        with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
             output = model(x, t, ctx, y)
             target = torch.randn_like(output)
             loss = torch.nn.functional.mse_loss(output, target)
