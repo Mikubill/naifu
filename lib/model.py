@@ -5,6 +5,7 @@ import os
 import tarfile
 from pathlib import Path
 import tempfile
+from typing import Any
 
 import pytorch_lightning as pl
 import requests
@@ -21,6 +22,8 @@ from torch_ema import ExponentialMovingAverage
 from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
+
+from pytorch_memlab import MemReporter
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -45,9 +48,9 @@ class StableDiffusionModel(pl.LightningModule):
                 self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
             else:
                 self.noise_scheduler = scheduler_cls.from_config(self.model_path, subfolder="scheduler")
-            self.tokenizer = CLIPTokenizer.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(config.encoder.text if config.encoder.text else self.model_path, subfolder="text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(config.encoder.vae if config.encoder.vae else self.model_path, subfolder="vae")
+            self.tokenizer = CLIPTokenizer.from_pretrained(self.model_path, subfolder="tokenizer")
+            self.text_encoder = CLIPTextModel.from_pretrained(self.model_path, subfolder="text_encoder")
+            self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
             self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
          
         self.unet.to(self.device, dtype=torch.float32)
@@ -191,8 +194,8 @@ class StableDiffusionModel(pl.LightningModule):
         latent_dist = self.vae.encode(pixels).latent_dist
         latents = latent_dist.sample() * 0.18215
         return latents
-            
-    def training_step(self, batch, batch_idx):
+
+    def training_step(self, batch, batch_idx):        
         input_ids, latents = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
         if not self.dataset.use_latent_cache:
@@ -203,6 +206,10 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.trainer.get("offset_noise"):
             noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
         
+        # https://arxiv.org/abs/2301.11706
+        if self.config.trainer.get("input_perturbation"):
+            noise = noise + float(self.config.trainer.get("input_perturbation_val")) * torch.randn_like(noise)
+
         bsz = latents.shape[0]
             
         # Sample a random timestep for each image
@@ -233,12 +240,17 @@ class StableDiffusionModel(pl.LightningModule):
             raise FloatingPointError("Error infinite or NaN loss detected")
         
         # Logging to TensorBoard by default
-        self.log("train_loss", loss)
+        major, minor, _ = pl.__version__.split('.')
+        if int(major) >= 2:
+            self.log("train_loss", loss, prog_bar=True)
+        else:
+            self.log("train_loss", loss)
+            
         return loss
     
     def get_scaled_lr(self, base):
         # Scale LR OPs
-        f = self.trainer.accumulate_grad_batches * self.config.trainer.init_batch_size * self.trainer.num_nodes * self.trainer.num_devices
+        f = self.trainer.accumulate_grad_batches * self.config.trainer.batch_size * self.trainer.num_nodes * self.trainer.num_devices
         if self.config.trainer.lr_scale == "linear":
             return base * f, True
         elif self.config.trainer.lr_scale == "sqrt":
@@ -249,7 +261,8 @@ class StableDiffusionModel(pl.LightningModule):
             raise ValueError(self.config.lr_scale)
     
     def configure_optimizers(self):
-        if self.config.lightning.auto_lr_find:
+        # align LR with batch size in case we're using lrfinder
+        if self.lr != self.config.optimizer.params.lr:
             self.config.optimizer.params.lr = self.lr
             
         new_lr, scaled = self.get_scaled_lr(self.config.optimizer.params.lr)
@@ -302,11 +315,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.to(self.device, dtype=self.unet.dtype)
             
         if self.config.dataset.get("cache_latents") == True:
-            self.dataset.cache_latents(
-                self.vae, 
-                self.data_sampler.buckets if self.config.arb.enabled else None,
-                self.config
-            )
+            self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
             
     def on_train_epoch_start(self) -> None:
         if self.config.dataset.get("cache_latents") == True:
@@ -357,7 +366,7 @@ def load_model(model_path, config):
         except FileNotFoundError:
             pass
 
-    return StableDiffusionModel(model_path, config, config.trainer.init_batch_size)
+    return StableDiffusionModel(model_path, config, config.trainer.batch_size)
 
 
 def load_sd_checkpoint(model_path):

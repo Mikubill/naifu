@@ -41,13 +41,10 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: 32
+  precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
-  auto_scale_batch_size: false
-  auto_lr_find: false
-  move_metrics_to_cpu: true
 
 arb:
   enabled: true
@@ -124,8 +121,4 @@ sampling:
     - "a girl running fast on the country lane"
     - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
 
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
   

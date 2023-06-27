@@ -3,7 +3,7 @@ name: test-run
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   model_path: "model"
-  init_batch_size: 2
+  batch_size: 2
   resolution: 512
   center_crop: false
   gradient_checkpointing: false
@@ -38,8 +38,6 @@ lightning:
   max_epochs: 20
   gradient_clip_val: 0
   accumulate_grad_batches: 1
-  auto_scale_batch_size: false
-  auto_lr_find: false
 
 arb:
   enabled: true
@@ -112,8 +110,3 @@ sampling:
   prompts: 
     - "a girl running fast on the country lane"
     - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
-
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
