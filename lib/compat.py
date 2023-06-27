@@ -14,6 +14,10 @@ def pl_compat_fix(config, callbacks):
         x = config.lightning.get("auto_select_gpus")
         if x:
             config.lightning.devices = "auto"
+            
+        x = config.trainer.get("init_batch_size")
+        if x:
+            config.trainer.batch_size = x
         
         # before: 
         # trainer = Trainer(accumulate_grad_batches={"1": 5, "10": 3})
