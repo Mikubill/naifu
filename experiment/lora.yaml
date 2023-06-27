@@ -15,7 +15,7 @@ lora:
 trainer:
   model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   model_path: "/root/workspace/storage/models/orangemix"
-  init_batch_size: 2
+  batch_size: 2
   resolution: 512
   center_crop: false
   gradient_checkpointing: true
@@ -33,8 +33,6 @@ trainer:
   offset_noise_val: 0.1
   min_snr: false
   min_snr_val: 5
-
-  # note: only works with init_batch_size > 1
   use_xformers: true
 
 checkpoint:
@@ -56,9 +54,6 @@ lightning:
   precision: 16
   log_every_n_steps: 1
   accumulate_grad_batches: 1
-  auto_scale_batch_size: false
-  auto_lr_find: false
-  move_metrics_to_cpu: true
 
 arb:
   enabled: true

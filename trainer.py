@@ -1,31 +1,31 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
-import sys
+import os
+
+# Hide welcome message from bitsandbytes
+os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
+
 import torch
 import pytorch_lightning as pl
-from distutils.version import LooseVersion
 
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback, SampleCallback
 from lib.model import load_model
+from lib.compat import pl_compat_fix
 
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-args = parse_args()
-config = OmegaConf.load(args.config)
-
 def main(args):
+    config = OmegaConf.load(args.config)
     torch.manual_seed(config.trainer.seed)
+    
     if args.model_path == None:
         args.model_path = config.trainer.model_path
     
     strategy = None
-    tune = config.lightning.auto_scale_batch_size or config.lightning.auto_lr_find
-    if config.lightning.accelerator in ["gpu", "cpu"] and not tune:
-        strategy = "ddp_find_unused_parameters_false"
-        if config.trainer.get("train_text_encoder") == True:
-            strategy = "ddp"
+    if config.lightning.accelerator in ["gpu", "cpu"]:
+        strategy = "ddp"
         
     if config.arb.enabled:
         config.lightning.replace_sampler_ddp = False
@@ -37,10 +37,10 @@ def main(args):
     if config.get("lora"):
         if config.lora.get("use_locon"):
             from experiment.locon import LoConDiffusionModel
-            model = LoConDiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+            model = LoConDiffusionModel(args.model_path, config, config.trainer.batch_size)
         else:
             from experiment.lora import LoRADiffusionModel
-            model = LoRADiffusionModel(args.model_path, config, config.trainer.init_batch_size)
+            model = LoRADiffusionModel(args.model_path, config, config.trainer.batch_size)
         strategy = config.lightning.strategy = None
     else:
         model = load_model(args.model_path, config)
@@ -75,9 +75,9 @@ def main(args):
     
     # for experiment only
     # from experiment.attn_realign import AttnRealignModel
-    # model = AttnRealignModel(args.model_path, config, config.trainer.init_batch_size)
+    # model = AttnRealignModel(args.model_path, config, config.trainer.batch_size)
     # from experiment.kwlenc import MixinModel
-    # model = MixinModel(args.model_path, config, config.trainer.init_batch_size)
+    # model = MixinModel(args.model_path, config, config.trainer.batch_size)
     
     callbacks = []
     if config.monitor.huggingface_repo != "":
@@ -117,20 +117,10 @@ def main(args):
 
     if config.lightning.get("enable_checkpointing") == None:
         config.lightning.enable_checkpointing = enable_checkpointing
-    
-    trainer = pl.Trainer(
-        logger=logger, 
-        callbacks=callbacks,
-        **config.lightning
-    )
-    
-    if trainer.auto_scale_batch_size or trainer.auto_lr_find:
-        trainer.tune(model=model, scale_batch_size_kwargs={"steps_per_trial": 5})
-    
-    trainer.fit(
-        model=model,
-        ckpt_path=args.resume if args.resume else None
-    )
+        
+    config, callbacks = pl_compat_fix(config, callbacks)
+    trainer = pl.Trainer(logger=logger, callbacks=callbacks, **config.lightning)
+    trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
 
 if __name__ == "__main__":
     args = parse_args()

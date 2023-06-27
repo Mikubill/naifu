@@ -9,7 +9,7 @@ bitsandbytes>=0.35.4
 wandb
 ftfy
 torchvision
-requests==2.28.1
+requests
 timm
 safetensors
 torch-ema
