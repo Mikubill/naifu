@@ -23,8 +23,6 @@ from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
 
-from pytorch_memlab import MemReporter
-
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self, model_path, config, batch_size):
