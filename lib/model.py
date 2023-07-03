@@ -3,23 +3,22 @@ import functools
 import math
 import os
 import tarfile
-from pathlib import Path
 import tempfile
-from typing import Any
 
 import pytorch_lightning as pl
 import requests
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from pathlib import Path
+from tqdm.auto import tqdm
+from omegaconf import OmegaConf
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers import StableDiffusionPipeline, DDIMScheduler
-from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
-from tqdm.auto import tqdm
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
 
@@ -89,6 +88,8 @@ class StableDiffusionModel(pl.LightningModule):
                 requires_safety_checker=False
             )
             self.pipeline.set_progress_bar_config(disable=True)
+            
+        self.use_latent_cache = self.config.dataset.get("cache_latents")
         
     def prepare_data(self):
         for k, entry in enumerate(self.config.dataset.img_path):
@@ -196,13 +197,14 @@ class StableDiffusionModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):        
         input_ids, latents = batch[0], batch[1]
         encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        if not self.dataset.use_latent_cache:
+        if not self.use_latent_cache:
             latents = self.encode_pixels(latents).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         if self.config.trainer.get("offset_noise"):
-            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
+            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) \
+                * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
         
         # https://arxiv.org/abs/2301.11706
         if self.config.trainer.get("input_perturbation"):
@@ -312,11 +314,11 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.trainer.use_ema: 
             self.ema.to(self.device, dtype=self.unet.dtype)
             
-        if self.config.dataset.get("cache_latents") == True:
+        if self.use_latent_cache:
             self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
             
     def on_train_epoch_start(self) -> None:
-        if self.config.dataset.get("cache_latents") == True:
+        if self.use_latent_cache:
             self.vae.to("cpu")
         
     def on_train_batch_end(self, *args, **kwargs):
@@ -349,22 +351,6 @@ def get_class(name: str):
     module_name, class_name = name.rsplit(".", 1)
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
-
-
-def load_model(model_path, config):
-    
-    if (
-        not Path(model_path).is_dir()
-        or not ((Path(model_path) / "model_index.json").is_file() or (Path(model_path) / "model.ckpt").is_file())
-    ):
-        model_url = config.trainer.model_url
-        try:
-            Path(model_path).mkdir(exist_ok=True)
-            download(model_url, model_path)
-        except FileNotFoundError:
-            pass
-
-    return StableDiffusionModel(model_path, config, config.trainer.batch_size)
 
 
 def load_sd_checkpoint(model_path):

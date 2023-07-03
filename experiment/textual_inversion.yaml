@@ -18,7 +18,6 @@ custom_embeddings:
     trainable: [momoko, ao, crosschan, nyanko:2v, rcins:11v] 
 
 trainer:
-  model_url: https://pub-2fdef7a2969f43289c42ac5ae3412fd4.r2.dev/animesfw.tgz
   model_path: "../animesfw"
   batch_size: 2
   resolution: 512

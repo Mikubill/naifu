@@ -9,7 +9,7 @@ import pytorch_lightning as pl
 
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback, SampleCallback
-from lib.model import load_model
+from lib.model import StableDiffusionModel
 from lib.compat import pl_compat_fix
 
 from omegaconf import OmegaConf
@@ -43,7 +43,7 @@ def main(args):
             model = LoRADiffusionModel(args.model_path, config, config.trainer.batch_size)
         strategy = config.lightning.strategy = None
     else:
-        model = load_model(args.model_path, config)
+        model = StableDiffusionModel(args.model_path, config, config.trainer.batch_size)
     
     major, minor, _ = torch.__version__.split('.')
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
