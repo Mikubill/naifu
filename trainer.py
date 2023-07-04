@@ -41,7 +41,7 @@ def main(args):
         else:
             from experiment.lora import LoRADiffusionModel
             model = LoRADiffusionModel(args.model_path, config, config.trainer.batch_size)
-        strategy = config.lightning.strategy = None
+        strategy = config.lightning.strategy = "auto"
     else:
         model = StableDiffusionModel(args.model_path, config, config.trainer.batch_size)
     
