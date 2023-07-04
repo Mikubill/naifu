@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import diffusers
+import pytorch_lightning as pl
 from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoConBaseModel(torch.nn.Module):
@@ -195,7 +196,12 @@ class LoConDiffusionModel(StableDiffusionModel):
             loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
         
         # Logging to TensorBoard by default
-        self.log("train_loss", loss)
+        major, minor, _ = pl.__version__.split('.')
+        if int(major) >= 2:
+            self.log("train_loss", loss, prog_bar=True)
+        else:
+            self.log("train_loss", loss)
+            
         return loss
     
     def configure_optimizers(self):
