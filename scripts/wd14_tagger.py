@@ -212,9 +212,10 @@ interrogators = {
 if __name__ == "__main__":
     # give a path to folder with images, use tqdm for progress bar
     args = argparse.ArgumentParser()
-    args.add_argument("--path", type=str, default="/notebooks/1575029518991879121")
+    args.add_argument("--path", type=str, default="/notebooks")
     args.add_argument("--interrogator", type=str, default="wd14-swinv2-v2")
     args.add_argument("--threshold", type=float, default=0.5)
+    args.add_argument("--prefix", type=str, default="")
     args = args.parse_args()
     
     # iter args.path
@@ -228,8 +229,9 @@ if __name__ == "__main__":
         interrogator = interrogators[args.interrogator]
         ratings, tags = interrogator.interrogate(Image.open(imgpath))
         tags = interrogator.postprocess_tags(tags, threshold=args.threshold)
-        
+        if args.prefix != "":
+            args.prefix += ", "
+            
         # write tags to file
-        # first strip path and extension
         with open(os.path.join(args.path, f"{name}.txt"), "w") as f:
-            f.write(", ".join(tags.keys()))
+            f.write(args.prefix+", ".join(tags.keys()))
