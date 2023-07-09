@@ -121,8 +121,3 @@ sampling:
   prompts: 
     - "masterpiece, best quality, 1girl, kitagawa_marin"
 
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
-  

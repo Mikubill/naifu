@@ -1,2 +1,3 @@
 from .model import UNetModel
-from .encoder import GeneralConditioner
+from .encoders import GeneralConditioner
+from .autoencoder import AutoencoderKL

@@ -130,9 +130,3 @@ sampling:
   prompts: 
     - "a girl running fast on the country lane"
     - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
-
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
-  

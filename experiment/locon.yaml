@@ -125,9 +125,3 @@ sampling:
     - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
     - "masterpiece, best quality, 1girl, oyama mahiro"
-
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
-  

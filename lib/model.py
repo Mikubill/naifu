@@ -1,26 +1,26 @@
 
-import functools
 import math
-import os
-import tarfile
-import tempfile
-
 import pytorch_lightning as pl
-import requests
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from pathlib import Path
-from tqdm.auto import tqdm
-from omegaconf import OmegaConf
 from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
-from diffusers import AutoencoderKL, UNet2DConditionModel
-from diffusers import StableDiffusionPipeline, DDIMScheduler
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
-from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
-from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
+from lib.utils import get_local_rank, get_world_size
+from lib.utils import min_snr_weighted_loss, load_torch_file
+from omegaconf import OmegaConf 
+from pathlib import Path
+from diffusers import DDIMScheduler
+from lib.sgm import GeneralConditioner
+from lib.warppers import AutoencoderKLWrapper, UnetWrapper
+
+        
+def disabled_train(self, mode=True):
+    """Overwrite model.train with this function to make sure train/eval mode
+    does not change anymore."""
+    return self
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -35,80 +35,50 @@ class StableDiffusionModel(pl.LightningModule):
         
     def init_model(self):
         config = self.config
-        scheduler_cls = DDIMScheduler
-            
-        if (Path(self.model_path) / "model.ckpt").is_file():
-            # use autoconvert
-            self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = load_sd_checkpoint(self.model_path)   
-        else:
-            if hasattr(scheduler_cls, "from_pretrained"):
-                self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
-            else:
-                self.noise_scheduler = scheduler_cls.from_config(self.model_path, subfolder="scheduler")
-            self.tokenizer = CLIPTokenizer.from_pretrained(self.model_path, subfolder="tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(self.model_path, subfolder="text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
-            self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
-         
-        self.unet.to(self.device, dtype=torch.float32)
-        self.unet.train()
         
-        self.vae.requires_grad_(False)
-        self.text_encoder.requires_grad_(False)
+        # assume path is file, we get the config from the file
+        yaml_file = Path(self.model_path).with_suffix(".yaml")
+        if not yaml_file.is_file():
+            # assume it's sdxl
+            yaml_file = Path("lib/model_configs/sd_xl_base.yaml")
+        self.model_config = OmegaConf.load(yaml_file)
+        model_params = self.model_config.model.params
         
-        if config.trainer.get("train_text_encoder"):
-            self.text_encoder.requires_grad_(True)
+        for item in model_params.conditioner_config.params.emb_models:
+            item["target"] = item["target"].replace("modules.", "")
+            item["target"] = "lib." + item["target"]   
         
-        if config.trainer.gradient_checkpointing: 
-            self.unet.enable_gradient_checkpointing()
-            
-        if config.trainer.get("use_xformers") == True:
-            if hasattr(self.unet, "set_use_memory_efficient_attention_xformers"):
-                self.unet.set_use_memory_efficient_attention_xformers(True)
-            elif hasattr(self.unet, "enable_xformers_memory_efficient_attention"):
-                self.unet.enable_xformers_memory_efficient_attention()
+        encoder = AutoencoderKLWrapper(**model_params.first_stage_config.params).eval()
+        encoder.train = disabled_train
+        for param in encoder.parameters():
+            param.requires_grad = False
+        self.first_stage_model = encoder
+        self.scale_factor = model_params.scale_factor
+
+        self.model = UnetWrapper(model_params.network_config.params)
+        self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
+        self.noise_scheduler = DDIMScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            clip_sample=False,
+            set_alpha_to_one=False,
+        )
         
-        if config.trainer.get("attention_slicing") == True:
-            if hasattr(self.unet, "enable_attention_slicing"):
-                self.unet.enable_attention_slicing()
-        
-        # finally setup ema
+        print(f"Loading model from {self.model_path}")
+        sd = load_torch_file(self.model_path)
+        missing, unexpected = self.load_state_dict(sd, strict=False)
+        if len(missing) > 0:
+            print(f"Missing Keys: {missing}")
+        if len(unexpected) > 0:
+            print(f"Unexpected Keys: {unexpected}")
+    
         if config.trainer.use_ema: 
-            self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-        
-        if config.get("sampling"):
-            self.pipeline = StableDiffusionPipeline(
-                vae=self.vae, 
-                text_encoder=self.text_encoder, 
-                tokenizer=self.tokenizer, 
-                unet=self.unet, 
-                scheduler=self.noise_scheduler, 
-                safety_checker=None,
-                feature_extractor=None,
-                requires_safety_checker=False
-            )
-            self.pipeline.set_progress_bar_config(disable=True)
+            self.ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
             
-        self.use_latent_cache = self.config.dataset.get("cache_latents")
-        
-    def prepare_data(self):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                Path(dlpath).mkdir(exist_ok=True)
-                download(entry, dlpath)
-                self.config.dataset.img_path[k] = dlpath
+        # self.use_latent_cache = self.config.dataset.get("cache_latents")
             
     def setup(self, stage):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                self.config.dataset.img_path[k] = dlpath
-            
         local_rank = get_local_rank()
         world_size = get_world_size()
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
@@ -119,7 +89,6 @@ class StableDiffusionModel(pl.LightningModule):
             seed=self.config.trainer.seed,
             rank=local_rank,
             init=not self.config.arb.enabled,
-            tokenizer=self.tokenizer,
             **self.config.dataset
         )
         
@@ -148,57 +117,28 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return dataloader
     
-    def encode_tokens(self, input_ids):
-        z = []
-        if input_ids.shape[1] > 77:  
-            # todo: Handle end-of-sentence truncation
-            while max(map(len, input_ids)) != 0:
-                rem_tokens = [x[75:] for x in input_ids]
-                tokens = []
-                for j in range(len(input_ids)):
-                    tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
+    @torch.no_grad()
+    def decode_first_stage(self, z):
+        z = 1.0 / self.scale_factor * z
+        with torch.autocast("cuda", enabled=False):
+            out = self.first_stage_model._decode(z)
+        return out
 
-                rebuild = [[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens]
-                if hasattr(torch, "asarray"):
-                    z.append(torch.asarray(rebuild))
-                else:
-                    z.append(torch.IntTensor(rebuild))
-                input_ids = rem_tokens
-        else:
-            z.append(input_ids)
+    @torch.no_grad()
+    def encode_first_stage(self, x):
+        with torch.autocast("cuda", enabled=False):
+            z = self.first_stage_model._encode(x)
+        z = self.scale_factor * z
+        return z
 
-        # Get the text embedding for conditioning
-        encoder_hidden_states = None
-        for tokens in z:
-            state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
-            state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
-            encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
-        
-        return encoder_hidden_states
-    
-    def encode_pixels(self, pixels):
-        pixels = pixels.to(self.vae.dtype)
-        if self.config.trainer.get("vae_slicing"):
-            result = []
-            for nx in range(pixels.shape[0]):
-                px = pixels[nx, ...].unsqueeze(0)
-                latent_dist = self.vae.encode(px).latent_dist
-                latents = latent_dist.sample() * 0.18215
-                result.append(latents)
-        
-            result = torch.stack(result).squeeze(1)
-            return result
-        
-        # Convert images to latent space
-        latent_dist = self.vae.encode(pixels).latent_dist
-        latents = latent_dist.sample() * 0.18215
-        return latents
-
-    def training_step(self, batch, batch_idx):        
-        input_ids, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
-        if not self.use_latent_cache:
-            latents = self.encode_pixels(latents).to(self.unet.dtype)
+    def training_step(self, batch, batch_idx):    
+        latents = self.encode_first_stage(batch["images"])
+        if torch.any(torch.isnan(latents)):
+            print("NaN found in latents, replacing with zeros")
+            latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
+              
+        del batch["images"]
+        cond = self.conditioner(batch)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -220,7 +160,7 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        noise_pred = self.model(noisy_latents, timesteps, cond)
         
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
@@ -270,7 +210,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.config.optimizer.params.lr = new_lr
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
             
-        params_to_optim = [{'params': self.unet.parameters()}]
+        params_to_optim = [{'params': self.model.diffusion_model.parameters()}]
         if self.config.trainer.get("train_text_encoder") == True:
             text_encoder_group = {'params': self.text_encoder.parameters()}
             if self.config.trainer.get("text_encoder_lr"):
@@ -314,12 +254,12 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.trainer.use_ema: 
             self.ema.to(self.device, dtype=self.unet.dtype)
             
-        if self.use_latent_cache:
-            self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
+        # if self.use_latent_cache:
+        #     self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
             
-    def on_train_epoch_start(self) -> None:
-        if self.use_latent_cache:
-            self.vae.to("cpu")
+    # def on_train_epoch_start(self) -> None:
+    #     if self.use_latent_cache:
+    #         self.vae.to("cpu")
         
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:
@@ -332,17 +272,7 @@ class StableDiffusionModel(pl.LightningModule):
     def on_load_checkpoint(self, checkpoint):
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
-            
 
-def download(url, model_path="model"):
-    print(f'Downloading: "{url}" to {model_path}\n')
-    r = requests.get(url, stream=True)
-    file_size = int(r.headers.get("content-length", 0))
-
-    r.raw.read = functools.partial(r.raw.read, decode_content=True)
-    with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
-        file = tarfile.open(fileobj=r_raw, mode="r|gz")
-        file.extractall(path=model_path)
 
 
 def get_class(name: str):
@@ -351,66 +281,3 @@ def get_class(name: str):
     module_name, class_name = name.rsplit(".", 1)
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
-
-
-def load_sd_checkpoint(model_path):
-    from lib.utils import (
-        convert_ldm_bert_checkpoint,
-        convert_ldm_clip_checkpoint,
-        convert_ldm_openclip_checkpoint,
-        convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint,
-        create_ldm_bert_config, create_unet_diffusers_config,
-        create_vae_diffusers_config
-    )
-    
-    vae_path = Path(model_path) / "model.vae.pt"
-    checkpoint_path = Path(model_path) / "model.ckpt"
-    config_path = Path(model_path) / "config.yaml"
-            
-    print(f"Loading StableDiffusionModel from {checkpoint_path}")
-    original_config = OmegaConf.load(config_path)
-    
-    num_train_timesteps = original_config.model.params.timesteps
-    beta_start = original_config.model.params.linear_start
-    beta_end = original_config.model.params.linear_end
-    scheduler = DDIMScheduler(
-        num_train_timesteps=num_train_timesteps,
-        beta_start=beta_start,
-        beta_end=beta_end,
-        beta_schedule="scaled_linear",
-    )
-            
-    checkpoint = torch.load(checkpoint_path)
-    checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-            
-    vae_checkpoint = checkpoint
-    if vae_path.is_file():
-        vae_checkpoint = torch.load(vae_path)["state_dict"]
-
-    # Convert the UNet2DConditionModel model.
-    unet_config = create_unet_diffusers_config(original_config)
-    converted_unet_checkpoint = convert_ldm_unet_checkpoint(checkpoint, unet_config, path=checkpoint_path, extract_ema=False)
-
-    # Convert the VAE model.
-    vae_config = create_vae_diffusers_config(original_config)
-    converted_vae_checkpoint = convert_ldm_vae_checkpoint(vae_checkpoint, vae_config)
-    
-    unet = UNet2DConditionModel(**unet_config)
-    unet.load_state_dict(converted_unet_checkpoint)
-
-    vae = AutoencoderKL(**vae_config)
-    vae.load_state_dict(converted_vae_checkpoint)
-            
-    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
-    if text_model_type == "FrozenCLIPEmbedder":
-        text_encoder = convert_ldm_clip_checkpoint(checkpoint)
-        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-    elif text_model_type == "FrozenOpenCLIPEmbedder":
-        text_encoder = convert_ldm_openclip_checkpoint(checkpoint)
-        tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
-    else:
-        text_config = create_ldm_bert_config(original_config)
-        text_encoder = convert_ldm_bert_checkpoint(checkpoint, text_config)
-        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        
-    return unet, vae, text_encoder, tokenizer, scheduler

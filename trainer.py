@@ -55,30 +55,6 @@ def main(args):
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision(precision)
             
-    # import sys
-    # if int(major) >= 2 and sys.version_info < (3, 11):
-    #     model.unet = torch.compile(model.unet, mode="reduce-overhead", fullgraph=True)
-        
-    # for ddp-optimize only
-    # from torch.distributed.algorithms.ddp_comm_hooks import post_localSGD_hook as post_localSGD
-    # strategy = pl.strategies.DDPStrategy(
-    #     find_unused_parameters=False,
-    #     gradient_as_bucket_view=True,
-    #     ddp_comm_state=post_localSGD.PostLocalSGDState(
-    #         process_group=None,
-    #         subgroup=None,
-    #         start_localSGD_iter=8,
-    #     ),
-    #     ddp_comm_hook=post_localSGD.post_localSGD_hook,
-    #     model_averaging_period=4,
-    # )
-    
-    # for experiment only
-    # from experiment.attn_realign import AttnRealignModel
-    # model = AttnRealignModel(args.model_path, config, config.trainer.batch_size)
-    # from experiment.kwlenc import MixinModel
-    # model = MixinModel(args.model_path, config, config.trainer.batch_size)
-    
     callbacks = []
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(

@@ -17,9 +17,9 @@ class LoRABaseModel(torch.nn.Module):
         
         self.text_encoder_loras = self.create_modules('lora_te', text_encoder, ["CLIPAttention", "CLIPMLP"], alpha, dropout)
 
-        unet_modules = ["Transformer2DModel", "Attention"]
+        unet_modules = ["Transformer2DModel", "SpatialTransformer", "Attention"]
         if diffusers.__version__ >= "0.15.0":
-            unet_modules = ["Transformer2DModel"]
+            unet_modules = ["Transformer2DModel", "SpatialTransformer"]
         self.unet_loras = self.create_modules('lora_unet', unet, unet_modules, alpha, dropout)
         
         print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")

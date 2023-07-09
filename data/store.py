@@ -31,7 +31,6 @@ class ImageStore(Dataset):
         rank=0,
         augment=None,
         process_tags=True,
-        tokenizer=None,
         important_tags=[],
         allow_duplicates=False,
         **kwargs
@@ -40,11 +39,8 @@ class ImageStore(Dataset):
         self.fliter_tags = process_tags
         self.center_crop = center_crop
         self.ucg = ucg
-        self.max_length = max_length
-        self.tokenizer=tokenizer
         self.rank = rank
         self.dataset = img_path
-        self.use_latent_cache = False
         self.allow_duplicates = allow_duplicates
         self.important_tags = important_tags
         self.image_transforms = transforms.Compose(
@@ -107,25 +103,6 @@ class ImageStore(Dataset):
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
-        
-    def cache_latents(self, vae, store=None, config=None):
-        self.use_latent_cache = True
-        self.latents_cache = {}
-        for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
-            image = torch.stack([self.image_transforms(self.read_img(entry[0]))])
-            latent = vae.encode(image.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
-            self.latents_cache[entry[0]] = latent.detach().squeeze(0).cpu()
-
-    def tokenize(self, prompt):
-        '''
-        Handle token truncation in collate_fn()
-        '''
-        return self.tokenizer(
-            prompt,
-            padding="do_not_pad",
-            truncation=True,
-            max_length=self.max_length,
-        ).input_ids 
 
     def read_img(self, filepath):  
         if self.allow_duplicates and "@" in filepath:
@@ -207,31 +184,36 @@ class ImageStore(Dataset):
         return "Tags: " + ", ".join(list(final_tags.keys())), skip_image
     
     def collate_fn(self, examples):
-        input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
-
         pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-        
-        return [input_ids, pixel_values]
+        result = {
+            "images": pixel_values,
+            "prompts": [example["prompts"] for example in examples],
+            "target_size_as_tuple": torch.stack([example["target_size_as_tuple"] for example in examples]),
+            "original_size_as_tuple": torch.stack([example["original_size_as_tuple"] for example in examples]),
+            "crop_coords_top_left": torch.stack([example["crop_coords_top_left"] for example in examples]),
+        }
+        return result
 
     def __len__(self):
         return self._length
 
     def __getitem__(self, index):
-        example = {}
         instance_path, instance_prompt = self.entries[index % self._length]
         
-        if self.use_latent_cache:
-            example["images"] = self.latents_cache[instance_path]
-        else:
-            instance_image = self.read_img(instance_path)
-            example["images"] = self.image_transforms(instance_image)
-            
-        example["prompt_ids"] = self.tokenize(instance_prompt)
-        return example
-
-
+        instance_image = self.read_img(instance_path)
+        img = self.image_transforms(instance_image)
+        prompts = instance_prompt
+        
+        inst = {
+            "images": img, 
+            "prompts": prompts,
+            "original_size_as_tuple": (self.size, self.size),
+            "crop_coords_top_left": (0,0),
+            "target_size_as_tuple": (self.size, self.size),   
+        }
+        return inst
+    
 class AspectRatioDataset(ImageStore):
     def __init__(self, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
@@ -240,27 +222,6 @@ class AspectRatioDataset(ImageStore):
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
-            
-    def cache_latents(self, vae, store, config):
-        self.use_latent_cache = True
-        self.latents_cache = {}
-        progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
-        for entry in store.buckets.keys():
-            size = store.resolutions[entry]
-            imgs = store.buckets[entry][:]
-            for img in imgs:
-                img_data = self.read_img(img)
-                img_data_actual = torch.stack([self.transformer(img_data, size, config.dataset.center_crop)]).float()
-                img_data_base = torch.stack([self.transformer(img_data, config.arb.base_res, True)]).float()
-                latent = vae.encode(img_data_actual.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
-                latent_base = vae.encode(img_data_base.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
-                self.latents_cache[str(img)] = {
-                    "latent": latent.detach().squeeze(0).cpu(),
-                    "latent_base": latent_base.detach().squeeze(0).cpu(),
-                    "size": size
-                }
-                progress_bar.update()
-        progress_bar.close()
         
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
@@ -324,16 +285,14 @@ class AspectRatioDataset(ImageStore):
         if random.random() < self.ucg:
             prompt = ''
         
-        if not self.use_latent_cache:
-            image = self.augment.transform(self.read_img(item_id), roll)
-            image = self.transformer(image, size)
-        else:
-            entry = self.latents_cache[str(item_id)]
-            image = entry["latent"] if (entry["size"] == size).all() else entry["latent_base"]
-
+        image = self.augment.transform(self.read_img(item_id), roll)
+        image = self.transformer(image, size)
         example = {
-            f"images": image,
-            f"prompt_ids": self.tokenize(prompt)
+            "images": image,
+            "prompts": prompt,
+            "original_size_as_tuple": torch.asarray(image.shape[1:]),
+            "crop_coords_top_left": torch.asarray((0,0)),
+            "target_size_as_tuple": torch.asarray(image.shape[1:]),   
         }
         return example
 

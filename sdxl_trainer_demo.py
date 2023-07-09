@@ -1,14 +1,15 @@
 
 import torch, transformers, time, os
-from lib.sgm import UNetModel
 
 # Hide welcome message from bitsandbytes
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
+from lib.sgm import UNetModel
+
 def main():
 
     batch_size = 1
-    steps = 5
+    steps = 50
     ADM_IN_CHANNELS = 2816
     
     # Model Train (50 steps)
@@ -29,29 +30,26 @@ def main():
         context_dim=2048,
         spatial_transformer_attn_type='softmax',
         legacy=False,
-    ).cuda()
+    ).cuda().to(torch.bfloat16)
     
     optimizer = transformers.optimization.Adafactor(model.parameters(), relative_step=True)  
-    scaler = torch.cuda.amp.GradScaler(enabled=True)
 
     for step in range(steps):
         print(f"step {step}")
         if step == 1:
             time_start = time.perf_counter()
 
-        x = torch.randn(batch_size, 4, 128, 128).cuda()  # 1024x1024
+        x = torch.randn(batch_size, 4, 128, 128).cuda().to(torch.bfloat16)  # 1024x1024
         t = torch.randint(low=0, high=10, size=(batch_size,), device="cuda")
-        ctx = torch.randn(batch_size, 77, 2048).cuda()
-        y = torch.randn(batch_size, ADM_IN_CHANNELS).cuda()
+        ctx = torch.randn(batch_size, 77, 2048).cuda().to(torch.bfloat16)
+        y = torch.randn(batch_size, ADM_IN_CHANNELS).cuda().to(torch.bfloat16)
 
-        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
-            output = model(x, t, ctx, y)
-            target = torch.randn_like(output)
-            loss = torch.nn.functional.mse_loss(output, target)
+        output = model(x, t, ctx, y)
+        target = torch.randn_like(output)
+        loss = torch.nn.functional.mse_loss(output, target)
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        loss.backward()
+        optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 
     time_end = time.perf_counter()
