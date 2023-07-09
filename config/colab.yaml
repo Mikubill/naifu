@@ -2,19 +2,17 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 2
+  batch_size: 1
   resolution: 1024
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
   seed: 1138
-
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
   train_text_encoder: false
-  attention_slicing: false
-  vae_slicing: true
+  mixed_precision: false
 
   offset_noise: false
   offset_noise_val: 0.1
@@ -40,7 +38,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: 16
+  precision: bf16
   strategy: ddp_find_unused_parameters_false
   log_every_n_steps: 1
   accumulate_grad_batches: 1
@@ -58,11 +56,12 @@ arb:
   dim_limit: 1728
 
 cache:
-  enable: true
-  save_to_file: True
-  target: [latents, tokens]
-  cache_bsz: 2
-  cache_path: cache
+  enabled: false
+  cache_bsz: 4
+  cache_dir: cache
+
+  # Not Implemented
+  # target: [images, prompts]
 
 dataset:
   img_path: 
@@ -74,16 +73,6 @@ dataset:
   process_tags: true
   important_tags: []
   allow_duplicates: false
-
-  # not works with cache_latents=True
-  augment:
-    enabled: false
-    debug: false
-    dropout: 0.7
-    methods:
-      adjust_brightness: 0.1
-      adjust_contrast: 0.1
-      # rotate_with_crop: 5
 
 optimizer:
   name: bitsandbytes.optim.AdamW

@@ -62,14 +62,6 @@ dataset:
   process_tags: true
   important_tags: []
   allow_duplicates: false
-  augment:
-    enabled: false
-    debug: false
-    dropout: 0.7
-    methods:
-      adjust_brightness: 0.1
-      adjust_contrast: 0.1
-      # rotate_with_crop: 5
 
 optimizer:
   name: torch.optim.AdamW

@@ -76,6 +76,15 @@ class StableDiffusionModel(pl.LightningModule):
             print(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             print(f"Unexpected Keys: {unexpected}")
+            
+        self.cast_dtype = torch.float32
+        if not self.config.trainer.mixed_precision:
+            if self.config.lightning.precision == 16:
+                self.cast_dtype = torch.float16
+            elif self.config.lightning.precision == "bf16":
+                self.cast_dtype = torch.bfloat16
+        self.model.to(self.cast_dtype)
+        self.conditioner.to(self.cast_dtype)
     
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
@@ -93,7 +102,8 @@ class StableDiffusionModel(pl.LightningModule):
             seed=self.config.trainer.seed,
             rank=local_rank,
             init=not self.config.arb.enabled,
-            **self.config.dataset
+            **self.config.dataset,
+            **self.config.cache
         )
         
         # init sampler
@@ -106,7 +116,16 @@ class StableDiffusionModel(pl.LightningModule):
                 dataset=self.dataset, 
                 world_size=world_size,
             ) 
-        
+        self.disable_amp()
+            
+    def disable_amp(self):
+        if self.dtype == torch.float32:
+            return
+        from pytorch_lightning.plugins import PrecisionPlugin
+        precision_plugin = PrecisionPlugin()
+        precision_plugin.precision = self.config.lightning.precision
+        self.trainer.strategy.precision_plugin = precision_plugin
+
     def train_dataloader(self):
         if self.data_sampler:
             self.data_sampler.update_bsz(self.batch_size)
@@ -134,15 +153,28 @@ class StableDiffusionModel(pl.LightningModule):
             z = self.first_stage_model._encode(x)
         z = self.scale_factor * z
         return z
+    
+    def setup_cache(self):
+        if self.config.get("cache") is None:
+            return
+        
+        if self.config.cache.get("enabled") == True:
+            self.dataset.setup_cache(self.encode_first_stage, self.conditioner, self.data_sampler.buckets)
+            self.conditioner.to("cpu")
+            self.first_stage_model.to("cpu")
 
     def training_step(self, batch, batch_idx):    
-        latents = self.encode_first_stage(batch["images"])
-        if torch.any(torch.isnan(latents)):
-            print("NaN found in latents, replacing with zeros")
-            latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
-              
-        del batch["images"]
-        cond = self.conditioner(batch)
+        if "latents" not in batch.keys():
+            latents = self.encode_first_stage(batch["images"])
+            if torch.any(torch.isnan(latents)):
+                print("NaN found in latents, replacing with zeros")
+                latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
+                
+            del batch["images"]
+            cond = self.conditioner(batch)
+        else:
+            latents = batch["latents"]
+            cond = batch["conds"]
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -164,7 +196,7 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.model(noisy_latents, timesteps, cond)
+        noise_pred = self.model(noisy_latents.to(self.cast_dtype), timesteps, {k: v.to(self.cast_dtype) for k, v in cond.items()})
         
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
@@ -258,8 +290,7 @@ class StableDiffusionModel(pl.LightningModule):
         if self.config.trainer.use_ema: 
             self.ema.to(self.device, dtype=self.unet.dtype)
             
-        # if self.use_latent_cache:
-        #     self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
+        self.setup_cache()
             
     # def on_train_epoch_start(self) -> None:
     #     if self.use_latent_cache:

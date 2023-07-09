@@ -103,10 +103,10 @@ class UnetWrapper(torch.nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor, c: dict, **kwargs) -> torch.Tensor:
         x = torch.cat((x, c.get("concat", torch.Tensor([]).type_as(x))), dim=1)
         return self.diffusion_model(
-            x,
+            x.to(torch.float16),
             timesteps=t,
-            context=c.get("crossattn", None),
-            y=c.get("vector", None),
+            context=c.get("crossattn", None).to(torch.float16),
+            y=c.get("vector", None).to(torch.float16),
             **kwargs
         )
         
