@@ -48,6 +48,10 @@ class StableDiffusionModel(pl.LightningModule):
             item["target"] = item["target"].replace("modules.", "")
             item["target"] = "lib." + item["target"]   
         
+        if self.config.trainer.use_xformers:
+            model_params.network_config.params.spatial_transformer_attn_type = "softmax-xformers"
+            model_params.first_stage_config.params.ddconfig.attn_type = "vanilla-xformers"
+        
         encoder = AutoencoderKLWrapper(**model_params.first_stage_config.params).eval()
         encoder.train = disabled_train
         for param in encoder.parameters():
