@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 8
+  batch_size: 2
   resolution: 1024
   center_crop: false
   gradient_checkpointing: true

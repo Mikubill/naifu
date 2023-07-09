@@ -14,7 +14,7 @@ from omegaconf import OmegaConf
 from pathlib import Path
 from diffusers import DDIMScheduler
 from lib.sgm import GeneralConditioner
-from lib.warppers import AutoencoderKLWrapper, UnetWrapper
+from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
 
         
 def disabled_train(self, mode=True):

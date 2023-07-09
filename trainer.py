@@ -69,30 +69,11 @@ def main(args):
         logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
         
-    if config.get("custom_embeddings") != None and config.custom_embeddings.enabled:
-        from experiment.textual_inversion import CustomEmbeddingsCallback
-        callbacks.append(CustomEmbeddingsCallback(config.custom_embeddings))
-        if not config.custom_embeddings.train_all and not config.custom_embeddings.concepts.trainable:
-            if strategy == 'ddp':
-                strategy = 'ddp_find_unused_parameters_false'
-        if config.custom_embeddings.freeze_unet:
-            if strategy == 'ddp_find_unused_parameters_false':
-                strategy = 'ddp'
-        
     if config.get("sampling") != None and config.sampling.enabled:
         callbacks.append(SampleCallback(config.sampling, logger))
         
     if config.lightning.get("strategy") is None:
         config.lightning.strategy = strategy
-
-    if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
-        callbacks.append(ModelCheckpoint(**config.checkpoint))
-        enable_checkpointing = True
-    else:
-        enable_checkpointing = False
-
-    if config.lightning.get("enable_checkpointing") == None:
-        config.lightning.enable_checkpointing = enable_checkpointing
         
     config, callbacks = pl_compat_fix(config, callbacks)
     trainer = pl.Trainer(logger=logger, callbacks=callbacks, **config.lightning)
