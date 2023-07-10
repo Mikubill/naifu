@@ -188,9 +188,9 @@ class StableDiffusionModel(pl.LightningModule):
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-
+            
         # Predict the noise residual
-        noise_pred = self.model(noisy_latents.to(self.cast_dtype), timesteps, {k: v.to(self.cast_dtype) for k, v in cond.items()})
+        noise_pred = self.model(noisy_latents, timesteps, cond)
         
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
