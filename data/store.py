@@ -278,18 +278,17 @@ class AspectRatioDataset(ImageStore):
 
         return new_img
     
+    @rank_zero_only
     def setup_cache(self, vae_encode_func, token_encode_func, store):
         cache_dir = Path(self.cache_dir)
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        return self.fulfill_cache(cache_dir, vae_encode_func, token_encode_func, store)
-    
-    @rank_zero_only
-    def fulfill_cache(self, cache_dir, vae_encode_func, token_encode_func, store):
         cache_file = cache_dir / "cache.h5"
-        cache = h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w")
-            
+        with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
+            self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
+
+    def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
         progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
@@ -330,7 +329,6 @@ class AspectRatioDataset(ImageStore):
 
                 progress_bar.update(len(imgs[idx:idx+stride]))
                 
-        cache.close()
         progress_bar.close()
 
     def build_dict(self, item) -> dict:
