@@ -278,34 +278,26 @@ class AspectRatioDataset(ImageStore):
 
         return new_img
     
-
     def setup_cache(self, vae_encode_func, token_encode_func, store):
-        """ Caches latents for all images in the dataset.
-            cache_config:
-                enable: true
-                save_to_file: True
-                target: [latents, tokens]
-                cache_bsz: 2
-                cache_dir: cache
-        """
         cache_dir = Path(self.cache_dir)
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
         need_to_cache = False
-        with h5py.File(cache_dir / "cache.h5", "r") as cache:
-            for entry in store.buckets.keys():
-                imgs = store.buckets[entry][:]
-                stride = self.cache_bsz
-                for idx in range(0, len(imgs), stride):
-                    if not all([f"{img}.latents" in cache and f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
-                        need_to_cache = True
-                        
-        if need_to_cache:
-            self.fulfill_cache(cache_dir, vae_encode_func, token_encode_func, store)
-        else:
-            print(f"\nCache restored from {cache_dir.absolute()}")
-            return
+        if (cache_dir / "cache.h5").exists():
+            with h5py.File(cache_dir / "cache.h5", "r") as cache:
+                for entry in store.buckets.keys():
+                    imgs = store.buckets[entry][:]
+                    stride = self.cache_bsz
+                    for idx in range(0, len(imgs), stride):
+                        if not all([f"{img}.latents" in cache and f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
+                            need_to_cache = True
+                            
+            if need_to_cache:
+                self.fulfill_cache(cache_dir, vae_encode_func, token_encode_func, store)
+            else:
+                print(f"\nCache restored from {cache_dir.absolute()}")
+                return
     
     @rank_zero_only
     def fulfill_cache(self, cache_dir, vae_encode_func, token_encode_func, store):

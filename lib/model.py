@@ -27,8 +27,8 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
         self.model_path = model_path
-        self.lr = self.config.optimizer.params.lr
         self.batch_size = batch_size 
+        self.lr = self.config.optimizer.params.get("lr", 1e-4)
         self.save_hyperparameters(config)
         self.init_model()
         self.automatic_optimization = False
@@ -249,11 +249,11 @@ class StableDiffusionModel(pl.LightningModule):
     
     def configure_optimizers(self):
         # align LR with batch size in case we're using lrfinder
-        if self.lr != self.config.optimizer.params.lr:
+        if self.lr != self.config.optimizer.params.get("lr", self.lr):
             self.config.optimizer.params.lr = self.lr
             
-        new_lr, scaled = self.get_scaled_lr(self.config.optimizer.params.lr)
-        if scaled:
+        new_lr, scaled = self.get_scaled_lr(self.lr)
+        if scaled and self.config.optimizer.params.get("lr") != None:
             self.config.optimizer.params.lr = new_lr
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
             
