@@ -100,7 +100,7 @@ monitor:
 sampling:
   enabled: false
   use_wandb: true
-  every_n_steps: 1
+  every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
   seed: 1139
