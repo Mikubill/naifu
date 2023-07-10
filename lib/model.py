@@ -78,14 +78,7 @@ class StableDiffusionModel(pl.LightningModule):
             print(f"Unexpected Keys: {unexpected}")
             
         self.cast_dtype = torch.float32
-        if not self.config.trainer.mixed_precision:
-            if self.config.lightning.precision == 16:
-                self.cast_dtype = torch.float16
-            elif self.config.lightning.precision == "bf16":
-                self.cast_dtype = torch.bfloat16
-        self.model.to(self.cast_dtype)
-        self.conditioner.to(self.cast_dtype)
-    
+        self.conditioner.to(torch.float16)    
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
             
@@ -119,7 +112,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.disable_amp()
             
     def disable_amp(self):
-        if self.dtype == torch.float32:
+        if self.cast_dtype == torch.float32:
             return
         from pytorch_lightning.plugins import PrecisionPlugin
         precision_plugin = PrecisionPlugin()
@@ -162,6 +155,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.dataset.setup_cache(self.encode_first_stage, self.conditioner, self.data_sampler.buckets)
             self.conditioner.to("cpu")
             self.first_stage_model.to("cpu")
+            torch.cuda.empty_cache()
 
     def training_step(self, batch, batch_idx):  
         if "latents" not in batch.keys():
