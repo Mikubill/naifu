@@ -5,6 +5,7 @@ import random
 import torch
 import h5py
 import os, binascii
+import numpy as np
 
 from pathlib import Path
 from PIL import Image
@@ -184,6 +185,19 @@ class ImageStore(Dataset):
             
         return "Tags: " + ", ".join(list(final_tags.keys())), skip_image
     
+    # cc: openai
+    def crop_rectangle(self, arrays):
+        min_width = np.min([array.shape[2] for array in arrays])
+        min_height = np.min([array.shape[1] for array in arrays])
+        
+        start_width = (arrays[0].shape[2] - min_width) // 2
+        start_height = (arrays[0].shape[1] - min_height) // 2
+        end_width = start_width + min_width
+        end_height = start_height + min_height
+
+        cropped_arrays = [array[:, start_height:end_height, start_width:end_width] for array in arrays]
+        return cropped_arrays
+    
     def collate_fn(self, examples):
         if "latents" in examples[0].keys():
             conds = {}
@@ -195,10 +209,10 @@ class ImageStore(Dataset):
                     conds[key].append(example["conds"][key])
             for key in conds:
                 conds[key] = torch.stack(conds[key])
-            return {
-                "latents": torch.stack([example["latents"] for example in examples]),
-                "conds": conds,
-            }
+            
+            latents = torch.stack(self.crop_rectangle([example["latents"] for example in examples]))
+            return {"latents": latents, "conds": conds}
+        
         pixel_values = [example["images"] for example in examples]
         pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
         result = {
@@ -285,6 +299,12 @@ class AspectRatioDataset(ImageStore):
             cache_dir.mkdir(parents=True, exist_ok=True)
 
         cache_file = cache_dir / "cache.h5"
+        if cache_file.exists():
+            with h5py.File(cache_file, "r") as cache:
+                to_cache = any(f"{img}.latents" not in cache or f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                if not to_cache:
+                    return
+            
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
 
@@ -328,7 +348,6 @@ class AspectRatioDataset(ImageStore):
                         cache.create_dataset(f"{img}.vec", data=vec.detach().half().cpu().numpy())
 
                 progress_bar.update(len(imgs[idx:idx+stride]))
-                
         progress_bar.close()
 
     def build_dict(self, item) -> dict:
