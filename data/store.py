@@ -279,7 +279,7 @@ class AspectRatioDataset(ImageStore):
         return new_img
     
 
-    def setup_cache(self, *args):
+    def setup_cache(self, vae_encode_func, token_encode_func, store):
         """ Caches latents for all images in the dataset.
             cache_config:
                 enable: true
@@ -305,7 +305,7 @@ class AspectRatioDataset(ImageStore):
             else:
                 return
 
-        self.fulfill_cache(*args)
+        self.fulfill_cache(vae_encode_func, token_encode_func, store)
     
     @rank_zero_only
     def fulfill_cache(self, vae_encode_func, token_encode_func, store):
