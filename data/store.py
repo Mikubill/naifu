@@ -189,15 +189,25 @@ class ImageStore(Dataset):
     def crop_rectangle(self, arrays):
         min_width = np.min([array.shape[2] for array in arrays])
         min_height = np.min([array.shape[1] for array in arrays])
-        
-        start_width = (arrays[0].shape[2] - min_width) // 2
-        start_height = (arrays[0].shape[1] - min_height) // 2
-        end_width = start_width + min_width
-        end_height = start_height + min_height
 
-        cropped_arrays = [array[:, start_height:end_height, start_width:end_width] for array in arrays]
+        start_width = []
+        start_height = []
+
+        for array in arrays:
+            width_diff = array.shape[2] - min_width
+            height_diff = array.shape[1] - min_height
+            start_width.append(width_diff // 2)
+            start_height.append(height_diff // 2)
+
+        end_width = [start + min_width for start in start_width]
+        end_height = [start + min_height for start in start_height]
+        
+        cropped_arrays = [
+            array[:, start_height[i]:end_height[i], start_width[i]:end_width[i]]
+            for i, array in enumerate(arrays)
+        ]
         return cropped_arrays
-    
+
     def collate_fn(self, examples):
         if "latents" in examples[0].keys():
             conds = {}
