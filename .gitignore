@@ -9,3 +9,4 @@ venv
 yandere-tags.json
 scripts/img_process.py
 samples/
+cache/

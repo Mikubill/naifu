@@ -6,14 +6,15 @@ import torch
 import h5py
 import os, binascii
 
-from lib.augment import AugmentTransforms
 from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from lib.utils import get_local_rank
 from dataclasses import dataclass
+from lib.utils import get_local_rank
+from lib.augment import AugmentTransforms
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 class ImageStore(Dataset):
     """
@@ -277,7 +278,8 @@ class AspectRatioDataset(ImageStore):
 
         return new_img
     
-    def setup_cache(self, vae_encode_func, token_encode_func, store):
+
+    def setup_cache(self, *args):
         """ Caches latents for all images in the dataset.
             cache_config:
                 enable: true
@@ -289,8 +291,25 @@ class AspectRatioDataset(ImageStore):
         cache_dir = Path(self.cache_dir)
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
-            
-        cache = h5py.File(cache_dir / "cache.h5", "w")
+
+        with h5py.File(cache_dir / "cache.h5", "r") as cache:
+            for entry in store.buckets.keys():
+                imgs = store.buckets[entry][:]
+                stride = self.cache_bsz
+                for idx in range(0, len(imgs), stride):
+                    if not all([f"{img}.latents" in cache and f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
+                        break
+                else:
+                    continue
+                break
+            else:
+                return
+
+        self.fulfill_cache(*args)
+    
+    @rank_zero_only
+    def fulfill_cache(self, vae_encode_func, token_encode_func, store):
+        cache = h5py.File(cache_dir / "cache.h5", "r+")
         progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
@@ -306,7 +325,7 @@ class AspectRatioDataset(ImageStore):
                     latent = vae_encode_func(torch.stack(batch))
                     for img, latent in zip(imgs[idx:idx+stride], latent):
                         img = str(img)
-                        cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).cpu())
+                        cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
                         cache.create_dataset(f"{img}.size", data=size)
                         
                 if not all([f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
@@ -326,8 +345,8 @@ class AspectRatioDataset(ImageStore):
                         img = str(img)
                         cond = conds[idx, ...]
                         vec = vectors[idx, ...]
-                        cache.create_dataset(f"{img}.crossattn", data=cond.detach().cpu())
-                        cache.create_dataset(f"{img}.vec", data=vec.detach().cpu())
+                        cache.create_dataset(f"{img}.crossattn", data=cond.detach().half().cpu().numpy())
+                        cache.create_dataset(f"{img}.vec", data=vec.detach().half().cpu().numpy())
 
                 progress_bar.update(len(imgs[idx:idx+stride]))
                 
@@ -339,15 +358,15 @@ class AspectRatioDataset(ImageStore):
         
         if self.cache_enabled:
             with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
-                latent = cache[f"{item_id}.latents"][:]
-                latent_size = cache[f"{item_id}.size"]
+                latent = torch.asarray(cache[f"{item_id}.latents"][:])
+                latent_size = cache[f"{item_id}.size"][:]
                 prompt = {
-                    "crossattn": cache[f"{item_id}.crossattn"][:],
-                    "vec": cache[f"{item_id}.vec"][:],
+                    "crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:]),
+                    "vector": torch.asarray(cache[f"{item_id}.vec"][:]),
                 }
-            estimate_size = latent_size[0] // 8, latent_size[1] // 8
-            if latent.shape != (1, 4, *estimate_size):
-                print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}")        
+                estimate_size = latent_size[1] // 8, latent_size[0] // 8,
+                if latent.shape != (4, *estimate_size):
+                    print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}")        
             return {"latents": latent, "conds": prompt}
 
         if item_id == "":

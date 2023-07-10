@@ -5,22 +5,20 @@ trainer:
   batch_size: 1
   resolution: 1024
   center_crop: false
-  gradient_checkpointing: true
-  clip_skip: 2
   seed: 1138
   use_ema: false
   use_hivemind: false
+  use_xformers: false
   lr_scale: sqrt
   train_text_encoder: false
   mixed_precision: false
+  offload_models: false
 
   offset_noise: false
   offset_noise_val: 0.1
   min_snr: false
   min_snr_val: 5
 
-  # note: only works with init_batch_size > 1
-  use_xformers: true
 
 checkpoint:
   monitor: 'epoch'
@@ -39,7 +37,7 @@ lightning:
   # limit_train_batches: 100
   max_epochs: 20
   precision: bf16
-  strategy: ddp_find_unused_parameters_false
+  strategy: auto
   log_every_n_steps: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
@@ -56,7 +54,7 @@ arb:
   dim_limit: 1728
 
 cache:
-  enabled: false
+  enabled: true
   cache_bsz: 4
   cache_dir: cache
 

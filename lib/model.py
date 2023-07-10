@@ -163,7 +163,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.conditioner.to("cpu")
             self.first_stage_model.to("cpu")
 
-    def training_step(self, batch, batch_idx):    
+    def training_step(self, batch, batch_idx):  
         if "latents" not in batch.keys():
             latents = self.encode_first_stage(batch["images"])
             if torch.any(torch.isnan(latents)):

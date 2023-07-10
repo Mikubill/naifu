@@ -5,8 +5,6 @@ trainer:
   batch_size: 1
   resolution: 512
   center_crop: false
-  gradient_checkpointing: true
-  clip_skip: 2
   seed: 1138
   use_ema: true
   use_hivemind: false
