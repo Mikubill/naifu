@@ -13,7 +13,7 @@ from lib.model import StableDiffusionModel
 from lib.compat import pl_compat_fix
 
 from omegaconf import OmegaConf
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 
 def main(args):
