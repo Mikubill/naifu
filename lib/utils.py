@@ -238,38 +238,6 @@ def load_clip_weights(model, sd):
     sd = transformers_convert(sd, "cond_stage_model.model.", "cond_stage_model.transformer.text_model.", 24)
     return load_model_weights(model, sd)
 
-VAE_PARAMS_Z_CHANNELS = 4
-VAE_PARAMS_RESOLUTION = 256
-VAE_PARAMS_IN_CHANNELS = 3
-VAE_PARAMS_OUT_CH = 3
-VAE_PARAMS_CH = 128
-VAE_PARAMS_CH_MULT = [1, 2, 4, 4]
-VAE_PARAMS_NUM_RES_BLOCKS = 2
-
-
-def create_vae_diffusers_config():
-    """
-    Creates a config for the diffusers based on the config of the LDM model.
-    """
-    # vae_params = original_config.model.params.first_stage_config.params.ddconfig
-    # _ = original_config.model.params.first_stage_config.params.embed_dim
-    block_out_channels = [VAE_PARAMS_CH * mult for mult in VAE_PARAMS_CH_MULT]
-    down_block_types = ["DownEncoderBlock2D"] * len(block_out_channels)
-    up_block_types = ["UpDecoderBlock2D"] * len(block_out_channels)
-
-    config = dict(
-        sample_size=VAE_PARAMS_RESOLUTION,
-        in_channels=VAE_PARAMS_IN_CHANNELS,
-        out_channels=VAE_PARAMS_OUT_CH,
-        down_block_types=tuple(down_block_types),
-        up_block_types=tuple(up_block_types),
-        block_out_channels=tuple(block_out_channels),
-        latent_channels=VAE_PARAMS_Z_CHANNELS,
-        layers_per_block=VAE_PARAMS_NUM_RES_BLOCKS,
-    )
-    return config
-
-
 def get_free_memory(dev=None, torch_free_too=False):
     stats = torch.cuda.memory_stats(dev)
     mem_active = stats['active_bytes.all.current']

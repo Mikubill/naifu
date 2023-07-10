@@ -15,6 +15,9 @@ from pathlib import Path
 from diffusers import DDIMScheduler
 from lib.sgm import GeneralConditioner
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
+
+from PIL import Image
+from tqdm.auto import tqdm
         
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
@@ -156,6 +159,58 @@ class StableDiffusionModel(pl.LightningModule):
             self.conditioner.to("cpu")
             self.first_stage_model.to("cpu")
             torch.cuda.empty_cache()
+
+    @torch.inference_mode()
+    @rank_zero_only 
+    def sample(self, prompt, negative_prompt, generator=None, size=(1024,1024), steps=20, guidance_scale=7.5):
+        self.model.eval()
+        self.conditioner.to("cuda")
+        # first construct batch
+        prompts_batch = {
+            "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
+            "original_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
+            "crop_coords_top_left": torch.stack([torch.asarray((0,0))]).cuda(),
+        }
+        prompts_batch["prompts"] = prompt
+        cond = self.conditioner(prompts_batch)
+        prompts_batch["prompts"] = negative_prompt
+        uncond = self.conditioner(prompts_batch)
+        cond = {
+            "crossattn": torch.cat([uncond["crossattn"], cond["crossattn"]], dim=0).cuda().float(),
+            "vector": torch.cat([uncond["vector"], cond["vector"]], dim=0).cuda().float(),
+        }
+        
+        self.conditioner.to("cpu")
+        latents_shape = (1, 4, size[0] // 8, size[1] // 8)
+        latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
+        latents = latents * self.noise_scheduler.init_noise_sigma
+        
+        self.noise_scheduler.set_timesteps(steps)
+        timesteps = self.noise_scheduler.timesteps
+        num_latent_input = 2
+        for i, t in enumerate(tqdm(timesteps)):
+            # expand the latents if we are doing classifier free guidance
+            latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
+            latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
+            latent_model_input = latent_model_input.cuda().to(torch.float32)
+
+            noise_pred = self.model(latent_model_input, torch.asarray([t]).cuda(), cond)
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(num_latent_input)  # uncond by negative prompt
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+            # compute the previous noisy sample x_t -> x_t-1
+            latents = self.noise_scheduler.step(noise_pred, t, latents.cuda()).prev_sample
+
+        self.first_stage_model.to("cuda")
+        image = self.decode_first_stage(latents)
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+
+        image = (image * 255).round().astype("uint8")
+        image = [Image.fromarray(im) for im in image]
+        
+        self.first_stage_model.to("cpu")
+        self.model.train()
+        return image
 
     def training_step(self, batch, batch_idx):  
         if "latents" not in batch.keys():
