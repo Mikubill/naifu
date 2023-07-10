@@ -288,10 +288,8 @@ class AspectRatioDataset(ImageStore):
     @rank_zero_only
     def fulfill_cache(self, cache_dir, vae_encode_func, token_encode_func, store):
         cache_file = cache_dir / "cache.h5"
-        if cache_file.exists():
-            cache = h5py.File(cache_file, "r+")
-        else:
-            cache = h5py.File(cache_file, "w")
+        cache = h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w")
+            
         progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]

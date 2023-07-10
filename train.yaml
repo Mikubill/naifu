@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 4
+  batch_size: 2
   resolution: 1024
   center_crop: false
   seed: 1138
@@ -18,7 +18,6 @@ trainer:
   offset_noise_val: 0.1
   min_snr: false
   min_snr_val: 5
-
 
 checkpoint:
   monitor: 'epoch'
@@ -73,14 +72,14 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  name: transformers.optimization.Adafactor
-  params: 
-    relative_step: True
-  # name: bitsandbytes.optim.PagedAdamW8bit
-  # params:
-  #   lr: 5e-6
-  #   weight_decay: 1e-2
-  #   eps: 1e-8
+  # name: transformers.optimization.Adafactor
+  # params: 
+  #   relative_step: True
+  name: bitsandbytes.optim.PagedAdamW8bit
+  params:
+    lr: 5e-6
+    weight_decay: 1e-2
+    eps: 1e-8
 
 lr_scheduler:
   name: torch.optim.lr_scheduler.CosineAnnealingLR
