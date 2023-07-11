@@ -13,6 +13,7 @@ from torch.utils.checkpoint import checkpoint
 from .model_util import use_noinit_ops
 from transformers import (
     CLIPTextModel,
+    CLIPTextConfig,
     CLIPTokenizer,
     modeling_utils,
 )
@@ -248,7 +249,9 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         assert layer in self.LAYERS
         self.tokenizer = CLIPTokenizer.from_pretrained(version)
         with use_noinit_ops(), modeling_utils.no_init_weights():
-            self.transformer = CLIPTextModel.from_pretrained(version)
+            config = CLIPTextConfig.from_pretrained(version)
+            self.transformer = CLIPTextModel(config)
+            # self.transformer = CLIPTextModel.from_pretrained(version)
                 
         self.device = device
         self.max_length = max_length
