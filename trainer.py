@@ -19,7 +19,7 @@ from pytorch_lightning.loggers import WandbLogger
 def main(args):
     config = OmegaConf.load(args.config)
     torch.manual_seed(config.trainer.seed)
-    
+
     if args.model_path == None:
         args.model_path = config.trainer.model_path
     
@@ -55,30 +55,6 @@ def main(args):
             torch.backends.cudnn.allow_tf32 = True
             torch.set_float32_matmul_precision(precision)
             
-    # import sys
-    # if int(major) >= 2 and sys.version_info < (3, 11):
-    #     model.unet = torch.compile(model.unet, mode="reduce-overhead", fullgraph=True)
-        
-    # for ddp-optimize only
-    # from torch.distributed.algorithms.ddp_comm_hooks import post_localSGD_hook as post_localSGD
-    # strategy = pl.strategies.DDPStrategy(
-    #     find_unused_parameters=False,
-    #     gradient_as_bucket_view=True,
-    #     ddp_comm_state=post_localSGD.PostLocalSGDState(
-    #         process_group=None,
-    #         subgroup=None,
-    #         start_localSGD_iter=8,
-    #     ),
-    #     ddp_comm_hook=post_localSGD.post_localSGD_hook,
-    #     model_averaging_period=4,
-    # )
-    
-    # for experiment only
-    # from experiment.attn_realign import AttnRealignModel
-    # model = AttnRealignModel(args.model_path, config, config.trainer.batch_size)
-    # from experiment.kwlenc import MixinModel
-    # model = MixinModel(args.model_path, config, config.trainer.batch_size)
-    
     callbacks = []
     if config.monitor.huggingface_repo != "":
         hf_logger = HuggingFaceHubCallback(
@@ -117,7 +93,7 @@ def main(args):
 
     if config.lightning.get("enable_checkpointing") == None:
         config.lightning.enable_checkpointing = enable_checkpointing
-        
+    
     config, callbacks = pl_compat_fix(config, callbacks)
     trainer = pl.Trainer(logger=logger, callbacks=callbacks, **config.lightning)
     trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)

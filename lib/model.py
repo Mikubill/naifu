@@ -21,6 +21,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
+from lib.utils import convert_to_sd, convert_to_df
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -37,26 +38,39 @@ class StableDiffusionModel(pl.LightningModule):
         config = self.config
         scheduler_cls = DDIMScheduler
             
-        if (Path(self.model_path) / "model.ckpt").is_file():
+        if Path(self.model_path).is_file():
             # use autoconvert
-            self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = load_sd_checkpoint(self.model_path)   
-        else:
-            if hasattr(scheduler_cls, "from_pretrained"):
-                self.noise_scheduler = scheduler_cls.from_pretrained(self.model_path, subfolder="scheduler")
+            from_safetensors = Path(self.model_path).with_suffix(".safetensors").is_file()
+            if from_safetensors:
+                from safetensors import safe_open
+
+                checkpoint = {}
+                with safe_open(checkpoint_path, framework="pt", device="cpu") as f:
+                    for key in f.keys():
+                        checkpoint[key] = f.get_tensor(key)
             else:
-                self.noise_scheduler = scheduler_cls.from_config(self.model_path, subfolder="scheduler")
-            self.tokenizer = CLIPTokenizer.from_pretrained(self.model_path, subfolder="tokenizer")
-            self.text_encoder = CLIPTextModel.from_pretrained(self.model_path, subfolder="text_encoder")
-            self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae")
-            self.unet = UNet2DConditionModel.from_pretrained(self.model_path, subfolder="unet") 
-         
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                checkpoint = torch.load(self.model_path, map_location=device)
+
+            # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
+            # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
+            while "state_dict" in checkpoint:
+                checkpoint = checkpoint["state_dict"]
+
+            self.pipeline = convert_to_df(checkpoint, return_pipe=True)
+        else:
+            self.pipeline = StableDiffusionPipeline.from_pretrained(self.model_path)
+        
+        self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = \
+            self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.tokenizer, self.pipeline.scheduler   
         self.unet.to(self.device, dtype=torch.float32)
         self.unet.train()
-        
+
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
         if config.trainer.get("train_text_encoder"):
+            self.text_encoder.train()
             self.text_encoder.requires_grad_(True)
         
         if config.trainer.gradient_checkpointing: 
@@ -75,19 +89,6 @@ class StableDiffusionModel(pl.LightningModule):
         # finally setup ema
         if config.trainer.use_ema: 
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
-        
-        if config.get("sampling"):
-            self.pipeline = StableDiffusionPipeline(
-                vae=self.vae, 
-                text_encoder=self.text_encoder, 
-                tokenizer=self.tokenizer, 
-                unet=self.unet, 
-                scheduler=self.noise_scheduler, 
-                safety_checker=None,
-                feature_extractor=None,
-                requires_safety_checker=False
-            )
-            self.pipeline.set_progress_bar_config(disable=True)
             
         self.use_latent_cache = self.config.dataset.get("cache_latents")
         
@@ -326,13 +327,19 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.update()
             
     def on_save_checkpoint(self, checkpoint):
+        checkpoint["state_dict"] = convert_to_sd(checkpoint["state_dict"])
         if self.config.trainer.use_ema:
             checkpoint["model_ema"] = self.ema.state_dict()
             
     def on_load_checkpoint(self, checkpoint):
+        unet_sd, vae_sd, te_sd = convert_to_df(checkpoint["state_dict"])
+        self.unet.load_state_dict(unet_sd)
+        self.vae.load_state_dict(vae_sd)
+        self.text_encoder.load_state_dict(te_sd)
+        checkpoint["state_dict"] = {}
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
-            
+
 
 def download(url, model_path="model"):
     print(f'Downloading: "{url}" to {model_path}\n')
@@ -351,66 +358,3 @@ def get_class(name: str):
     module_name, class_name = name.rsplit(".", 1)
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
-
-
-def load_sd_checkpoint(model_path):
-    from lib.utils import (
-        convert_ldm_bert_checkpoint,
-        convert_ldm_clip_checkpoint,
-        convert_ldm_openclip_checkpoint,
-        convert_ldm_unet_checkpoint, convert_ldm_vae_checkpoint,
-        create_ldm_bert_config, create_unet_diffusers_config,
-        create_vae_diffusers_config
-    )
-    
-    vae_path = Path(model_path) / "model.vae.pt"
-    checkpoint_path = Path(model_path) / "model.ckpt"
-    config_path = Path(model_path) / "config.yaml"
-            
-    print(f"Loading StableDiffusionModel from {checkpoint_path}")
-    original_config = OmegaConf.load(config_path)
-    
-    num_train_timesteps = original_config.model.params.timesteps
-    beta_start = original_config.model.params.linear_start
-    beta_end = original_config.model.params.linear_end
-    scheduler = DDIMScheduler(
-        num_train_timesteps=num_train_timesteps,
-        beta_start=beta_start,
-        beta_end=beta_end,
-        beta_schedule="scaled_linear",
-    )
-            
-    checkpoint = torch.load(checkpoint_path)
-    checkpoint = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-            
-    vae_checkpoint = checkpoint
-    if vae_path.is_file():
-        vae_checkpoint = torch.load(vae_path)["state_dict"]
-
-    # Convert the UNet2DConditionModel model.
-    unet_config = create_unet_diffusers_config(original_config)
-    converted_unet_checkpoint = convert_ldm_unet_checkpoint(checkpoint, unet_config, path=checkpoint_path, extract_ema=False)
-
-    # Convert the VAE model.
-    vae_config = create_vae_diffusers_config(original_config)
-    converted_vae_checkpoint = convert_ldm_vae_checkpoint(vae_checkpoint, vae_config)
-    
-    unet = UNet2DConditionModel(**unet_config)
-    unet.load_state_dict(converted_unet_checkpoint)
-
-    vae = AutoencoderKL(**vae_config)
-    vae.load_state_dict(converted_vae_checkpoint)
-            
-    text_model_type = original_config.model.params.cond_stage_config.target.split(".")[-1]
-    if text_model_type == "FrozenCLIPEmbedder":
-        text_encoder = convert_ldm_clip_checkpoint(checkpoint)
-        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-    elif text_model_type == "FrozenOpenCLIPEmbedder":
-        text_encoder = convert_ldm_openclip_checkpoint(checkpoint)
-        tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
-    else:
-        text_config = create_ldm_bert_config(original_config)
-        text_encoder = convert_ldm_bert_checkpoint(checkpoint, text_config)
-        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        
-    return unet, vae, text_encoder, tokenizer, scheduler

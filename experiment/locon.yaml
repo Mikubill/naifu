@@ -16,7 +16,7 @@ lora:
   dropout: 0.0
 
 trainer:
-  model_path: "/root/workspace/storage/models/orangemix"
+  model_path: "/notebooks/storage/animesfw"
   batch_size: 2
   resolution: 512
   center_crop: false
@@ -69,7 +69,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/pvc"
+    - "/notebooks/rurudo_lion"
   center_crop: false
   ucg: 0.0
   debug_arb: false
