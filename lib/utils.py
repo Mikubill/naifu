@@ -106,6 +106,10 @@ def convert_to_df(checkpoint, return_pipe=False):
     key_name_v2_1 = "model.diffusion_model.input_blocks.2.1.transformer_blocks.0.attn2.to_k.weight"
     key_name_sd_xl_base = "conditioner.embedders.1.model.transformer.resblocks.9.mlp.c_proj.bias"
     key_name_sd_xl_refiner = "conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias"
+    
+    global_step = None
+    if "global_step" in checkpoint:
+        global_step = checkpoint["global_step"]
 
     # model_type = "v1"
     config_url = "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml"
