@@ -45,7 +45,7 @@ class StableDiffusionModel(pl.LightningModule):
                 from safetensors import safe_open
 
                 checkpoint = {}
-                with safe_open(checkpoint_path, framework="pt", device="cpu") as f:
+                with safe_open(self.model_path, framework="pt", device="cpu") as f:
                     for key in f.keys():
                         checkpoint[key] = f.get_tensor(key)
             else:
