@@ -60,7 +60,8 @@ class StableDiffusionModel(pl.LightningModule):
             self.pipeline = convert_to_df(checkpoint, return_pipe=True)
         else:
             self.pipeline = StableDiffusionPipeline.from_pretrained(self.model_path)
-        
+            
+        self.pipeline.set_progress_bar_config(disable=True)
         self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = \
             self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.tokenizer, self.pipeline.scheduler   
         self.unet.to(self.device, dtype=torch.float32)
