@@ -196,6 +196,8 @@ def convert_to_df(checkpoint, return_pipe=False):
         
         text_model = CLIPTextModel(CLIPTextConfig.from_pretrained("openai/clip-vit-large-patch14"))
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        if len(text_model_dict) < 10:
+            text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
     
     if not return_pipe:
         return converted_unet_checkpoint, converted_vae_checkpoint, text_model_dict
@@ -203,7 +205,7 @@ def convert_to_df(checkpoint, return_pipe=False):
         vae = AutoencoderKL(**vae_config)
         vae.load_state_dict(converted_vae_checkpoint)
         unet.load_state_dict(converted_unet_checkpoint)
-        text_model.load_state_dict(text_model_dict)
+        text_model.load_state_dict(text_model_dict, strict=False)
         pipe = StableDiffusionPipeline(
             unet=unet,
             vae=vae,

@@ -7,8 +7,8 @@ os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
 def main():
 
-    batch_size = 1
-    steps = 5
+    batch_size = 4
+    steps = 50
     ADM_IN_CHANNELS = 2816
     
     # Model Train (50 steps)
@@ -44,7 +44,7 @@ def main():
         ctx = torch.randn(batch_size, 77, 2048).cuda()
         y = torch.randn(batch_size, ADM_IN_CHANNELS).cuda()
 
-        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
             output = model(x, t, ctx, y)
             target = torch.randn_like(output)
             loss = torch.nn.functional.mse_loss(output, target)
