@@ -38,13 +38,26 @@ class StableDiffusionModel(pl.LightningModule):
         
     def init_model(self):
         config = self.config
+        print(f"Loading model from {self.model_path}")
+        sd = load_torch_file(self.model_path)
         
-        # assume path is file, we get the config from the file
-        yaml_file = Path(self.model_path).with_suffix(".yaml")
-        if not yaml_file.is_file():
-            # assume it's sdxl
-            yaml_file = Path("lib/model_configs/sd_xl_base.yaml")
-        self.model_config = OmegaConf.load(yaml_file)
+        key_name_v2_1 = "model.diffusion_model.input_blocks.2.1.transformer_blocks.0.attn2.to_k.weight"
+        key_name_sd_xl_base = "conditioner.embedders.1.model.transformer.resblocks.9.mlp.c_proj.bias"
+        key_name_sd_xl_refiner = "conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias"
+
+        config_file = Path(self.model_path).with_suffix(".yaml")
+        if not config_file.is_file():
+            # model_type = "v1"
+            config_file = "lib/model_configs/sd_1.yaml"
+            if key_name_v2_1 in sd and sd[key_name_v2_1].shape[-1] == 1024:
+                # model_type = "v2"
+                config_file = "lib/model_configs/sd_2_1.yaml"
+            elif key_name_sd_xl_base in sd:
+                config_file = "lib/model_configs/sd_xl_base.yaml"
+            elif key_name_sd_xl_refiner in sd:
+                config_file = "lib/model_configs/sd_xl_refiner.yaml"
+            
+        self.model_config = OmegaConf.load(config_file)
         model_params = self.model_config.model.params
         
         for item in model_params.conditioner_config.params.emb_models:
@@ -72,8 +85,6 @@ class StableDiffusionModel(pl.LightningModule):
             set_alpha_to_one=False,
         )
         
-        print(f"Loading model from {self.model_path}")
-        sd = load_torch_file(self.model_path)
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
             print(f"Missing Keys: {missing}")
