@@ -9,9 +9,8 @@ from omegaconf import OmegaConf
 import requests
 import torch
 from transformers import (
-    BertTokenizerFast, 
     CLIPTextModel, 
-    modeling_utils,
+    CLIPTextConfig,
     CLIPTokenizer
 )
 from diffusers import (
@@ -185,7 +184,6 @@ def convert_to_df(checkpoint, return_pipe=False):
     vae_config = create_vae_diffusers_config(original_config, image_size=image_size)
     converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
 
-    converted_text_model = {}
     if model_type == "FrozenOpenCLIPEmbedder":
         text_model = convert_open_clip_checkpoint(checkpoint)
         tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2", subfolder="tokenizer")
@@ -195,8 +193,8 @@ def convert_to_df(checkpoint, return_pipe=False):
         for key in keys:
             if key.startswith("cond_stage_model.transformer"):
                 text_model_dict[key[len("cond_stage_model.transformer.") :]] = checkpoint[key]
-        with modeling_utils.no_init_weights():
-            text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+        
+        text_model = CLIPTextModel(CLIPTextConfig.from_pretrained("openai/clip-vit-large-patch14"))
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     
     if not return_pipe:
@@ -205,6 +203,7 @@ def convert_to_df(checkpoint, return_pipe=False):
         vae = AutoencoderKL(**vae_config)
         vae.load_state_dict(converted_vae_checkpoint)
         unet.load_state_dict(converted_unet_checkpoint)
+        text_model.load_state_dict(text_model_dict)
         pipe = StableDiffusionPipeline(
             unet=unet,
             vae=vae,
