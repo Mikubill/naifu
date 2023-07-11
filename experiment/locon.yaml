@@ -2,18 +2,18 @@ name: test-run
 
 lora:
   use_locon: true
-  rank: 8
-  conv_rank: 8
-  lora_alpha: 1
-  conv_alpha: 1
+  rank: 16
+  conv_rank: 16
+  lora_alpha: 8
+  conv_alpha: 8
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
   unet_lr: 1e-4
-  encoder_lr: 1e-4
+  encoder_lr: 5e-5
   lowvram: false
   override_prompt: ""
-  dropout: 0.0
+  dropout: 0.1
 
 trainer:
   model_path: "/notebooks/storage/animesfw"
