@@ -15,6 +15,7 @@ from lib.compat import pl_compat_fix
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.strategies import SingleDeviceStrategy
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -71,6 +72,13 @@ def main(args):
         
     if config.get("sampling") != None and config.sampling.enabled:
         callbacks.append(SampleCallback(config.sampling, logger))
+        
+    if torch.cuda.device_count() == 1:
+        strategy = SingleDeviceStrategy(device="cuda:0")
+        
+    if config.lightning.get("strategy") is not None:
+        strategy = config.lightning.strategy
+        del config.lightning["strategy"]
         
     if config.lightning.get("strategy") is None:
         config.lightning.strategy = strategy
