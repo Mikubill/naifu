@@ -214,7 +214,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         return [input_ids, pixel_values]
 
     def __len__(self):
-        return self._length
+        return self._length // get_world_size()
 
     def __iter__(self):
         for entry in self.entries[get_local_rank()::get_world_size()]:
