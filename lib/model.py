@@ -12,14 +12,10 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from pathlib import Path
 from tqdm.auto import tqdm
-from omegaconf import OmegaConf
-from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
-from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
-from transformers import BertTokenizerFast, CLIPTextModel, CLIPTokenizer
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
 from lib.utils import convert_to_sd, convert_to_df
 
@@ -115,8 +111,17 @@ class StableDiffusionModel(pl.LightningModule):
         world_size = get_world_size()
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
+        arb_config = {
+            "bsz": self.config.trainer.batch_size,
+            "seed": self.config.trainer.seed,
+            "world_size": world_size,
+            "global_rank": local_rank,
+            **self.config.arb
+        }
+        
         # init Dataset
         self.dataset = dataset_cls(
+            arb_config=arb_config,
             size=self.config.trainer.resolution,
             seed=self.config.trainer.seed,
             rank=local_rank,
@@ -126,26 +131,26 @@ class StableDiffusionModel(pl.LightningModule):
         )
         
         # init sampler
-        self.data_sampler = None
-        if self.config.arb.enabled:
-            self.data_sampler = AspectRatioSampler(
-                bsz=self.batch_size,
-                config=self.config, 
-                rank=local_rank, 
-                dataset=self.dataset, 
-                world_size=world_size,
-            ) 
+    #   self.data_sampler = None
+    #   if self.config.arb.enabled:
+    #       self.data_sampler = AspectRatioSampler(
+    #           bsz=self.batch_size,
+    #           config=self.config, 
+    #           rank=local_rank, 
+    #           dataset=self.dataset, 
+    #           world_size=world_size,
+    #       ) 
         
     def train_dataloader(self):
-        if self.data_sampler:
-            self.data_sampler.update_bsz(self.batch_size)
+        # if self.data_sampler:
+        #     self.data_sampler.update_bsz(self.batch_size)
             
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
+            prefetch_factor=2,
             collate_fn=self.dataset.collate_fn,
-            sampler=self.data_sampler,
             num_workers=self.config.dataset.num_workers,
-            batch_size=1 if self.data_sampler else self.batch_size,
+            batch_size=self.batch_size,
             persistent_workers=True,
         )
         return dataloader
