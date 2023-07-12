@@ -15,6 +15,7 @@ from lib.compat import pl_compat_fix
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.strategies import SingleDeviceStrategy
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -72,18 +73,16 @@ def main(args):
     if config.get("custom_embeddings") != None and config.custom_embeddings.enabled:
         from experiment.textual_inversion import CustomEmbeddingsCallback
         callbacks.append(CustomEmbeddingsCallback(config.custom_embeddings))
-        if not config.custom_embeddings.train_all and not config.custom_embeddings.concepts.trainable:
-            if strategy == 'ddp':
-                strategy = 'ddp_find_unused_parameters_false'
-        if config.custom_embeddings.freeze_unet:
-            if strategy == 'ddp_find_unused_parameters_false':
-                strategy = 'ddp'
-        
+
     if config.get("sampling") != None and config.sampling.enabled:
         callbacks.append(SampleCallback(config.sampling, logger))
         
-    if config.lightning.get("strategy") is None:
-        config.lightning.strategy = strategy
+    if torch.cuda.device_count() == 1:
+        strategy = SingleDeviceStrategy(device="cuda:0")
+        
+    if config.lightning.get("strategy") is not None:
+        strategy = config.lightning.strategy
+        del config.lightning["strategy"]
 
     if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
         callbacks.append(ModelCheckpoint(**config.checkpoint))
@@ -95,7 +94,7 @@ def main(args):
         config.lightning.enable_checkpointing = enable_checkpointing
         
     config, callbacks = pl_compat_fix(config, callbacks)
-    trainer = pl.Trainer(logger=logger, callbacks=callbacks, **config.lightning)
+    trainer = pl.Trainer(logger=logger, callbacks=callbacks, strategy=strategy, **config.lightning)
     trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
 
 if __name__ == "__main__":
