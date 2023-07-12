@@ -271,19 +271,6 @@ class StableDiffusionModel(pl.LightningModule):
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
-            
-        optimizers = self.optimizers()
-        optimizers = optimizers if isinstance(optimizers, list) else [optimizers]
-        accumulate_grad_batches = self.trainer.accumulate_grad_batches
-        current_step = self.trainer.global_step
-        if (current_step + 1) % accumulate_grad_batches == 0:
-            for opt in optimizers:
-                opt.zero_grad(set_to_none=True)
-
-        self.manual_backward(loss)
-        if (current_step + 1) % accumulate_grad_batches == 0:
-            for opt in optimizers:
-                opt.step()
                 
         # Logging to TensorBoard by default
         major, minor, _ = pl.__version__.split('.')
@@ -291,6 +278,8 @@ class StableDiffusionModel(pl.LightningModule):
             self.log("train_loss", loss, prog_bar=True)
         else:
             self.log("train_loss", loss)
+        
+        return loss
     
     def get_scaled_lr(self, base):
         # Scale LR OPs
