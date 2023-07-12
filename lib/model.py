@@ -33,7 +33,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.lr = self.config.optimizer.params.get("lr", 1e-4)
         self.save_hyperparameters(config)
         self.init_model()
-        self.automatic_optimization = False
+        # self.automatic_optimization = False
         
     def init_model(self):
         config = self.config
