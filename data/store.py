@@ -11,7 +11,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from lib.utils import get_local_rank
 from data.buckets import AspectRatioBucket
-
+from lib.utils import get_local_rank, get_world_size
 
 class ImageStore(torch.utils.data.IterableDataset):
     """
@@ -217,7 +217,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         return self._length
 
     def __iter__(self):
-        for entry in self.entries:
+        for entry in self.entries[get_local_rank()::get_world_size()]:
             example = {}
             instance_path, instance_prompt = entry
             
@@ -335,6 +335,9 @@ class AspectRatioDataset(ImageStore):
             f"prompt_ids": self.tokenize(prompt)
         }
         return example
+    
+    def __len__(self):
+        return len(self.buckets.res_map) // get_world_size() 
 
     def __iter__(self):
         for batch, size in self.buckets.generator():
