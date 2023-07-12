@@ -1,21 +1,19 @@
-import itertools
 import json
 import os
 import random
 import torch
-import tempfile
 import os, binascii
 
 from lib.augment import AugmentTransforms
 from pathlib import Path
 from PIL import Image
-from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
 from lib.utils import get_local_rank
+from data.buckets import AspectRatioBucket
 
 
-class ImageStore(Dataset):
+class ImageStore(torch.utils.data.IterableDataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
@@ -218,28 +216,51 @@ class ImageStore(Dataset):
     def __len__(self):
         return self._length
 
-    def __getitem__(self, index):
-        example = {}
-        instance_path, instance_prompt = self.entries[index % self._length]
-        
-        if self.use_latent_cache:
-            example["images"] = self.latents_cache[instance_path]
-        else:
-            instance_image = self.read_img(instance_path)
-            example["images"] = self.image_transforms(instance_image)
+    def __iter__(self):
+        for entry in self.entries:
+            example = {}
+            instance_path, instance_prompt = entry
             
-        example["prompt_ids"] = self.tokenize(instance_prompt)
-        return example
+            if self.use_latent_cache:
+                example["images"] = self.latents_cache[instance_path]
+            else:
+                instance_image = self.read_img(instance_path)
+                example["images"] = self.image_transforms(instance_image)
+                
+            example["prompt_ids"] = self.tokenize(instance_prompt)
+            yield example
 
 
 class AspectRatioDataset(ImageStore):
-    def __init__(self, debug_arb=False, **kwargs):
+    def __init__(self, arb_config, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
         self.debug = debug_arb
         self.prompt_cache = {}
+        self.kwargs = kwargs
+
+        self.arb_config = arb_config
+        if arb_config["debug"]:
+            print(f"BucketManager initialized using config: {self.arb_config}")
+        else:
+            print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
+        
+        self.init_buckets()
+
+    def init_buckets(self):
+        entries = [x[0] for x in self.entries]
+        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
+        
+    def get_dict(self, entries):
+        id_size_map = {}
+        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
+            fp = entry[entry.index("@")+1:] if self.kwargs.get("allow_duplicates") else entry
+            with Image.open(fp) as img:
+                size = img.size
+            id_size_map[entry] = size
+        return id_size_map
             
     def cache_latents(self, vae, store, config):
         self.use_latent_cache = True
@@ -266,10 +287,6 @@ class AspectRatioDataset(ImageStore):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
         return res
-    
-    def collate_fn(self, examples):
-        examples = list(itertools.chain.from_iterable(examples))
-        return super().collate_fn(examples=examples)
 
     def transformer(self, img, size, center_crop=False):
         x, y = img.size
@@ -294,24 +311,6 @@ class AspectRatioDataset(ImageStore):
         ])
 
         new_img = image_transforms(img)
-
-        if self.debug:
-            import uuid
-
-            import torchvision
-            print(x, y, "->", new_w, new_h, "->", new_img.shape)
-            
-            basedir = os.path.join(tempfile.gettempdir(), "nd-arb-debug")
-            os.makedirs(basedir, exist_ok=True)
-            filename = "arb_" + str(uuid.uuid4())[:8]
-            rawp = os.path.join(basedir, f"{filename}_raw.jpg")
-            trsp = os.path.join(basedir, f"{filename}_transformed.jpg")
-            
-            torchvision.utils.save_image(self.denormalize(new_img), rawp)
-            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), trsp)
-            print(f"saved: {rawp}")
-            print(f"saved: {trsp}")
-
         return new_img
 
     def build_dict(self, item, roll) -> dict:
@@ -337,10 +336,9 @@ class AspectRatioDataset(ImageStore):
         }
         return example
 
-    def __getitem__(self, index):
-        result = []
-        rs = random.random()
-        for item in index:
-            result.append(self.build_dict(item, rs))
+    def __iter__(self):
+        for batch, size in self.buckets.generator():
+            for item in batch:
+                rs = random.random()
+                yield self.build_dict({"size": size, "instance": item}, rs)
 
-        return result
