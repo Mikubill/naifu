@@ -4,7 +4,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from data.buckets import AspectRatioSampler
 from data.store import AspectRatioDataset, ImageStore
 from pytorch_lightning.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
@@ -103,8 +102,17 @@ class StableDiffusionModel(pl.LightningModule):
         world_size = get_world_size()
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
         
+        arb_config = {
+            "bsz": self.config.trainer.batch_size,
+            "seed": self.config.trainer.seed,
+            "world_size": world_size,
+            "global_rank": local_rank,
+            **self.config.arb
+        }
+        
         # init Dataset
         self.dataset = dataset_cls(
+            arb_config=arb_config,
             size=self.config.trainer.resolution,
             seed=self.config.trainer.seed,
             rank=local_rank,
@@ -113,16 +121,6 @@ class StableDiffusionModel(pl.LightningModule):
             **self.config.cache
         )
         
-        # init sampler
-        self.data_sampler = None
-        if self.config.arb.enabled:
-            self.data_sampler = AspectRatioSampler(
-                bsz=self.batch_size,
-                config=self.config, 
-                rank=local_rank, 
-                dataset=self.dataset, 
-                world_size=world_size,
-            ) 
         self.disable_amp()
             
     def disable_amp(self):
@@ -134,15 +132,14 @@ class StableDiffusionModel(pl.LightningModule):
         self.trainer.strategy.precision_plugin = precision_plugin
 
     def train_dataloader(self):
-        if self.data_sampler:
-            self.data_sampler.update_bsz(self.batch_size)
+        # if self.data_sampler:
+        #     self.data_sampler.update_bsz(self.batch_size)
             
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             collate_fn=self.dataset.collate_fn,
-            sampler=self.data_sampler,
             num_workers=self.config.dataset.num_workers,
-            batch_size=1 if self.data_sampler else self.batch_size,
+            batch_size=self.batch_size,
             persistent_workers=True,
         )
         return dataloader
@@ -166,7 +163,7 @@ class StableDiffusionModel(pl.LightningModule):
             return
         
         if self.config.cache.get("enabled") == True:
-            self.dataset.setup_cache(self.encode_first_stage, self.conditioner, self.data_sampler.buckets)
+            self.dataset.setup_cache(self.encode_first_stage, self.conditioner)
             self.conditioner.to("cpu")
             self.first_stage_model.to("cpu")
             torch.cuda.empty_cache()

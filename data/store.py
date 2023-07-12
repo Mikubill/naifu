@@ -1,4 +1,3 @@
-import itertools
 import json
 import os
 import random
@@ -9,15 +8,16 @@ import numpy as np
 
 from pathlib import Path
 from PIL import Image
-from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from dataclasses import dataclass
 from lib.utils import get_local_rank
 from lib.augment import AugmentTransforms
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from data.buckets import AspectRatioBucket
+from lib.utils import get_local_rank, get_world_size
 
-class ImageStore(Dataset):
+
+class ImageStore(torch.utils.data.IterableDataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
@@ -235,47 +235,69 @@ class ImageStore(Dataset):
         return result
 
     def __len__(self):
-        return self._length
+        return self._length // get_world_size()
 
-    def __getitem__(self, index):
-        instance_path, instance_prompt = self.entries[index % self._length]
-        
-        instance_image = self.read_img(instance_path)
-        img = self.image_transforms(instance_image)
-        prompts = instance_prompt
-        
-        inst = {
-            "images": img, 
-            "prompts": prompts,
-            "original_size_as_tuple": (self.size, self.size),
-            "crop_coords_top_left": (0,0),
-            "target_size_as_tuple": (self.size, self.size),   
-        }
-        return inst
+    def __iter__(self):
+        for entry in self.entries[get_local_rank()::get_world_size()]:
+            instance_path, instance_prompt = entry
+            
+            instance_image = self.read_img(instance_path)
+            img = self.image_transforms(instance_image)
+            prompts = instance_prompt
+            
+            inst = {
+                "images": img, 
+                "prompts": prompts,
+                "original_size_as_tuple": (self.size, self.size),
+                "crop_coords_top_left": (0,0),
+                "target_size_as_tuple": (self.size, self.size),   
+            }
+            return inst
     
     
     
 class AspectRatioDataset(ImageStore):
-    def __init__(self, debug_arb=False, **kwargs):
+    def __init__(self, arb_config, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
         self.debug = debug_arb
         self.prompt_cache = {}
+        self.kwargs = kwargs
         self.cache_enabled = kwargs.get("enabled", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
+            
+        self.arb_config = arb_config
+        if arb_config["debug"]:
+            print(f"BucketManager initialized using config: {self.arb_config}")
+        else:
+            print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
+        
+        for path, prompt in self.entries:
+            self.prompt_cache[path] = prompt
+        
+        self.init_buckets()
+
+    def init_buckets(self):
+        entries = [x[0] for x in self.entries]
+        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
+        
+    def get_dict(self, entries):
+        id_size_map = {}
+        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
+            fp = entry[entry.index("@")+1:] if self.kwargs.get("allow_duplicates") else entry
+            with Image.open(fp) as img:
+                size = img.size
+            id_size_map[entry] = size
+        return id_size_map
         
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
         return res
     
-    def collate_fn(self, examples):
-        examples = list(itertools.chain.from_iterable(examples))
-        return super().collate_fn(examples=examples)
-
     def transformer(self, img, size, center_crop=False):
         x, y = img.size
         short, long = (x, y) if x <= y else (y, x)
@@ -303,8 +325,9 @@ class AspectRatioDataset(ImageStore):
         return new_img
     
     @rank_zero_only
-    def setup_cache(self, vae_encode_func, token_encode_func, store):
+    def setup_cache(self, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
+        store = self.buckets
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -393,6 +416,14 @@ class AspectRatioDataset(ImageStore):
             "target_size_as_tuple": torch.asarray(image.shape[1:]),   
         }
         return example
+    
+    def __len__(self):
+        return len(self.buckets.res_map) // get_world_size() 
 
-    def __getitem__(self, index):
-        return [self.build_dict(item) for item in index]
+    def __iter__(self):
+        for batch, size in self.buckets.generator():
+            for item in batch:
+                yield self.build_dict({"size": size, "instance": item})
+
+    # def __getitem__(self, index):
+    #     return [self.build_dict(item) for item in index]

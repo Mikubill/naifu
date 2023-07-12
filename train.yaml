@@ -70,14 +70,14 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  # name: transformers.optimization.Adafactor
-  # params: 
-  #   relative_step: True
-  name: bitsandbytes.optim.PagedAdamW8bit
-  params:
-    lr: 5e-6
-    weight_decay: 1e-2
-    eps: 1e-8
+  name: transformers.optimization.Adafactor
+  params: 
+    relative_step: True
+  # name: bitsandbytes.optim.PagedAdamW8bit
+  # params:
+    # lr: 5e-6
+    # weight_decay: 1e-2
+    # eps: 1e-8
 
 lr_scheduler:
   name: torch.optim.lr_scheduler.CosineAnnealingLR
