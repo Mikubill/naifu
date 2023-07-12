@@ -84,7 +84,7 @@ def main(args):
         config.lightning.strategy = strategy
             
     config, callbacks = pl_compat_fix(config, callbacks)
-    trainer = pl.Trainer(logger=logger, callbacks=callbacks, **config.lightning)
+    trainer = pl.Trainer(logger=logger, callbacks=callbacks, strategy=strategy, **config.lightning)
     trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
 
 if __name__ == "__main__":

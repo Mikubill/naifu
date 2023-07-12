@@ -33,7 +33,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: bf16-mixed
+  precision: 16-mixed
   strategy: auto
   log_every_n_steps: 1
   accumulate_grad_batches: 1
