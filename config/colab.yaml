@@ -1,7 +1,7 @@
 name: test-run
 
 trainer:
-  model_path: /notebooks/ComfyUI/models/checkpoints/Counterfeit-V2.0.ckpt
+  model_path: /notebooks/storage/animesfw
   batch_size: 2
   resolution: 512
   center_crop: false
