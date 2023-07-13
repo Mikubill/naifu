@@ -2,12 +2,12 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 1
+  batch_size: 4
   resolution: 1024
   seed: 1138
   
   use_ema: false
-  use_xformers: false
+  use_xformers: true
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
 
@@ -24,7 +24,7 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: 16-mixed
+  precision: bf16-mixed
 
 # 1024
 arb:
@@ -57,14 +57,14 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  name: transformers.optimization.Adafactor
-  params: 
-    relative_step: True
-  # name: bitsandbytes.optim.PagedAdamW8bit
-  # params:
-  #   lr: 5e-6
-  #   weight_decay: 1e-2
-  #   eps: 1e-8
+  # name: transformers.optimization.Adafactor
+  # params: 
+  #   relative_step: True
+  name: bitsandbytes.optim.PagedAdamW8bit
+  params:
+    lr: 5e-6
+    weight_decay: 1e-2
+    eps: 1e-8
 
 monitor:
   wandb_id: ""
@@ -73,14 +73,14 @@ monitor:
   store_checkpoints: true
 
 sampling:
-  enabled: false
+  enabled: true
   use_wandb: true
   every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
   seed: 1139
-  height: 512
-  width: 512
+  height: 1024
+  width: 1024
   steps: 20
   cfg_scale: 9
   negative_prompts: 

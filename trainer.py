@@ -1,4 +1,5 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
+import copy
 import os
 
 # Hide welcome message from bitsandbytes
@@ -8,7 +9,6 @@ import torch
 import lightning as pl
 
 from lib.args import parse_args
-from lib.callbacks import HuggingFaceHubCallback, SampleCallback
 from lib.model import StableDiffusionModel
 
 from omegaconf import OmegaConf
@@ -17,6 +17,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from data.store import AspectRatioDataset, ImageStore
 from pathlib import Path
 from tqdm import tqdm
+
 
 def setup_torch(config):
     major, minor, _ = torch.__version__.split('.')
@@ -102,6 +103,11 @@ def train(fabric, model, optimizer, dataloader):
     global_step = 0
     current_epoch = 0
     should_stop = False
+    
+    enabled_sampling = model.config.sampling.enabled
+    sampling_cfg =  model.config.sampling
+    sampling_steps = sampling_cfg.every_n_steps
+    sampling_epochs = sampling_cfg.every_n_epochs
 
     state = {"model": model, "optim": optimizer}
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
@@ -148,22 +154,46 @@ def train(fabric, model, optimizer, dataloader):
                   
             if fabric.is_global_zero:
                 prog_bar.update(1)
-                postfix_str = f"train_loss: {loss:.3f}"
-                prog_bar.set_postfix_str(postfix_str)
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
                 
             if cfg.max_steps > 0 and global_step >= cfg.max_steps:
                 should_stop = True
                 break
             
+            if sampling_steps > 0 and global_step % sampling_steps == 0 and enabled_sampling:
+                sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
+            
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
             should_stop = True
-            break
+            
+        if sampling_epochs > 0 and current_epoch % sampling_epochs == 0 and enabled_sampling:
+            sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
             
         state.update(global_step=global_step, current_epoch=current_epoch)
         if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
             fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:04d}.ckpt"), state)
             
+def sampler(logger, config, model, current_epoch, global_step):
+    if not any(config.prompts):
+        return
+        
+    save_dir = Path(config.save_dir) 
+    save_dir.mkdir(parents=True, exist_ok=True)
+    generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        
+    negative_prompts = list(config.negative_prompts) if OmegaConf.is_list(config.negative_prompts) else config.negative_prompts
+    prompts = list(config.prompts) if OmegaConf.is_list(config.prompts) else config.prompts
+    prompt_to_gen = copy.deepcopy(prompts)
+    images = []
+    while len(prompt_to_gen) > 0:
+        images.extend(model.sample(prompt_to_gen.pop(), negative_prompts.pop(), generator))
+
+    for j, image in enumerate(images):
+        image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
+        
+    if config.use_wandb and logger:
+        logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
 
 def get_class(name: str):
     import importlib
@@ -172,7 +202,6 @@ def get_class(name: str):
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
-
 def main(args):
     config = OmegaConf.load(args.config)
     setup_torch(config)
@@ -180,7 +209,7 @@ def main(args):
         config.trainer.model_path = args.model_path 
 
     logger = WandbLogger(project=config.monitor.wandb_id) if config.monitor.wandb_id != "" else None
-    fabric = pl.Fabric(loggers=logger, **config.lightning)
+    fabric = pl.Fabric(loggers=[logger], **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
@@ -202,7 +231,6 @@ def main(args):
     fabric.barrier()
     torch.cuda.empty_cache()        
     train(fabric, model, optimizer, dataloader)
-    
 
 if __name__ == "__main__":
     args = parse_args()

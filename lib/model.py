@@ -111,7 +111,7 @@ class StableDiffusionModel(pl.LightningModule):
     @rank_zero_only 
     def sample(self, prompt, negative_prompt, generator=None, size=(1024,1024), steps=20, guidance_scale=7.5):
         self.model.eval()
-        self.conditioner.to("cuda")
+        self.conditioner.cuda()
         # first construct batch
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
@@ -127,7 +127,7 @@ class StableDiffusionModel(pl.LightningModule):
             "vector": torch.cat([uncond["vector"], cond["vector"]], dim=0).cuda().float(),
         }
         
-        self.conditioner.to("cpu")
+        self.conditioner.cpu()
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
         latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
         latents = latents * self.noise_scheduler.init_noise_sigma
@@ -135,7 +135,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.noise_scheduler.set_timesteps(steps)
         timesteps = self.noise_scheduler.timesteps
         num_latent_input = 2
-        for i, t in enumerate(tqdm(timesteps)):
+        for i, t in enumerate(timesteps):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
             latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
@@ -148,14 +148,14 @@ class StableDiffusionModel(pl.LightningModule):
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.noise_scheduler.step(noise_pred, t, latents.cuda()).prev_sample
 
-        self.first_stage_model.to("cuda")
+        self.first_stage_model.cuda()
         image = self.decode_first_stage(latents)
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
         image = (image * 255).round().astype("uint8")
         image = [Image.fromarray(im) for im in image]
         
-        self.first_stage_model.to("cpu")
+        self.first_stage_model.cpu()
         self.model.train()
         return image
 
@@ -212,19 +212,4 @@ class StableDiffusionModel(pl.LightningModule):
             raise FloatingPointError("Error infinite or NaN loss detected")
                 
         return loss
-    
-    # def on_train_start(self):
-    #     if self.config.trainer.use_ema: 
-    #         self.ema.to(self.device, dtype=self.unet.dtype)
-            
-    #     self.setup_cache()
-            
-    # def on_train_epoch_start(self) -> None:
-    #     if self.use_latent_cache:
-    #         self.vae.to("cpu")
-        
-    # def on_train_batch_end(self, *args, **kwargs):
-    #     if self.config.trainer.use_ema:
-    #         self.ema.update()
-
 
