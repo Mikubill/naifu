@@ -192,10 +192,17 @@ def convert_to_df(checkpoint, return_pipe=False):
         text_model_dict = {}
         for key in keys:
             if key.startswith("cond_stage_model.transformer"):
-                text_model_dict[key[len("cond_stage_model.transformer.") :]] = checkpoint[key]
+                dest_key = key[len("cond_stage_model.transformer.") :]
+                if "text_model" not in dest_key:
+                    dest_key = f"text_model.{dest_key}"
+                text_model_dict[dest_key] = checkpoint[key]
         
         text_model = CLIPTextModel(CLIPTextConfig.from_pretrained("openai/clip-vit-large-patch14"))
         tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        if "text_model.embeddings.position_ids" not in text_model.state_dict().keys() \
+            and "text_model.embeddings.position_ids" in text_model_dict.keys():
+            del text_model_dict["text_model.embeddings.position_ids"] 
+
         if len(text_model_dict) < 10:
             text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
     
@@ -205,7 +212,7 @@ def convert_to_df(checkpoint, return_pipe=False):
         vae = AutoencoderKL(**vae_config)
         vae.load_state_dict(converted_vae_checkpoint)
         unet.load_state_dict(converted_unet_checkpoint)
-        text_model.load_state_dict(text_model_dict, strict=False)
+        text_model.load_state_dict(text_model_dict)
         pipe = StableDiffusionPipeline(
             unet=unet,
             vae=vae,
