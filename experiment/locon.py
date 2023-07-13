@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import diffusers
-import pytorch_lightning as pl
+import lightning as pl
 from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoConBaseModel(torch.nn.Module):

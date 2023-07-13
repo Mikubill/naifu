@@ -2,42 +2,29 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 4
+  batch_size: 1
   resolution: 1024
-  center_crop: false
   seed: 1138
+  
   use_ema: false
-  use_hivemind: false
   use_xformers: false
-  lr_scale: sqrt
-  train_text_encoder: false
+  accumulate_grad_batches: 1
+  gradient_clip_val: 0.0
 
   offset_noise: false
   offset_noise_val: 0.1
   min_snr: true
   min_snr_val: 5
 
-checkpoint:
-  monitor: 'epoch'
-  dirpath: checkpoint
-  filename: 'sample-nd-epoch{epoch:02d}-loss{train_loss:.2f}'
-  auto_insert_metric_name: false
-  every_n_epochs: 10
-  save_top_k: 10
-  mode: 'max'
-  save_last: false
+  checkpoint_dir: checkopint
+  checkpoint_freq: 1
+  max_epochs: 4
+  max_steps: -1
 
 lightning:
   accelerator: gpu
   devices: -1
-  auto_select_gpus: true
-  # limit_train_batches: 100
-  max_epochs: 20
   precision: 16-mixed
-  strategy: auto
-  log_every_n_steps: 1
-  accumulate_grad_batches: 1
-  gradient_clip_val: 0.0
 
 # 1024
 arb:
@@ -60,7 +47,7 @@ cache:
 
 dataset:
   img_path: 
-    - "/notebooks/storage/datasets/momoko-fuji"
+    - "/notebooks/rurudo_lion"
   center_crop: false
   ucg: 0.1
   debug_arb: false
@@ -75,21 +62,9 @@ optimizer:
     relative_step: True
   # name: bitsandbytes.optim.PagedAdamW8bit
   # params:
-    # lr: 5e-6
-    # weight_decay: 1e-2
-    # eps: 1e-8
-
-lr_scheduler:
-  name: torch.optim.lr_scheduler.CosineAnnealingLR
-  warmup: 
-    enabled: false
-    init_lr: 2e-8
-    num_warmup: 50
-    strategy: "cos"
-  params:
-    T_max: 20
-    eta_min: 1e-7
-    last_epoch: -1
+  #   lr: 5e-6
+  #   weight_decay: 1e-2
+  #   eps: 1e-8
 
 monitor:
   wandb_id: ""

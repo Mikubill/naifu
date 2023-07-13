@@ -1,13 +1,11 @@
 
 import math
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from data.store import AspectRatioDataset, ImageStore
-from pytorch_lightning.utilities import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
-from lib.utils import get_local_rank, get_world_size
 from lib.utils import min_snr_weighted_loss, load_torch_file
 from omegaconf import OmegaConf 
 from pathlib import Path
@@ -25,11 +23,11 @@ def disabled_train(self, mode=True):
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
-    def __init__(self, model_path, config, batch_size):
+    def __init__(self, model_path, config):
         super().__init__()
         self.config = config
         self.model_path = model_path
-        self.batch_size = batch_size 
+        self.batch_size = config.trainer.batch_size 
         self.lr = self.config.optimizer.params.get("lr", 1e-4)
         self.init_model()
         
@@ -91,57 +89,10 @@ class StableDiffusionModel(pl.LightningModule):
         self.cast_dtype = torch.float32
         self.conditioner.to(torch.float16)    
         if config.trainer.use_ema: 
-            self.ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
+            self.model_ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
             
         # self.use_latent_cache = self.config.dataset.get("cache_latents")
-            
-    def setup(self, stage):
-        local_rank = get_local_rank()
-        world_size = get_world_size()
-        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
-        
-        arb_config = {
-            "bsz": self.config.trainer.batch_size,
-            "seed": self.config.trainer.seed,
-            "world_size": world_size,
-            "global_rank": local_rank,
-            **self.config.arb
-        }
-        
-        # init Dataset
-        self.dataset = dataset_cls(
-            arb_config=arb_config,
-            size=self.config.trainer.resolution,
-            seed=self.config.trainer.seed,
-            rank=local_rank,
-            init=not self.config.arb.enabled,
-            **self.config.dataset,
-            **self.config.cache
-        )
-        
-        self.disable_amp()
-            
-    def disable_amp(self):
-        if self.cast_dtype == torch.float32:
-            return
-        from pytorch_lightning.plugins import PrecisionPlugin
-        precision_plugin = PrecisionPlugin()
-        precision_plugin.precision = self.config.lightning.precision
-        self.trainer.strategy.precision_plugin = precision_plugin
 
-    def train_dataloader(self):
-        # if self.data_sampler:
-        #     self.data_sampler.update_bsz(self.batch_size)
-            
-        dataloader = torch.utils.data.DataLoader(
-            self.dataset,
-            collate_fn=self.dataset.collate_fn,
-            num_workers=self.config.dataset.num_workers,
-            batch_size=self.batch_size,
-            persistent_workers=True,
-        )
-        return dataloader
-    
     @torch.no_grad()
     def decode_first_stage(self, z):
         z = 1.0 / self.scale_factor * z
@@ -155,16 +106,6 @@ class StableDiffusionModel(pl.LightningModule):
             z = self.first_stage_model._encode(x)
         z = self.scale_factor * z
         return z
-    
-    def setup_cache(self):
-        if self.config.get("cache") is None:
-            return
-        
-        if self.config.cache.get("enabled") == True:
-            self.dataset.setup_cache(self.encode_first_stage, self.conditioner)
-            self.conditioner.to("cpu")
-            self.first_stage_model.to("cpu")
-            torch.cuda.empty_cache()
 
     @torch.inference_mode()
     @rank_zero_only 
@@ -218,7 +159,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.model.train()
         return image
 
-    def training_step(self, batch, batch_idx):  
+    def forward(self, batch):  
         if "latents" not in batch.keys():
             latents = self.encode_first_stage(batch["images"])
             if torch.any(torch.isnan(latents)):
@@ -270,104 +211,20 @@ class StableDiffusionModel(pl.LightningModule):
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
                 
-        # Logging to TensorBoard by default
-        major, minor, _ = pl.__version__.split('.')
-        if int(major) >= 2:
-            self.log("train_loss", loss, prog_bar=True)
-        else:
-            self.log("train_loss", loss)
-        
         return loss
     
-    def get_scaled_lr(self, base):
-        # Scale LR OPs
-        f = self.trainer.accumulate_grad_batches * self.config.trainer.batch_size * self.trainer.num_nodes * self.trainer.num_devices
-        if self.config.trainer.lr_scale == "linear":
-            return base * f, True
-        elif self.config.trainer.lr_scale == "sqrt":
-            return base * math.sqrt(f), True
-        elif self.config.trainer.lr_scale == "none":
-            return base, False
-        else:
-            raise ValueError(self.config.lr_scale)
-    
-    def configure_optimizers(self):
-        # align LR with batch size in case we're using lrfinder
-        if self.lr != self.config.optimizer.params.get("lr", self.lr):
-            self.config.optimizer.params.lr = self.lr
+    # def on_train_start(self):
+    #     if self.config.trainer.use_ema: 
+    #         self.ema.to(self.device, dtype=self.unet.dtype)
             
-        new_lr, scaled = self.get_scaled_lr(self.lr)
-        if scaled and self.config.optimizer.params.get("lr") != None:
-            self.config.optimizer.params.lr = new_lr
-            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
-            
-        params_to_optim = [{'params': self.model.diffusion_model.parameters()}]
-        if self.config.trainer.get("train_text_encoder") == True:
-            text_encoder_group = {'params': self.text_encoder.parameters()}
-            if self.config.trainer.get("text_encoder_lr"):
-                text_encoder_group['lr'], te_scaled = self.get_scaled_lr(self.config.trainer.get("text_encoder_lr"))
-            params_to_optim.append(text_encoder_group)
-
-        optimizer = get_class(self.config.optimizer.name)(
-            params_to_optim, **self.config.optimizer.params
-        )
-        scheduler = get_class(self.config.lr_scheduler.name)(
-            optimizer=optimizer,
-            **self.config.lr_scheduler.params
-        )
-        
-        warmup_config = self.config.lr_scheduler.warmup
-        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
-            for pg in optimizer.param_groups:
-                pg["lr"] = min(pg["lr"], warmup_config.init_lr)
-            
-        return [[optimizer], [scheduler]]
-    
-    def lr_scheduler_step(self, *args):
-        warmup_config = self.config.lr_scheduler.warmup
-        if not warmup_config.enabled or self.trainer.global_step > warmup_config.num_warmup:
-            super().lr_scheduler_step(*args)
-                
-    def optimizer_step(self, epoch, batch_idx, optimizer, *args, **kwargs):
-        super().optimizer_step(epoch, batch_idx, optimizer, *args, **kwargs)
-        
-        warmup_config = self.config.lr_scheduler.warmup
-        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
-            f = min(1.0, float(self.trainer.global_step + 1) / float(warmup_config.num_warmup))
-            if warmup_config.strategy == "cos":
-                f = (math.cos(math.pi*(1+f))+1)/2.
-            delta = self.config.optimizer.params.lr-warmup_config.init_lr
-            for pg in optimizer.param_groups:
-                if pg["lr"] >= warmup_config.init_lr:
-                    pg["lr"] = warmup_config.init_lr+f*delta
-    
-    def on_train_start(self):
-        if self.config.trainer.use_ema: 
-            self.ema.to(self.device, dtype=self.unet.dtype)
-            
-        self.setup_cache()
+    #     self.setup_cache()
             
     # def on_train_epoch_start(self) -> None:
     #     if self.use_latent_cache:
     #         self.vae.to("cpu")
         
-    def on_train_batch_end(self, *args, **kwargs):
-        if self.config.trainer.use_ema:
-            self.ema.update()
-            
-    def on_save_checkpoint(self, checkpoint):
-        if self.config.trainer.use_ema:
-            checkpoint["model_ema"] = self.ema.state_dict()
-            
-    def on_load_checkpoint(self, checkpoint):
-        if self.config.trainer.use_ema:
-            self.ema.load_state_dict(checkpoint["model_ema"])
+    # def on_train_batch_end(self, *args, **kwargs):
+    #     if self.config.trainer.use_ema:
+    #         self.ema.update()
 
 
-
-def get_class(name: str):
-    import importlib
-
-    module_name, class_name = name.rsplit(".", 1)
-    module = importlib.import_module(module_name, package=None)
-    return getattr(module, class_name)

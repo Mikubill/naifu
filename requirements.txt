@@ -1,6 +1,6 @@
 numpy
 accelerate
-pytorch-lightning>=1.8.1
+lightning>=1.8.1
 omegaconf>=2.1.1
 lightning_lite
 transformers>=4.25.1

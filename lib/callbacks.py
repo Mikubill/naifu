@@ -2,12 +2,12 @@ import tempfile
 from huggingface_hub import Repository
 from huggingface_hub.constants import ENDPOINT
 from omegaconf import OmegaConf
-from pytorch_lightning import Callback
+from lightning import Callback
 
 import copy
 import torch
 from pathlib import Path
-from pytorch_lightning.utilities import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 
 class SampleCallback(Callback):
     def __init__(self, config, logger):

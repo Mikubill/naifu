@@ -8,20 +8,6 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
-
-def get_world_size() -> int:
-    # if config is not None and config.lightning.accelerator == "tpu":
-    #     import torch_xla.core.xla_model as xm
-    #     return xm.xrt_world_size()
-    
-    return int(os.environ.get("WORLD_SIZE", 1))
-
-def get_local_rank() -> int:
-    # if config.lightning.accelerator == "tpu":
-    #     import torch_xla.core.xla_model as xm
-    #     return xm.get_ordinal()
-    
-    return int(os.environ.get("LOCAL_RANK", -1))
     
 def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, gamma:float):
     alphas = noise_scheduler.alphas_cumprod[timesteps.to("cpu")]

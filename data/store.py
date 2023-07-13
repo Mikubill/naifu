@@ -10,11 +10,9 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
-from lib.utils import get_local_rank
 from lib.augment import AugmentTransforms
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 from data.buckets import AspectRatioBucket
-from lib.utils import get_local_rank, get_world_size
 
 
 class ImageStore(torch.utils.data.IterableDataset):
@@ -31,6 +29,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         max_length=225,
         ucg=0,
         rank=0,
+        world_size=1,
         augment=None,
         process_tags=True,
         important_tags=[],
@@ -42,6 +41,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.center_crop = center_crop
         self.ucg = ucg
         self.rank = rank
+        self.world_size = world_size
         self.dataset = img_path
         self.allow_duplicates = allow_duplicates
         self.important_tags = important_tags
@@ -235,10 +235,10 @@ class ImageStore(torch.utils.data.IterableDataset):
         return result
 
     def __len__(self):
-        return self._length // get_world_size()
+        return self._length // self.world_size
 
     def __iter__(self):
-        for entry in self.entries[get_local_rank()::get_world_size()]:
+        for entry in self.entries[self.rank::self.world_size]:
             instance_path, instance_prompt = entry
             
             instance_image = self.read_img(instance_path)
@@ -342,7 +342,7 @@ class AspectRatioDataset(ImageStore):
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
-        progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
+        progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=self.rank not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
             imgs = store.buckets[entry][:]
@@ -418,7 +418,7 @@ class AspectRatioDataset(ImageStore):
         return example
     
     def __len__(self):
-        return len(self.buckets.res_map) // get_world_size() 
+        return len(self.buckets.res_map) // self.world_size
 
     def __iter__(self):
         for batch, size in self.buckets.generator():

@@ -3,7 +3,7 @@ from abc import abstractmethod
 from contextlib import contextmanager
 from typing import Any, Dict, Tuple, Union
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import ListConfig
 from packaging import version
