@@ -146,9 +146,8 @@ class StableDiffusionModel(pl.LightningModule):
             
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
-            prefetch_factor=2,
             collate_fn=self.dataset.collate_fn,
-            num_workers=self.config.dataset.num_workers,
+            num_workers=1,
             batch_size=self.batch_size,
             persistent_workers=True,
         )
