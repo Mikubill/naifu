@@ -17,7 +17,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from data.store import AspectRatioDataset, ImageStore
 from pathlib import Path
 from tqdm import tqdm
-
+from contextlib import contextmanager
 
 def setup_torch(config):
     major, minor, _ = torch.__version__.split('.')
@@ -32,18 +32,7 @@ def setup_torch(config):
 
 def setup_model(config, farbic):
     model_path = config.trainer.model_path
-    dataset_cls = AspectRatioDataset if config.arb.enabled else ImageStore
-
-    if config.get("lora"):
-        if config.lora.get("use_locon"):
-            from experiment.locon import LoConDiffusionModel
-            model = LoConDiffusionModel(model_path, config)
-        else:
-            from experiment.lora import LoRADiffusionModel
-            model = LoRADiffusionModel(model_path, config)
-    else:
-        model = StableDiffusionModel(model_path, config)
-        
+    model = StableDiffusionModel(model_path, config)    
     arb_config = {
         "bsz": config.trainer.batch_size,
         "seed": config.trainer.seed,
@@ -53,13 +42,12 @@ def setup_model(config, farbic):
     }
 
     # init Dataset
-    dataset = dataset_cls(
+    dataset = AspectRatioDataset(
         arb_config=arb_config,
         size=config.trainer.resolution,
         seed=config.trainer.seed,
         rank=farbic.global_rank,
         world_size=farbic.world_size,
-        init=not config.arb.enabled,
         **config.dataset,
         **config.cache
     )
@@ -73,20 +61,6 @@ def setup_model(config, farbic):
     )
     return model, dataset, dataloader
 
-# learning rate decay scheduler (cosine with warmup)
-# def get_lr(it, warmup_iters=2000, lr_decay_iters=10000, min_lr=6e-5, learning_rate=6e-4):
-#     # 1) linear warmup for warmup_iters steps
-#     if it < warmup_iters:
-#         return learning_rate * it / warmup_iters
-#     # 2) if it > lr_decay_iters, return min learning rate
-#     if it > lr_decay_iters:
-#         return min_lr
-#     # 3) in between, use cosine decay down to min learning rate
-#     decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
-#     assert 0 <= decay_ratio <= 1
-#     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-#     return min_lr + coeff * (learning_rate - min_lr)
-
 def get_latest_checkpoint(checkpoint_dir: str):
     if not os.path.isdir(checkpoint_dir):
         return None
@@ -94,6 +68,21 @@ def get_latest_checkpoint(checkpoint_dir: str):
     if not items:
         return None
     return os.path.join(checkpoint_dir, items[-1])
+
+@contextmanager
+def ema_scope(sd, enabled=False, context=None):
+    if enabled:
+        sd.model_ema.store(sd.model.parameters())
+        sd.model_ema.copy_to(sd.model)
+        if context is not None:
+            print(f"{context}: Switched to EMA weights")
+    try:
+        yield None
+    finally:
+        if enabled:
+            sd.model_ema.restore(sd.model.parameters())
+            if context is not None:
+                print(f"{context}: Restored training weights")
 
 def train(fabric, model, optimizer, dataloader):
     cfg = model.config.trainer
@@ -104,12 +93,12 @@ def train(fabric, model, optimizer, dataloader):
     current_epoch = 0
     should_stop = False
     
-    enabled_sampling = model.config.sampling.enabled
+    enabled_sampling = fabric.is_global_zero and model.config.sampling.enabled
     sampling_cfg =  model.config.sampling
     sampling_steps = sampling_cfg.every_n_steps
     sampling_epochs = sampling_cfg.every_n_epochs
 
-    state = {"model": model, "optim": optimizer}
+    state = {"model": model, "optimizer": optimizer}
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
         latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
         remainder = fabric.load(latest_checkpoint_path, state)
@@ -122,6 +111,9 @@ def train(fabric, model, optimizer, dataloader):
     prog_bar = None
     if fabric.is_global_zero:
         prog_bar = tqdm(dataloader, total=len(dataloader)-1, desc=f"Epoch {current_epoch}")
+
+    if cfg.use_ema and fabric.is_global_zero: 
+        fabric.to_device(model.model_ema)
         
     while not should_stop:
         if fabric.is_global_zero:
@@ -131,15 +123,10 @@ def train(fabric, model, optimizer, dataloader):
         
         for batch_idx, batch in enumerate(dataloader):
             is_accumulating = global_step % grad_accum_steps != 0
-
-            with fabric.no_backward_sync(model, enabled=is_accumulating):
+            
+            with fabric.no_backward_sync(model.model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
-            
-            # determine and set the learning rate for this iteration
-            # lr = get_lr(iter_num) if decay_lr else learning_rate
-            # for param_group in optimizer.param_groups:
-            #     param_group["lr"] = lr
 
             if not is_accumulating:
                 if grad_clip_val > 0:
@@ -149,8 +136,8 @@ def train(fabric, model, optimizer, dataloader):
                 optimizer.zero_grad(set_to_none=True) 
                 global_step += 1
 
-                if cfg.use_ema: 
-                    model.model_ema.update()
+                if cfg.use_ema and fabric.is_global_zero: 
+                    model.model_ema(model.model)
                   
             if fabric.is_global_zero:
                 prog_bar.update(1)
@@ -160,19 +147,21 @@ def train(fabric, model, optimizer, dataloader):
                 should_stop = True
                 break
             
-            if sampling_steps > 0 and global_step % sampling_steps == 0 and enabled_sampling:
-                sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
+            if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
+                with ema_scope(model, enabled=cfg.use_ema, context=None):
+                    sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
             should_stop = True
             
-        if sampling_epochs > 0 and current_epoch % sampling_epochs == 0 and enabled_sampling:
-            sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
+        if enabled_sampling and sampling_epochs > 0 and current_epoch % sampling_epochs == 0:
+            with ema_scope(model, enabled=cfg.use_ema, context=None):
+                sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
             
         state.update(global_step=global_step, current_epoch=current_epoch)
         if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
-            fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:04d}.ckpt"), state)
+            fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
             
 def sampler(logger, config, model, current_epoch, global_step):
     if not any(config.prompts):
@@ -208,7 +197,7 @@ def main(args):
     if args.model_path != None:
         config.trainer.model_path = args.model_path 
 
-    logger = WandbLogger(project=config.monitor.wandb_id) if config.monitor.wandb_id != "" else None
+    logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[logger], **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
@@ -217,13 +206,16 @@ def main(args):
     params_to_optim = [{'params': model.model.parameters()}]
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)
-        model.conditioner.cpu()
         model.first_stage_model.cpu()
+        model.conditioner.cpu()
+    else:
+        fabric.to_device(model.first_stage_model)
+        fabric.to_device(model.conditioner)
         
     if args.resume:
         config.trainer.resume = True

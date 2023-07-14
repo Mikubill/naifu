@@ -12,7 +12,6 @@ torchvision
 requests
 timm
 safetensors
-torch-ema
 tensorboard
 h5py
 open-clip-torch

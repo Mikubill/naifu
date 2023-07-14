@@ -5,9 +5,10 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
+  wandb_id: ""
   
   use_ema: false
-  use_xformers: true
+  use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
 
@@ -17,8 +18,8 @@ trainer:
   min_snr_val: 5
 
   checkpoint_dir: checkopint
-  checkpoint_freq: 1
-  max_epochs: 4
+  checkpoint_freq: -1
+  max_epochs: 40
   max_steps: -1
 
 lightning:
@@ -28,26 +29,22 @@ lightning:
 
 # 1024
 arb:
-  enabled: true
   debug: false
   base_res: [1024, 1024]
-  max_size: [1280, 1024]
+  max_size: [1024, 1024]
   divisible: 64
   max_ar_error: 4
-  min_dim: 640
-  dim_limit: 1728
+  min_dim: 1024
+  dim_limit: 1024
 
 cache:
   enabled: true
   cache_bsz: 4
   cache_dir: cache
 
-  # Not Implemented
-  # target: [images, prompts]
-
 dataset:
   img_path: 
-    - "/notebooks/rurudo_lion"
+    - "/notebooks/storage/datasets/momoko-fuji"
   center_crop: false
   ucg: 0.1
   debug_arb: false
@@ -57,20 +54,11 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  # name: transformers.optimization.Adafactor
-  # params: 
-  #   relative_step: True
   name: bitsandbytes.optim.PagedAdamW8bit
   params:
     lr: 5e-6
     weight_decay: 1e-2
     eps: 1e-8
-
-monitor:
-  wandb_id: ""
-  huggingface_repo: ""
-  hf_auth_token: ""
-  store_checkpoints: true
 
 sampling:
   enabled: true

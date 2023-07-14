@@ -5,12 +5,11 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from lightning.pytorch.utilities import rank_zero_only
-from torch_ema import ExponentialMovingAverage
 from lib.utils import min_snr_weighted_loss, load_torch_file
 from omegaconf import OmegaConf 
 from pathlib import Path
 from diffusers import DDIMScheduler
-from lib.sgm import GeneralConditioner
+from lib.sgm import GeneralConditioner, LitEma
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
 
 from PIL import Image
@@ -89,7 +88,8 @@ class StableDiffusionModel(pl.LightningModule):
         self.cast_dtype = torch.float32
         self.conditioner.to(torch.float16)    
         if config.trainer.use_ema: 
-            self.model_ema = ExponentialMovingAverage(self.model.parameters(), decay=0.995)
+            self.model_ema = LitEma(self.model.parameters(), decay=0.9999)
+            print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
             
         # self.use_latent_cache = self.config.dataset.get("cache_latents")
 
