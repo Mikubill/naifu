@@ -12,12 +12,11 @@ from lib.args import parse_args
 from lib.model import StableDiffusionModel
 
 from omegaconf import OmegaConf
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.strategies import DDPStrategy
-from data.store import AspectRatioDataset, ImageStore
 from pathlib import Path
 from tqdm import tqdm
 from contextlib import contextmanager
+from lightning.pytorch.loggers import WandbLogger
+from data.store import AspectRatioDataset
 
 def setup_torch(config):
     major, minor, _ = torch.__version__.split('.')
@@ -209,13 +208,12 @@ def main(args):
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     
+    fabric.to_device(model.first_stage_model)
+    fabric.to_device(model.conditioner)
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)
         model.first_stage_model.cpu()
         model.conditioner.cpu()
-    else:
-        fabric.to_device(model.first_stage_model)
-        fabric.to_device(model.conditioner)
         
     if args.resume:
         config.trainer.resume = True

@@ -336,6 +336,7 @@ class AspectRatioDataset(ImageStore):
             with h5py.File(cache_file, "r") as cache:
                 to_cache = any(f"{img}.latents" not in cache or f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 if not to_cache:
+                    print(f"Restored cache from {cache_file}")
                     return
             
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
