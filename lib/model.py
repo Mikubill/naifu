@@ -26,8 +26,6 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
         self.config = config
         self.model_path = model_path
-        self.batch_size = config.trainer.batch_size 
-        self.lr = self.config.optimizer.params.get("lr", 1e-4)
         self.init_model()
         
     def init_model(self):

@@ -131,6 +131,7 @@ def train(fabric, model, optimizer, dataloader):
                     
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True) 
+                fabric.log("train_loss", loss, step=global_step)
                 global_step += 1
 
                 if cfg.use_ema and fabric.is_global_zero: 

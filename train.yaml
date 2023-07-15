@@ -38,10 +38,10 @@ arb:
   dim_limit:  1536
 
 cache:
-  enabled: true
+  enabled: false
   cache_bsz: 4
   cache_dir: cache
-  target: ["images"]
+  target: ["images"] #[images, prompts]
 
 dataset:
   img_path: 
@@ -56,21 +56,20 @@ dataset:
 optimizer:
   name: bitsandbytes.optim.PagedAdamW8bit
   params:
-    lr: 5e-6
+    lr: 2e-6
     weight_decay: 1e-2
-    eps: 1e-8
 
 sampling:
   enabled: true
   use_wandb: true
-  every_n_steps: 10
+  every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
-  seed: 1139
-  height: 768
+  seed: 1024
+  height: 1024
   width: 1024
-  steps: 30
-  cfg_scale: 7.6
+  steps: 28
+  cfg_scale: 8
   negative_prompts: 
     - "lowres, bad anatomy, text, error, extra digit, cropped"
     - "lowres, low quality, text, error, extra digit, cropped"
