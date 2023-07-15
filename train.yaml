@@ -38,7 +38,7 @@ arb:
   dim_limit:  1536
 
 cache:
-  enabled: false
+  enabled: true
   cache_bsz: 4
   cache_dir: cache
   target: ["images"] #[images, prompts]
