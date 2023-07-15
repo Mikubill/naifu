@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
-  batch_size: 4
+  batch_size: 1
   resolution: 1024
   seed: 1138
   wandb_id: ""
@@ -41,6 +41,7 @@ cache:
   enabled: true
   cache_bsz: 4
   cache_dir: cache
+  target: ["images", "prompts"]
 
 dataset:
   img_path: 

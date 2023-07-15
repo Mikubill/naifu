@@ -7,7 +7,7 @@ os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
 def main():
 
-    batch_size = 4
+    batch_size = 1
     steps = 50
     ADM_IN_CHANNELS = 2816
     

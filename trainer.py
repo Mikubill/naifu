@@ -111,9 +111,6 @@ def train(fabric, model, optimizer, dataloader):
     if fabric.is_global_zero:
         prog_bar = tqdm(dataloader, total=len(dataloader)-1, desc=f"Epoch {current_epoch}")
 
-    if cfg.use_ema and fabric.is_global_zero: 
-        fabric.to_device(model.model_ema)
-        
     while not should_stop:
         if fabric.is_global_zero:
             prog_bar.refresh()
@@ -192,6 +189,7 @@ def get_class(name: str):
 
 def main(args):
     config = OmegaConf.load(args.config)
+    config.trainer.resume = args.resume
     setup_torch(config)
     if args.model_path != None:
         config.trainer.model_path = args.model_path 
@@ -205,18 +203,11 @@ def main(args):
     params_to_optim = [{'params': model.model.parameters()}]
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     
-    model.model, optimizer = fabric.setup(model.model, optimizer)
+    model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     
-    fabric.to_device(model.first_stage_model)
-    fabric.to_device(model.conditioner)
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)
-        model.first_stage_model.cpu()
-        model.conditioner.cpu()
-        
-    if args.resume:
-        config.trainer.resume = True
         
     fabric.barrier()
     torch.cuda.empty_cache()        

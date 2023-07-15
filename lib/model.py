@@ -167,9 +167,14 @@ class StableDiffusionModel(pl.LightningModule):
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
                 
             del batch["images"]
+        else:
+            self.first_stage_model.cpu()
+            latents = batch["latents"]
+            
+        if "conds" not in batch.keys():
             cond = self.conditioner(batch)
         else:
-            latents = batch["latents"]
+            self.conditioner.cpu()
             cond = batch["conds"]
 
         # Sample noise that we'll add to the latents

@@ -255,7 +255,6 @@ class ImageStore(torch.utils.data.IterableDataset):
             return inst
     
     
-    
 class AspectRatioDataset(ImageStore):
     def __init__(self, arb_config, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
@@ -265,6 +264,7 @@ class AspectRatioDataset(ImageStore):
         self.cache_enabled = kwargs.get("enabled", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
+        self.cache_target = kwargs.get("cache_target", [])
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
@@ -328,14 +328,18 @@ class AspectRatioDataset(ImageStore):
     def setup_cache(self, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
         store = self.buckets
+        self.cache_images = "images" in self.cache_target
+        self.cache_prompts = "prompts" in self.cache_target
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
         cache_file = cache_dir / "cache.h5"
         if cache_file.exists():
+            
             with h5py.File(cache_file, "r") as cache:
-                to_cache = any(f"{img}.latents" not in cache or f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
-                if not to_cache:
+                to_cache_images = self.cache_images and any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                if not to_cache_images and not to_cache_prompts:
                     print(f"Restored cache from {cache_file}")
                     return
             
@@ -350,7 +354,7 @@ class AspectRatioDataset(ImageStore):
             stride = self.cache_bsz
             for idx in range(0, len(imgs), stride):                
    
-                if not all([f"{img}.latents" in cache for img in imgs[idx:idx+stride]]):
+                if self.cache_images and not all([f"{img}.latents" in cache for img in imgs[idx:idx+stride]]):
                     batch = []
                     for img in imgs[idx:idx+stride]:
                         img_data = self.read_img(img)
@@ -361,7 +365,7 @@ class AspectRatioDataset(ImageStore):
                         cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
                         cache.create_dataset(f"{img}.size", data=size)
                         
-                if not all([f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
+                if self.cache_prompts and not all([f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
                     prompt_batch = []
                     for img in imgs[idx:idx+stride]:
                         prompt_data = self.prompt_cache[img]
@@ -386,37 +390,46 @@ class AspectRatioDataset(ImageStore):
 
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
+        cache_images = "images" in self.cache_target
+        cache_prompts = "prompts" in self.cache_target
         
-        if self.cache_enabled:
+        result = {}
+        if self.cache_enabled and item_id:
             with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
-                latent = torch.asarray(cache[f"{item_id}.latents"][:])
-                latent_size = cache[f"{item_id}.size"][:]
-                prompt = {
-                    "crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:]),
-                    "vector": torch.asarray(cache[f"{item_id}.vec"][:]),
-                }
-                estimate_size = latent_size[1] // 8, latent_size[0] // 8,
-                if latent.shape != (4, *estimate_size):
-                    print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}")        
-            return {"latents": latent, "conds": prompt}
+                if cache_images:
+                    latent = torch.asarray(cache[f"{item_id}.latents"][:])
+                    latent_size = cache[f"{item_id}.size"][:]
+                    estimate_size = latent_size[1] // 8, latent_size[0] // 8,
+                    if latent.shape != (4, *estimate_size):
+                        print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
+                    result.update({"latents": latent})
+                if cache_prompts:
+                    prompt = {
+                        "crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:]),
+                        "vector": torch.asarray(cache[f"{item_id}.vec"][:]),
+                    }    
+                    result.update({"conds": prompt})
+                if len(result) == 2:
+                    return result
+        else:
+            return result
 
-        if item_id == "":
-            return {}
-
-        prompt, _ = self.process_tags(self.prompt_cache[item_id])
-        if random.random() < self.ucg:
-            prompt = ''
+        if not cache_prompts:
+            prompt, _ = self.process_tags(self.prompt_cache[item_id])
+            if random.random() < self.ucg:
+                prompt = ''
+            result.update({"prompts": prompt})
         
-        image = self.read_img(item_id)
-        image = self.transformer(image, size)
-        example = {
-            "images": image,
-            "prompts": prompt,
-            "original_size_as_tuple": torch.asarray(image.shape[1:]),
-            "crop_coords_top_left": torch.asarray((0,0)),
-            "target_size_as_tuple": torch.asarray(image.shape[1:]),   
-        }
-        return example
+        if not cache_images:
+            image = self.read_img(item_id)
+            image = self.transformer(image, size)
+            result.update({
+                "images": image,
+                "original_size_as_tuple": torch.asarray(image.shape[1:]),
+                "crop_coords_top_left": torch.asarray((0,0)),
+                "target_size_as_tuple": torch.asarray(image.shape[1:]),   
+            })
+        return result
     
     def __len__(self):
         return len(self.buckets.res_map) // self.world_size
