@@ -5,7 +5,7 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: ""
+  wandb_id: "sdxl-test"
   
   use_ema: false
   use_xformers: false
@@ -63,17 +63,17 @@ optimizer:
 sampling:
   enabled: true
   use_wandb: true
-  every_n_steps: -1
+  every_n_steps: 10
   every_n_epochs: 1
   save_dir: "samples"
   seed: 1139
-  height: 1024
+  height: 768
   width: 1024
-  steps: 20
-  cfg_scale: 9
+  steps: 30
+  cfg_scale: 7.6
   negative_prompts: 
     - "lowres, bad anatomy, text, error, extra digit, cropped"
-    - "lowres, low quality"
+    - "lowres, low quality, text, error, extra digit, cropped"
   prompts: 
     - "a girl running fast on the country lane"
     - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"

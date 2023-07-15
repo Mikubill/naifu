@@ -17,6 +17,7 @@ from tqdm import tqdm
 from contextlib import contextmanager
 from lightning.pytorch.loggers import WandbLogger
 from data.store import AspectRatioDataset
+from lightning.pytorch.utilities.model_summary import ModelSummary
 
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
@@ -202,6 +203,9 @@ def main(args):
     model, dataset, dataloader = setup_model(config, fabric)
     params_to_optim = [{'params': model.model.parameters()}]
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
+    
+    if fabric.is_global_zero:
+        print(f"\n{ModelSummary(model, max_depth=1)}")
     
     model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
