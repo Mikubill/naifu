@@ -209,7 +209,16 @@ class ImageStore(torch.utils.data.IterableDataset):
         return cropped_arrays
 
     def collate_fn(self, examples):
+        result = {}
         if "latents" in examples[0].keys():
+            latents = torch.stack(self.crop_rectangle([example["latents"] for example in examples]))
+            result.update({"latents": latents})
+        else:
+            pixel_values = [example["images"] for example in examples]
+            pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+            result.update({"images": pixel_values})
+        
+        if "conds" in examples[0].keys():
             conds = {}
             for example in examples:
                 # conds is a dict, concat all values by keys
@@ -219,19 +228,14 @@ class ImageStore(torch.utils.data.IterableDataset):
                     conds[key].append(example["conds"][key])
             for key in conds:
                 conds[key] = torch.stack(conds[key])
-            
-            latents = torch.stack(self.crop_rectangle([example["latents"] for example in examples]))
-            return {"latents": latents, "conds": conds}
-        
-        pixel_values = [example["images"] for example in examples]
-        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        result = {
-            "images": pixel_values,
-            "prompts": [example["prompts"] for example in examples],
-            "target_size_as_tuple": torch.stack([example["target_size_as_tuple"] for example in examples]),
-            "original_size_as_tuple": torch.stack([example["original_size_as_tuple"] for example in examples]),
-            "crop_coords_top_left": torch.stack([example["crop_coords_top_left"] for example in examples]),
-        }
+            result.update({"conds": conds})
+        else:
+            result.update({
+                "prompts": [example["prompts"] for example in examples],
+                "target_size_as_tuple": torch.stack([example["target_size_as_tuple"] for example in examples]),
+                "original_size_as_tuple": torch.stack([example["original_size_as_tuple"] for example in examples]),
+                "crop_coords_top_left": torch.stack([example["crop_coords_top_left"] for example in examples]),
+            })
         return result
 
     def __len__(self):
@@ -394,7 +398,10 @@ class AspectRatioDataset(ImageStore):
         cache_prompts = "prompts" in self.cache_target
         
         result = {}
-        if self.cache_enabled and item_id:
+        if item_id == "":
+            return {}
+        
+        if self.cache_enabled:
             with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
                 if cache_images:
                     latent = torch.asarray(cache[f"{item_id}.latents"][:])
@@ -411,24 +418,22 @@ class AspectRatioDataset(ImageStore):
                     result.update({"conds": prompt})
                 if len(result) == 2:
                     return result
-        else:
-            return result
 
         if not cache_prompts:
             prompt, _ = self.process_tags(self.prompt_cache[item_id])
             if random.random() < self.ucg:
                 prompt = ''
-            result.update({"prompts": prompt})
-        
+            result.update({
+                "prompts": prompt,
+                "original_size_as_tuple": torch.asarray(size),
+                "crop_coords_top_left": torch.asarray((0,0)),
+                "target_size_as_tuple": torch.asarray(size),
+            })
+            
         if not cache_images:
             image = self.read_img(item_id)
             image = self.transformer(image, size)
-            result.update({
-                "images": image,
-                "original_size_as_tuple": torch.asarray(image.shape[1:]),
-                "crop_coords_top_left": torch.asarray((0,0)),
-                "target_size_as_tuple": torch.asarray(image.shape[1:]),   
-            })
+            result.update({"images": image})
         return result
     
     def __len__(self):

@@ -1,7 +1,7 @@
 name: test-run
 
 trainer:
-  model_path: ../sd_xl_base_0.9.safetensors
+  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
   batch_size: 1
   resolution: 1024
   seed: 1138
