@@ -1,7 +1,7 @@
 name: test-run
 
 trainer:
-  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_0.9.safetensors
+  model_path: ../sd_xl_base_0.9.safetensors
   batch_size: 1
   resolution: 1024
   seed: 1138
@@ -31,17 +31,17 @@ lightning:
 arb:
   debug: false
   base_res: [1024, 1024]
-  max_size: [1024, 1024]
+  max_size: [1024, 1280]
   divisible: 64
   max_ar_error: 4
-  min_dim: 1024
-  dim_limit: 1024
+  min_dim: 384
+  dim_limit:  1536
 
 cache:
   enabled: true
   cache_bsz: 4
   cache_dir: cache
-  target: ["images", "prompts"]
+  target: ["images"]
 
 dataset:
   img_path: 
@@ -49,7 +49,6 @@ dataset:
   center_crop: false
   ucg: 0.1
   debug_arb: false
-  num_workers: 3
   process_tags: true
   important_tags: []
   allow_duplicates: false

@@ -264,7 +264,7 @@ class AspectRatioDataset(ImageStore):
         self.cache_enabled = kwargs.get("enabled", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
-        self.cache_target = kwargs.get("cache_target", [])
+        self.cache_target = kwargs.get("target", [])
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
@@ -340,14 +340,14 @@ class AspectRatioDataset(ImageStore):
                 to_cache_images = self.cache_images and any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 if not to_cache_images and not to_cache_prompts:
-                    print(f"Restored cache from {cache_file}")
+                    print(f"Restored cache from {cache_file.absolute()}")
                     return
             
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
-        progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=self.rank not in [0, -1])
+        progress_bar = tqdm(total=len(self.entries), desc=f"Caching", disable=self.rank not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
             imgs = store.buckets[entry][:]

@@ -120,7 +120,7 @@ def train(fabric, model, optimizer, dataloader):
         for batch_idx, batch in enumerate(dataloader):
             is_accumulating = global_step % grad_accum_steps != 0
             
-            with fabric.no_backward_sync(model.model, enabled=is_accumulating):
+            with fabric.no_backward_sync(model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
 
