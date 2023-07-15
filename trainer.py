@@ -19,7 +19,7 @@ from lightning.pytorch.loggers import WandbLogger
 from data.store import AspectRatioDataset
 
 def setup_torch(config):
-    major, minor, _ = torch.__version__.split('.')
+    major, minor = torch.__version__.split('.')[:2]
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
         device = torch.cuda.get_device_properties(0)
         compute_capability = float(f"{device.major}.{device.minor}")

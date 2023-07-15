@@ -85,6 +85,11 @@ class StableDiffusionModel(pl.LightningModule):
         if len(unexpected) > 0:
             print(f"Unexpected Keys: {unexpected}")
             
+        try:
+            torch.compile(self.model, mode="max-autotune", fullgraph=True, dynamic=True)
+        except Exception as e:
+            print(f"Failed to compile model: {e}")
+            
         self.cast_dtype = torch.float32
         self.conditioner.to(torch.float16)    
         if config.trainer.use_ema: 
