@@ -268,7 +268,7 @@ class AspectRatioDataset(ImageStore):
         self.cache_enabled = kwargs.get("enabled", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
-        self.cache_target = kwargs.get("target", [])
+        self.cache_target = kwargs.get("target", []) if self.cache_enabled else []
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt

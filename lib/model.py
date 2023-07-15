@@ -127,7 +127,6 @@ class StableDiffusionModel(pl.LightningModule):
             "vector": torch.cat([uncond["vector"], cond["vector"]], dim=0).cuda().float(),
         }
         
-        self.conditioner.cpu()
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
         latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
         latents = latents * self.noise_scheduler.init_noise_sigma
@@ -154,8 +153,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         image = (image * 255).round().astype("uint8")
         image = [Image.fromarray(im) for im in image]
-        
-        self.first_stage_model.cpu()
+    
         self.model.train()
         return image
 
