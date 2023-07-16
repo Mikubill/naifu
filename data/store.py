@@ -363,7 +363,8 @@ class AspectRatioDataset(ImageStore):
                     for img in imgs[idx:idx+stride]:
                         img_data = self.read_img(img)
                         batch.append(self.transformer(img_data, size, center_crop=True))
-                    latent = vae_encode_func(torch.stack(batch))
+                        
+                    latent = vae_encode_func(torch.stack(batch).cuda())
                     for img, latent in zip(imgs[idx:idx+stride], latent):
                         img = str(img)
                         cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())

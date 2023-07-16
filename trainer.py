@@ -121,7 +121,7 @@ def train(fabric, model, optimizer, dataloader):
         for batch_idx, batch in enumerate(dataloader):
             is_accumulating = global_step % grad_accum_steps != 0
             
-            with fabric.no_backward_sync(model, enabled=is_accumulating):
+            with fabric.no_backward_sync(model.model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
 
@@ -131,8 +131,10 @@ def train(fabric, model, optimizer, dataloader):
                     
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True) 
-                fabric.log("train_loss", loss, step=global_step)
                 global_step += 1
+                
+                if cfg.wandb_id != "":
+                    fabric.log("train_loss", loss, step=global_step)
 
                 if cfg.use_ema and fabric.is_global_zero: 
                     model.model_ema(model.model)
@@ -208,8 +210,9 @@ def main(args):
     if fabric.is_global_zero:
         print(f"\n{ModelSummary(model, max_depth=1)}")
     
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
+    fabric.to_device(model)
     
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)

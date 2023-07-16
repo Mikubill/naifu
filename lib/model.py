@@ -100,13 +100,13 @@ class StableDiffusionModel(pl.LightningModule):
     def decode_first_stage(self, z):
         z = 1.0 / self.scale_factor * z
         with torch.autocast("cuda", enabled=False):
-            out = self.first_stage_model._decode(z)
+            out = self.first_stage_model.decode(z)
         return out
 
     @torch.no_grad()
     def encode_first_stage(self, x):
         with torch.autocast("cuda", enabled=False):
-            z = self.first_stage_model._encode(x)
+            z = self.first_stage_model.encode(x).sample()
         z = self.scale_factor * z
         return z
 

@@ -5,7 +5,7 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: "sdxl-test"
+  wandb_id: ""
   
   use_ema: false
   use_xformers: false
@@ -45,7 +45,7 @@ cache:
 
 dataset:
   img_path: 
-    - "/notebooks/storage/datasets/momoko-fuji"
+    - "/notebooks/rurudo_lion"
   center_crop: false
   ucg: 0.1
   debug_arb: false
@@ -74,7 +74,7 @@ sampling:
     - "lowres, bad anatomy, text, error, extra digit, cropped"
     - "lowres, low quality, text, error, extra digit, cropped"
   prompts: 
-    - "a girl running fast on the country lane"
-    - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
+    - "rurudo_lion, a girl running fast on the country lane"
+    - "rurudo_lion, a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
 
   
