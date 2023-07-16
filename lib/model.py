@@ -151,7 +151,7 @@ class StableDiffusionModel(pl.LightningModule):
             latents = self.noise_scheduler.step(noise_pred, t, latents.cuda()).prev_sample
 
         self.first_stage_model.cuda()
-        image = self.decode_first_stage(latents)
+        image = torch.clamp((self.decode_first_stage(latents) + 1.0) / 2.0, min=0.0, max=1.0).cpu().float()
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
         image = (image * 255).round().astype("uint8")
@@ -170,7 +170,7 @@ class StableDiffusionModel(pl.LightningModule):
             del batch["images"]
         else:
             self.first_stage_model.cpu()
-            latents = batch["latents"]
+            latents = batch["latents"] 
             
         if "conds" not in batch.keys():
             cond = self.conditioner(batch)

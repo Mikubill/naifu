@@ -5,7 +5,7 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: ""
+  wandb_id: "sdxl-test"
   
   use_ema: false
   use_xformers: false
