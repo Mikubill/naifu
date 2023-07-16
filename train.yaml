@@ -5,7 +5,7 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: "sdxl-test"
+  wandb_id: ""
   
   use_ema: false
   use_xformers: false
@@ -45,7 +45,7 @@ cache:
 
 dataset:
   img_path: 
-    - "/notebooks/rurudo_lion"
+    - "/tmp/dataset_ready"
   center_crop: false
   ucg: 0.1
   debug_arb: false

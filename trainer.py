@@ -175,8 +175,8 @@ def sampler(logger, config, model, current_epoch, global_step):
     prompts = list(config.prompts) if OmegaConf.is_list(config.prompts) else config.prompts
     prompt_to_gen = copy.deepcopy(prompts)
     images = []
-    while len(prompt_to_gen) > 0:
-        images.extend(model.sample(prompt_to_gen.pop(), negative_prompts.pop(), generator))
+    for prompt, negative_prompt in zip(prompt_to_gen, negative_prompts):
+        images.extend(model.sample(prompt, negative_prompt, generator))
 
     for j, image in enumerate(images):
         image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
