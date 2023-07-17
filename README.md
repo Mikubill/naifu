@@ -2,16 +2,24 @@
 
 Naifu Diffusion is the name for this project of finetuning Stable Diffusion on images and captions.
 
-Still under testing, see `config/test.yaml` for any configuration.
 
-Colab example: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
+## Features
 
-Currently implemented features:
+The trainer has integrated several features:
 
-- [x] Aspect Ratio Bucket and Custom Batch
-- [x] Using Hidden States of CLIP’s Penultimate Layer
-- [x] Nai-style tag processing
-- [x] Extending the Stable Diffusion Token Limit by 3x (beta)
+* Aspect Ratio Bucket and Custom Batch
+* Utilizing Hidden States of CLIP’s Penultimate Layer
+* Nai-style Tag Processing (w/ Tag Fliter and Cliper)
+* Lora/Locon Training
+* Min-SNR Weighting Strategy
+* Offset Noise and Input Perturbation
+
+And several experimental features:
+
+* SDXL Training w/ Lora/Locon
+* Less vram usage 
+* Image and Caption Cache
+* Use optimized sgm library instead of diffusers impl
 
 ## Usage
 
@@ -22,63 +30,14 @@ git clone https://github.com/Mikubill/naifu-diffusion
 cd naifu-diffusion
 ```
 
-Fulfill deps
+Start training
 
 ```bash
-# by conda
-conda env create -f environment.yaml
-conda activate nd
-
-# OR by pip
+# Fulfill deps
 pip install -r requirements.txt
+
+# Start training.
+python trainer.py --config train.yaml
 ```
 
-Start training.
-
-```bash
-# test
-python trainer.py --config config/test.yaml
-
-# For multi-gpu
-python trainer.py --config config/multi-gpu.yaml
-
-# Disitrubuted
-python trainer.py --config config/distributed.yaml
-```
-
-Convert checkpoint files to use in SD-based webui
-
-```bash
-python scripts/convert_to_sd.py --src /path/last.ckpt --dst /path/last.ckpt
-```
-
-## Experiments
-
-Train [LoRA](https://arxiv.org/abs/2106.09685)
-
-```bash
-python trainer.py --config experiment/lora.yaml
-
-## extract 
-python experiment/extract_lora.py --src last.ckpt --dst output_lora.pt
-```
-
-Train [LoCon](https://github.com/KohakuBlueleaf/LoCon)
-
-```bash
-python trainer.py --config experiment/locon.yaml
-
-## extract 
-python experiment/extract_lora.py --src last.ckpt --dst output_locon.pt
-```
-
-Train [Textual Inversion](https://textual-inversion.github.io)
-
-```bash
-python trainer.py --config experiment/textual_inversion.yaml
-```
-
-Convert any checkpoint to safetensors
-```bash
-python scripts/sd_to_safetensors.py --src input.ckpt --dst output.safetensors
-```
+No need to convert any model: we have done it for you.
