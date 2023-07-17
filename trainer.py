@@ -98,7 +98,7 @@ def train(fabric, model, optimizer, dataloader):
     sampling_steps = sampling_cfg.every_n_steps
     sampling_epochs = sampling_cfg.every_n_epochs
 
-    state = {"model": model, "optimizer": optimizer}
+    state = {"state_dict": model, "optimizer": optimizer}
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
         latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
         remainder = fabric.load(latest_checkpoint_path, state)
