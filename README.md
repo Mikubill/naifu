@@ -2,16 +2,21 @@
 
 Naifu Diffusion is the name for this project of finetuning Stable Diffusion on images and captions.
 
-Still under testing, see `config/test.yaml` for any configuration.
+This branch is aiming to train stable diffusion model stably with diffusers. To make use of all new features, such as SDXL Traing and more efficient strategy (torch.compile and fp8 transoformer engine), checkout sgm branch.
 
-Colab example: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
+Colab demo: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
 
-Currently implemented features:
+## Features
 
-- [x] Aspect Ratio Bucket and Custom Batch
-- [x] Using Hidden States of CLIP’s Penultimate Layer
-- [x] Nai-style tag processing
-- [x] Extending the Stable Diffusion Token Limit by 3x (beta)
+The trainer has integrated several features:
+
+* Aspect Ratio Bucket and Custom Batch
+* Utilizing Hidden States of CLIP’s Penultimate Layer
+* Nai-style Tag Processing (w/ Tag Fliter and Cliper)
+* Extending the Stable Diffusion Token Limit by 3x
+* Lora/Locon Training
+* Min-SNR Weighting Strategy
+* Offset Noise and Input Perturbation
 
 ## Usage
 
