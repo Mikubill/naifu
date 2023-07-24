@@ -61,6 +61,11 @@ class StableDiffusionModel(pl.LightningModule):
             self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.tokenizer, self.pipeline.scheduler   
         self.unet.to(self.device, dtype=torch.float32)
         self.unet.train()
+        
+        try:
+            torch.compile(self.unet, mode="max-autotune", fullgraph=True, dynamic=True)
+        except Exception as e:
+            print(f"Skip: unable to compile model - {e}")
 
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
@@ -88,24 +93,7 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.use_latent_cache = self.config.dataset.get("cache_latents")
         
-    def prepare_data(self):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                Path(dlpath).mkdir(exist_ok=True)
-                download(entry, dlpath)
-                self.config.dataset.img_path[k] = dlpath
-            
-    def setup(self, stage):
-        for k, entry in enumerate(self.config.dataset.img_path):
-            if not isinstance(entry, str):
-                continue
-            if entry.startswith("https://") or entry.startswith("http://"):
-                dlpath = os.path.join(tempfile.gettempdir(), f"dataset-{k}")
-                self.config.dataset.img_path[k] = dlpath
-            
+    def setup(self, stage):            
         local_rank = get_local_rank()
         world_size = get_world_size()
         dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
@@ -129,21 +117,7 @@ class StableDiffusionModel(pl.LightningModule):
             **self.config.dataset
         )
         
-        # init sampler
-    #   self.data_sampler = None
-    #   if self.config.arb.enabled:
-    #       self.data_sampler = AspectRatioSampler(
-    #           bsz=self.batch_size,
-    #           config=self.config, 
-    #           rank=local_rank, 
-    #           dataset=self.dataset, 
-    #           world_size=world_size,
-    #       ) 
-        
     def train_dataloader(self):
-        # if self.data_sampler:
-        #     self.data_sampler.update_bsz(self.batch_size)
-            
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             collate_fn=self.dataset.collate_fn,
