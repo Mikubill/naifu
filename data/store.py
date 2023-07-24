@@ -28,14 +28,14 @@ class ImageStore(torch.utils.data.IterableDataset):
         ucg=0,
         rank=0,
         augment=None,
-        process_tags=True,
+        tag_processor=[],
         tokenizer=None,
         important_tags=[],
         allow_duplicates=False,
         **kwargs
     ):
         self.size = size
-        self.fliter_tags = process_tags
+        self.tag_processor = tag_processor
         self.center_crop = center_crop
         self.ucg = ucg
         self.max_length = max_length
@@ -53,18 +53,10 @@ class ImageStore(torch.utils.data.IterableDataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        if isinstance(self.dataset, str):
+            self.dataset = [self.dataset]
         
-        self.yandere_tags = {}
         self.latent_cache = {}
-        self.augment = AugmentTransforms(augment)
-        print()
-        
-        # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
-        if Path("yandere-tags.json").is_file():
-            with open("yandere-tags.json") as f:
-                self.yandere_tags = json.loads(f.read())
-            print(f"Read {len(self.yandere_tags)} tags from yandere-tags.json")
-            
         self.update_store()
 
     def prompt_resolver(self, x: str):
@@ -133,77 +125,15 @@ class ImageStore(torch.utils.data.IterableDataset):
             img = img.convert("RGB")
         return img
 
-    def process_tags(self, tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
-        if not self.fliter_tags:
+    def process_tags(self, tags):
+        if len(self.tag_processor) == 0:
             return tags, False
         
-        if isinstance(tags, str):
-            tags = tags.replace(",", " ").split(" ")
-            tags = [tag.strip() for tag in tags if tag != ""]
-        final_tags = {}
-
-        tag_dict = {tag: True for tag in tags}
-        pure_tag_dict = {tag.split(":", 1)[-1]: tag for tag in tags}
-        for bad_tag in ["absurdres", "highres", "translation_request", "translated", "commentary", "commentary_request", "commentary_typo", "character_request", "bad_id", "bad_link", "bad_pixiv_id", "bad_twitter_id", "bad_tumblr_id", "bad_deviantart_id", "bad_nicoseiga_id", "md5_mismatch", "cosplay_request", "artist_request", "wide_image", "author_request", "artist_name"]:
-            if bad_tag in pure_tag_dict:
-                del tag_dict[pure_tag_dict[bad_tag]]
-
-        if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
-            final_tags["nsfw"] = True
-
-        base_chosen = []
-        skip_image = False
-        # counts = [0]
+        for processor in self.tag_processor:
+            tags = processor(tags)
+            
+        return tags, len(tags) == 0
         
-        for tag in tag_dict.keys():
-            # For yande.re tags.
-            if len(self.yandere_tags) <= 0 or tag not in self.yandere_tags:
-                continue
-            
-            if int(self.yandere_tags[tag]["type"]) in [1, 3, 4, 5] and random.random() < keep_important:
-                base_chosen.append(tag)
-                      
-        for tag in tag_dict.keys():
-            # For danbooru tags.
-            parts = tag.split(":", 1)
-            if parts[0] in self.important_tags and random.random() < keep_important:
-                base_chosen.append(tag)
-            if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
-                base_chosen.append(tag)
-            if len(parts[-1]) > 1 and parts[-1][0] in ["1", "2", "3", "4", "5", "6"] and parts[-1][1:] in ["boy", "boys", "girl", "girls"]:
-                base_chosen.append(tag)
-            if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
-                base_chosen.append(tag)
-
-        tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
-        base_chosen_set = set(base_chosen)
-        chosen_tags = base_chosen + [tag for tag in random.sample(list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
-        if sort_tags:
-            chosen_tags = sorted(chosen_tags)
-
-        for tag in chosen_tags:
-            tag = tag.replace(",", "").replace("_", " ")
-            if random.random() < type_dropout:
-                if tag.startswith("artist:"):
-                    tag = tag[7:]
-                elif tag.startswith("copyright:"):
-                    tag = tag[10:]
-                elif tag.startswith("character:"):
-                    tag = tag[10:]
-                elif tag.startswith("general:"):
-                    tag = tag[8:]
-            if tag.startswith("meta:"):
-                tag = tag[5:]
-            final_tags[tag] = True
-
-        for bad_tag in ["comic", "panels", "everyone", "sample_watermark", "text_focus", "text", "tagme"]:
-            if bad_tag in pure_tag_dict:
-                skip_image = True
-        if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
-            skip_image = True
-            
-        return "Tags: " + ", ".join(list(final_tags.keys())), skip_image
-    
     def collate_fn(self, examples):
         input_ids = [example["prompt_ids"] for example in examples]
         pixel_values = [example["images"] for example in examples]
@@ -313,7 +243,7 @@ class AspectRatioDataset(ImageStore):
         new_img = image_transforms(img)
         return new_img
 
-    def build_dict(self, item, roll) -> dict:
+    def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
 
         if item_id == "":
@@ -324,8 +254,7 @@ class AspectRatioDataset(ImageStore):
             prompt = ''
         
         if not self.use_latent_cache:
-            image = self.augment.transform(self.read_img(item_id), roll)
-            image = self.transformer(image, size)
+            image = self.transformer(self.read_img(item_id), size)
         else:
             entry = self.latents_cache[str(item_id)]
             image = entry["latent"] if (entry["size"] == size).all() else entry["latent_base"]
@@ -342,6 +271,5 @@ class AspectRatioDataset(ImageStore):
     def __iter__(self):
         for batch, size in self.buckets.generator():
             for item in batch:
-                rs = random.random()
-                yield self.build_dict({"size": size, "instance": item}, rs)
+                yield self.build_dict({"size": size, "instance": item})
 
