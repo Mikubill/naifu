@@ -42,13 +42,7 @@ Start training.
 
 ```bash
 # test
-python trainer.py --config config/test.yaml
-
-# For multi-gpu
-python trainer.py --config config/multi-gpu.yaml
-
-# Disitrubuted
-python trainer.py --config config/distributed.yaml
+python trainer.py --config train.yaml
 ```
 
 Convert checkpoint files to use in SD-based webui
