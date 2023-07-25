@@ -45,12 +45,6 @@ Start training.
 python trainer.py --config train.yaml
 ```
 
-Convert checkpoint files to use in SD-based webui
-
-```bash
-python scripts/convert_to_sd.py --src /path/last.ckpt --dst /path/last.ckpt
-```
-
 ## Experiments
 
 Train [LoRA](https://arxiv.org/abs/2106.09685)
