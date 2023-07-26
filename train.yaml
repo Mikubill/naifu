@@ -56,7 +56,7 @@ dataset:
 optimizer:
   name: bitsandbytes.optim.PagedAdamW8bit
   params:
-    lr: 2e-6
+    lr: 5e-7
     weight_decay: 1e-2
 
 sampling:
