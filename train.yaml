@@ -31,6 +31,9 @@ checkpoint:
   save_top_k: 3
   mode: 'max'
   save_last: false
+  save_weights_only: false
+  extended:
+    save_fp16_weights: true
 
 lightning:
   accelerator: gpu
@@ -69,7 +72,7 @@ optimizer:
 
 lr_scheduler:
   name: torch.optim.lr_scheduler.CosineAnnealingLR
-  warmup: 
+  warmup:
     enabled: false
     init_lr: 2e-8
     num_warmup: 50
@@ -96,11 +99,10 @@ sampling:
   width: 512
   steps: 20
   cfg_scale: 9
-  negative_prompts: 
+  negative_prompts:
     - "lowres, bad anatomy, text, error, extra digit, cropped"
     - "lowres, low quality"
-  prompts: 
+  prompts:
     - "a girl running fast on the country lane"
     - "a girl in black serafuku standing in a field. Tags: solo, food, fruit, lemon, masterpiece"
 
-  
