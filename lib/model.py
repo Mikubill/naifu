@@ -308,8 +308,9 @@ class StableDiffusionModel(pl.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         state_dict = convert_to_sd(checkpoint["state_dict"])
-        if self.config.checkpoint.extended.save_fp16_weights:
-            state_dict = {k: v.to(torch.float16) for k, v in state_dict.items()}
+        if self.config.checkpoint.get("extended"):
+            if self.config.checkpoint.extended.save_fp16_weights:
+                state_dict = {k: v.to(torch.float16) for k, v in state_dict.items()}
 
         checkpoint["state_dict"] = state_dict
 
