@@ -197,6 +197,13 @@ def get_class(name: str):
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
+def cast_precision(tensor, precision):
+    if precision == "bf16":
+        tensor.to(torch.bfloat16)
+    elif precision == "fp16":
+        tensor.to(torch.float16)
+    return tensor
+
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
@@ -223,9 +230,7 @@ def main(args):
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
-    
-    if config.trainer.use_fp16:
-        model.model.to(torch.float16)
+    cast_precision(model.model, config.trainer.get("model_precision"))
     
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)
