@@ -11,6 +11,7 @@ import lightning as pl
 from lib.args import parse_args
 from lib.model import StableDiffusionModel
 
+import transformers
 from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
@@ -84,7 +85,7 @@ def ema_scope(sd, enabled=False, context=None):
             if context is not None:
                 print(f"{context}: Restored training weights")
 
-def train(fabric, model, optimizer, dataloader):
+def train(fabric, model, optimizer, scheduler, dataloader):
     cfg = model.config.trainer
     grad_accum_steps = cfg.accumulate_grad_batches
     grad_clip_val = cfg.gradient_clip_val
@@ -97,7 +98,7 @@ def train(fabric, model, optimizer, dataloader):
     sampling_cfg =  model.config.sampling
     sampling_steps = sampling_cfg.every_n_steps
     sampling_epochs = sampling_cfg.every_n_epochs
-
+    
     state = {"state_dict": model, "optimizer": optimizer}
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
         latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
@@ -131,10 +132,14 @@ def train(fabric, model, optimizer, dataloader):
                     
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True) 
+                
+                # use float as epoch
+                scheduler.step(current_epoch + batch_idx / len(dataloader))
                 global_step += 1
                 
                 if cfg.wandb_id != "":
                     fabric.log("train_loss", loss, step=global_step)
+                    fabric.log("learn_rate", scheduler.get_last_lr()[0], step=global_step)
 
                 if cfg.use_ema and fabric.is_global_zero: 
                     model.model_ema(model.model)
@@ -142,6 +147,7 @@ def train(fabric, model, optimizer, dataloader):
             if fabric.is_global_zero:
                 prog_bar.update(1)
                 prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
+                # prog_bar.set_postfix_str(f"lr: {scheduler.get_last_lr()[0]:.3e}")
                 
             if cfg.max_steps > 0 and global_step >= cfg.max_steps:
                 should_stop = True
@@ -209,17 +215,24 @@ def main(args):
     
     if fabric.is_global_zero:
         print(f"\n{ModelSummary(model, max_depth=1)}")
+     
+    scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=100)
+    if config.get("scheduler"):
+        scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
     
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
+    
+    if config.trainer.use_fp16:
+        model.model.to(torch.float16)
     
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.conditioner)
         
     fabric.barrier()
     torch.cuda.empty_cache()        
-    train(fabric, model, optimizer, dataloader)
+    train(fabric, model, optimizer, scheduler, dataloader)
 
 if __name__ == "__main__":
     args = parse_args()
