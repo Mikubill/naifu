@@ -13,6 +13,13 @@ from lib.utils import get_local_rank
 from data.buckets import AspectRatioBucket
 from lib.utils import get_local_rank, get_world_size
 
+def get_class(name: str):
+    import importlib
+
+    module_name, class_name = name.rsplit(".", 1)
+    module = importlib.import_module(module_name, package=None)
+    return getattr(module, class_name)
+
 class ImageStore(torch.utils.data.IterableDataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -27,7 +34,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         max_length=225,
         ucg=0,
         rank=0,
-        augment=None,
         tag_processor=[],
         tokenizer=None,
         important_tags=[],
@@ -53,8 +59,14 @@ class ImageStore(torch.utils.data.IterableDataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        
         if isinstance(self.dataset, str):
             self.dataset = [self.dataset]
+            
+        self.tag_processor = []
+        for processor in tag_processor:
+            if processor != "":
+                self.tag_processor.append(get_class(processor))
         
         self.latent_cache = {}
         self.update_store()
@@ -129,10 +141,12 @@ class ImageStore(torch.utils.data.IterableDataset):
         if len(self.tag_processor) == 0:
             return tags, False
         
+        reject = False
         for processor in self.tag_processor:
-            tags = processor(tags)
+            tags, rej_cur = processor(tags)
+            reject = reject or rej_cur
             
-        return tags, len(tags) == 0
+        return tags, reject
         
     def collate_fn(self, examples):
         input_ids = [example["prompt_ids"] for example in examples]
