@@ -11,7 +11,7 @@ lora:
   train_text_encoder: true
   unet_lr: 1e-4
   encoder_lr: 5e-5
-  lowvram: true
+  lowvram: false
   override_prompt: ""
   dropout: 0.1
 
