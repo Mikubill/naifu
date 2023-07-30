@@ -45,12 +45,6 @@ Start training.
 python trainer.py --config train.yaml
 ```
 
-Convert checkpoint files to use in SD-based webui
-
-```bash
-python scripts/convert_to_sd.py --src /path/last.ckpt --dst /path/last.ckpt
-```
-
 ## Experiments
 
 Train [LoRA](https://arxiv.org/abs/2106.09685)
@@ -59,7 +53,7 @@ Train [LoRA](https://arxiv.org/abs/2106.09685)
 python trainer.py --config experiment/lora.yaml
 
 ## extract 
-python experiment/extract_lora.py --src last.ckpt --dst output_lora.pt
+python experiment/extract_lora.py --src last.ckpt
 ```
 
 Train [LoCon](https://github.com/KohakuBlueleaf/LoCon)
@@ -68,7 +62,7 @@ Train [LoCon](https://github.com/KohakuBlueleaf/LoCon)
 python trainer.py --config experiment/locon.yaml
 
 ## extract 
-python experiment/extract_lora.py --src last.ckpt --dst output_locon.pt
+python experiment/extract_lora.py --src last.ckpt
 ```
 
 Train [Textual Inversion](https://textual-inversion.github.io)
