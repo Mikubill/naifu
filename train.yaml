@@ -46,15 +46,15 @@ cache:
 dataset:
   img_path: 
     - "/notebooks/PVC-XL"
+  tag_processor: 
+    - data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
   debug_arb: false
-  process_tags: false
-  important_tags: []
   allow_duplicates: false
 
 optimizer:
-  ## Note: To use adafactor, you need disable schedulers 
+  # Note: To use adafactor, you need disable schedulers 
   # name: transformers.Adafactor
   # params: 
   #   relative_step: True

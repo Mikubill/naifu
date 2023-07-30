@@ -10,9 +10,14 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
-from lib.augment import AugmentTransforms
 from lightning.pytorch.utilities import rank_zero_only
 from data.buckets import AspectRatioBucket
+
+def get_class(name: str):
+    import importlib
+    module_name, class_name = name.rsplit(".", 1)
+    module = importlib.import_module(module_name, package=None)
+    return getattr(module, class_name)
 
 
 class ImageStore(torch.utils.data.IterableDataset):
@@ -26,18 +31,15 @@ class ImageStore(torch.utils.data.IterableDataset):
         img_path,
         size=512,
         center_crop=False,
-        max_length=225,
         ucg=0,
         rank=0,
+        tag_processor=[],
         world_size=1,
-        augment=None,
-        process_tags=True,
         important_tags=[],
         allow_duplicates=False,
         **kwargs
     ):
         self.size = size
-        self.fliter_tags = process_tags
         self.center_crop = center_crop
         self.ucg = ucg
         self.rank = rank
@@ -54,17 +56,15 @@ class ImageStore(torch.utils.data.IterableDataset):
             ]
         )
         
-        self.yandere_tags = {}
-        self.latent_cache = {}
-        self.augment = AugmentTransforms(augment)
-        print()
-        
-        # https://huggingface.co/datasets/nyanko7/yandere-images/blob/main/yandere-tags.json
-        if Path("yandere-tags.json").is_file():
-            with open("yandere-tags.json") as f:
-                self.yandere_tags = json.loads(f.read())
-            print(f"Read {len(self.yandere_tags)} tags from yandere-tags.json")
+        if isinstance(self.dataset, str):
+            self.dataset = [self.dataset]
             
+        self.tag_processor = []
+        for processor in tag_processor:
+            if processor != "":
+                self.tag_processor.append(get_class(processor))
+        
+        self.latent_cache = {}
         self.update_store()
 
     def prompt_resolver(self, x: str):
@@ -113,77 +113,17 @@ class ImageStore(torch.utils.data.IterableDataset):
         if not img.mode == "RGB":
             img = img.convert("RGB")
         return img
-
-    def process_tags(self, tags, min_tags=24, max_tags=72, type_dropout=0.75, keep_important=1.00, keep_jpeg_artifacts=True, sort_tags=False):
-        if not self.fliter_tags:
+    
+    def process_tags(self, tags):
+        if len(self.tag_processor) == 0:
             return tags, False
         
-        if isinstance(tags, str):
-            tags = tags.replace(",", " ").split(" ")
-            tags = [tag.strip() for tag in tags if tag != ""]
-        final_tags = {}
-
-        tag_dict = {tag: True for tag in tags}
-        pure_tag_dict = {tag.split(":", 1)[-1]: tag for tag in tags}
-        for bad_tag in ["absurdres", "highres", "translation_request", "translated", "commentary", "commentary_request", "commentary_typo", "character_request", "bad_id", "bad_link", "bad_pixiv_id", "bad_twitter_id", "bad_tumblr_id", "bad_deviantart_id", "bad_nicoseiga_id", "md5_mismatch", "cosplay_request", "artist_request", "wide_image", "author_request", "artist_name"]:
-            if bad_tag in pure_tag_dict:
-                del tag_dict[pure_tag_dict[bad_tag]]
-
-        if "rating:questionable" in tag_dict or "rating:explicit" in tag_dict or "nsfw" in tag_dict:
-            final_tags["nsfw"] = True
-
-        base_chosen = []
-        skip_image = False
-        # counts = [0]
-        
-        for tag in tag_dict.keys():
-            # For yande.re tags.
-            if len(self.yandere_tags) <= 0 or tag not in self.yandere_tags:
-                continue
+        reject = False
+        for processor in self.tag_processor:
+            tags, rej_cur = processor(tags)
+            reject = reject or rej_cur
             
-            if int(self.yandere_tags[tag]["type"]) in [1, 3, 4, 5] and random.random() < keep_important:
-                base_chosen.append(tag)
-                      
-        for tag in tag_dict.keys():
-            # For danbooru tags.
-            parts = tag.split(":", 1)
-            if parts[0] in self.important_tags and random.random() < keep_important:
-                base_chosen.append(tag)
-            if parts[0] in ["artist", "copyright", "character"] and random.random() < keep_important:
-                base_chosen.append(tag)
-            if len(parts[-1]) > 1 and parts[-1][0] in ["1", "2", "3", "4", "5", "6"] and parts[-1][1:] in ["boy", "boys", "girl", "girls"]:
-                base_chosen.append(tag)
-            if parts[-1] in ["6+girls", "6+boys", "bad_anatomy", "bad_hands"]:
-                base_chosen.append(tag)
-
-        tag_count = min(random.randint(min_tags, max_tags), len(tag_dict.keys()))
-        base_chosen_set = set(base_chosen)
-        chosen_tags = base_chosen + [tag for tag in random.sample(list(tag_dict.keys()), tag_count) if tag not in base_chosen_set]
-        if sort_tags:
-            chosen_tags = sorted(chosen_tags)
-
-        for tag in chosen_tags:
-            tag = tag.replace(",", "").replace("_", " ")
-            if random.random() < type_dropout:
-                if tag.startswith("artist:"):
-                    tag = tag[7:]
-                elif tag.startswith("copyright:"):
-                    tag = tag[10:]
-                elif tag.startswith("character:"):
-                    tag = tag[10:]
-                elif tag.startswith("general:"):
-                    tag = tag[8:]
-            if tag.startswith("meta:"):
-                tag = tag[5:]
-            final_tags[tag] = True
-
-        for bad_tag in ["comic", "panels", "everyone", "sample_watermark", "text_focus", "text", "tagme"]:
-            if bad_tag in pure_tag_dict:
-                skip_image = True
-        if not keep_jpeg_artifacts and "jpeg_artifacts" in tag_dict:
-            skip_image = True
-            
-        return "Tags: " + ", ".join(list(final_tags.keys())), skip_image
+        return tags, reject
     
     # cc: openai
     def crop_rectangle(self, arrays):
