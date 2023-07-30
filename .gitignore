@@ -1,3 +1,4 @@
+.vscode
 .mypy_cache
 __pycache__
 lightning_logs
@@ -9,3 +10,5 @@ venv
 yandere-tags.json
 scripts/img_process.py
 samples/
+*.ckpt
+*.safetensors
