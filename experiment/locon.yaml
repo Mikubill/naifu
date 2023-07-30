@@ -18,7 +18,7 @@ lora:
 trainer:
   model_path: "/notebooks/storage/animesfw"
   batch_size: 2
-  resolution: 512
+  resolution: 768
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
@@ -31,11 +31,11 @@ trainer:
   attention_slicing: false
   vae_slicing: true
 
-  offset_noise: false
-  offset_noise_val: 0.1
-  min_snr: false
+  offset_noise: true
+  offset_noise_val: 0.02
+  min_snr: true
   min_snr_val: 5
-  use_xformers: true
+  use_xformers: false
 
 checkpoint:
   monitor: 'epoch'
@@ -45,7 +45,7 @@ checkpoint:
   every_n_epochs: 3
   save_top_k: 3
   mode: 'max'
-  save_last: true
+  save_last: false
 
 lightning:
   accelerator: gpu
@@ -53,40 +53,30 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 40
-  precision: 16
+  precision: bf16-mixed
   log_every_n_steps: 1
   accumulate_grad_batches: 1
 
 arb:
   enabled: true
   debug: false
-  base_res: [512, 512]
-  max_size: [768, 512]
+  base_res: [768, 768]
+  max_size: [1152, 768]
   divisible: 64
   max_ar_error: 4
-  min_dim: 256
-  dim_limit: 1024
+  min_dim: 512
+  dim_limit: 1792
 
 dataset:
-  img_path: 
-    - "/notebooks/rurudo_lion"
+  img_path: "/notebooks/mill"
   center_crop: false
-  ucg: 0.0
+  ucg: 0.1
   debug_arb: false
-  num_workers: 2
   process_tags: false
-  important_tags: [pvc]
-  augment:
-    enabled: false
-    debug: false
-    dropout: 0.7
-    methods:
-      adjust_brightness: 1.1
-      adjust_contrast: 1.1
-      # rotate_with_crop: 5
+  important_tags: []
 
 optimizer:
-  name: torch.optim.AdamW
+  name: bitsandbytes.optim.PagedAdamW8bit
   # name: lion_pytorch.Lion
   # name: dadaptation.DAdaptAdam
   params:
