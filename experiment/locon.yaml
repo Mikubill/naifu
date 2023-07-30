@@ -11,7 +11,7 @@ lora:
   train_text_encoder: true
   unet_lr: 1e-4
   encoder_lr: 5e-5
-  lowvram: false
+  lowvram: true
   override_prompt: ""
   dropout: 0.1
 
@@ -68,7 +68,10 @@ arb:
   dim_limit: 1792
 
 dataset:
-  img_path: "/notebooks/mill"
+  img_path: 
+    - "/notebooks/PVC-XL"
+  tag_processor: 
+    - data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
   debug_arb: false
