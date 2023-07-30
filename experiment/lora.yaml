@@ -66,21 +66,15 @@ arb:
 
 dataset:
   img_path: 
-    - "/root/workspace/ONIMAI"
+    - "/notebooks/PVC-XL"
+  tag_processor: 
+    - data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.0
   debug_arb: false
   num_workers: 3
   process_tags: false
   cache_latents: false
-  augment:
-    enabled: false
-    debug: false
-    dropout: 0.7
-    methods:
-      adjust_brightness: 0.1
-      adjust_contrast: 0.1
-      # rotate_with_crop: 5
 
 optimizer:
   name: torch.optim.AdamW
