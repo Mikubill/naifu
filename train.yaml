@@ -6,7 +6,7 @@ trainer:
   resolution: 1024
   seed: 1138
   wandb_id: "sdxl1.0-pvc-test"
-  # model_precision: bf16
+  model_precision: bf16
   use_ema: false
   use_xformers: false
   accumulate_grad_batches: 1
@@ -54,6 +54,10 @@ dataset:
   allow_duplicates: false
 
 optimizer:
+  ## Note: To use adafactor, you need disable schedulers 
+  # name: transformers.Adafactor
+  # params: 
+  #   relative_step: True
   name: bitsandbytes.optim.PagedAdamW8bit
   params:
     lr: 5e-7

@@ -132,14 +132,17 @@ def train(fabric, model, optimizer, scheduler, dataloader):
                     
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True) 
+                global_step += 1
+                last_lr = optimizer.param_groups[0].get("lr", 0)
                 
                 # use float as epoch
-                scheduler.step(current_epoch + batch_idx / len(dataloader))
-                global_step += 1
-                
+                if scheduler is not None:
+                    scheduler.step(current_epoch + batch_idx / len(dataloader))
+                    last_lr = scheduler.get_last_lr()[0]
+                    
                 if cfg.wandb_id != "":
                     fabric.log("train_loss", loss, step=global_step)
-                    fabric.log("learn_rate", scheduler.get_last_lr()[0], step=global_step)
+                    fabric.log("learn_rate", last_lr, step=global_step)
 
                 if cfg.use_ema and fabric.is_global_zero: 
                     model.model_ema(model.model)
@@ -223,7 +226,7 @@ def main(args):
     if fabric.is_global_zero:
         print(f"\n{ModelSummary(model, max_depth=1)}")
      
-    scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=100)
+    scheduler = None
     if config.get("scheduler"):
         scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
     
