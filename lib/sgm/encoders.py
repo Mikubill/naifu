@@ -27,7 +27,7 @@ from .encoder_util import (
 )
 
 
-def process_input_ids(input_ids, tokenizer=None, max_length=227):
+def process_input_ids(input_ids, tokenizer, max_length):
     if max_length > tokenizer.model_max_length:
         input_ids = input_ids.squeeze(0)
         iids_list = []
@@ -323,7 +323,7 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         ).input_ids
         
         # b,n,77
-        input_ids = torch.stack([process_input_ids(batch, self.tokenizer) for batch in batch_encoding]).to(self.device)
+        input_ids = torch.stack([process_input_ids(batch, self.tokenizer, self.max_length) for batch in batch_encoding]).to(self.device)
         batch_size = input_ids.size()[0]
         
         # b,n,77 -> b*n, 77
@@ -417,7 +417,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     @autocast
     def forward(self, text):
         tokens = open_clip.tokenize(text, context_length=self.max_length)
-        input_ids = torch.stack([process_input_ids(batch, self.clip_tokenizer) for batch in tokens]).to(self.device)
+        input_ids = torch.stack([process_input_ids(batch, self.clip_tokenizer, self.max_length) for batch in tokens]).to(self.device)
         batch_size = input_ids.size()[0]
         
         input_ids = input_ids.reshape((-1, self.clip_tokenizer.model_max_length))
