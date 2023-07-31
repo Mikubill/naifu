@@ -19,7 +19,7 @@ trainer:
 
   checkpoint_dir: checkopint
   checkpoint_freq: 10
-  save_weight_only: true
+  save_weights_only: true
   max_epochs: 60
   max_steps: -1
 
