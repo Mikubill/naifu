@@ -27,6 +27,43 @@ from .encoder_util import (
 )
 
 
+def process_input_ids(input_ids, tokenizer=None, max_length=227):
+    if max_length > tokenizer.model_max_length:
+        input_ids = input_ids.squeeze(0)
+        iids_list = []
+        if tokenizer.pad_token_id == tokenizer.eos_token_id: # sdv1
+            for i in range(1, max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2):  # (1, 152, 75)
+                ids_chunk = (
+                    input_ids[0].unsqueeze(0),
+                    input_ids[i : i + tokenizer.model_max_length - 2],
+                    input_ids[-1].unsqueeze(0),
+                )
+                ids_chunk = torch.cat(ids_chunk)
+                iids_list.append(ids_chunk)
+        else: # v2 or SDXL
+            # 77以上の時は "<BOS> .... <EOS> <PAD> <PAD>..." でトータル227とかになっているので、"<BOS>...<EOS> <PAD> <PAD> ..."の三連に変換する
+            for i in range(1, max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2):
+                ids_chunk = (
+                    input_ids[0].unsqueeze(0),  # BOS
+                    input_ids[i : i + tokenizer.model_max_length - 2],
+                    input_ids[-1].unsqueeze(0),
+                )  # PAD or EOS
+                ids_chunk = torch.cat(ids_chunk)
+                
+                # 末尾が <EOS> <PAD> または <PAD> <PAD> の場合は、何もしなくてよい
+                # 末尾が x <PAD/EOS> の場合は末尾を <EOS> に変える（x <EOS> なら結果的に変化なし）
+                if ids_chunk[-2] != tokenizer.eos_token_id and ids_chunk[-2] != tokenizer.pad_token_id:
+                    ids_chunk[-1] = tokenizer.eos_token_id
+                # 先頭が <BOS> <PAD> ... の場合は <BOS> <EOS> <PAD> ... に変える
+                if ids_chunk[1] == tokenizer.pad_token_id:
+                    ids_chunk[1] = tokenizer.eos_token_id
+
+                iids_list.append(ids_chunk)
+
+        input_ids = torch.stack(iids_list)  # 3,77
+    return input_ids
+
+
 def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
     """
     Create sinusoidal timestep embeddings.
@@ -239,7 +276,7 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         self,
         version="openai/clip-vit-large-patch14",
         device="cuda",
-        max_length=77,
+        max_length=227,
         freeze=True,
         layer="last",
         layer_idx=None,
@@ -272,6 +309,9 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
 
     @autocast
     def forward(self, text):
+        # not support pooled output at the moment
+        assert not self.return_pooled and not self.layer == "pooled"
+        
         batch_encoding = self.tokenizer(
             text,
             truncation=True,
@@ -280,19 +320,31 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
             return_overflowing_tokens=False,
             padding="max_length",
             return_tensors="pt",
-        )
-        tokens = batch_encoding["input_ids"].to(self.device)
-        outputs = self.transformer(
-            input_ids=tokens, output_hidden_states=self.layer == "hidden"
-        )
+        ).input_ids
+        
+        # b,n,77
+        input_ids = torch.stack([process_input_ids(batch, self.tokenizer) for batch in batch_encoding]).to(self.device)
+        batch_size = input_ids.size()[0]
+        
+        # b,n,77 -> b*n, 77
+        input_ids = input_ids.reshape((-1, self.tokenizer.model_max_length))
+        outputs = self.transformer(input_ids=input_ids, output_hidden_states=self.layer == "hidden")
+        
         if self.layer == "last":
             z = outputs.last_hidden_state
-        elif self.layer == "pooled":
-            z = outputs.pooler_output[:, None, :]
         else:
             z = outputs.hidden_states[self.layer_idx]
-        if self.return_pooled:
-            return z, outputs.pooler_output
+            
+        # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
+        hidden_states = z.reshape((batch_size, -1, z.shape[-1]))
+        states_list = [hidden_states[:, 0].unsqueeze(1)]  # <BOS>
+        
+        # <BOS> の後から <EOS> の前まで
+        for i in range(1, self.max_length, self.tokenizer.model_max_length):
+            states_list.append(hidden_states[:, i : i + self.tokenizer.model_max_length - 2])  
+            
+        states_list.append(hidden_states[:, -1].unsqueeze(1))  # <EOS>
+        z = torch.cat(states_list, dim=1)       
         return z
 
     def encode(self, text):
@@ -311,7 +363,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         arch="ViT-H-14",
         version="laion2b_s32b_b79k",
         device="cuda",
-        max_length=77,
+        max_length=227,
         freeze=True,
         layer="last",
         always_return_pooled=False,
@@ -319,7 +371,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     ):
         super().__init__()
         assert layer in self.LAYERS
-        with use_noinit_ops(), modeling_utils.no_init_weights():
+        with use_noinit_ops():
             model = open_clip.create_model(
                 arch,
                 device=torch.device("cpu"),
@@ -341,22 +393,46 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         else:
             raise NotImplementedError()
         self.legacy = legacy
+        self.clip_tokenizer = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
+        self.clip_tokenizer.pad_token_id = 0  # fix pad token id to make same as open clip tokenizer
 
     def freeze(self):
         self.model = self.model.eval()
         for param in self.parameters():
             param.requires_grad = False
+            
+    def process_hidden_state(self, z, batch_size):
+        # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
+        hidden_states = z.reshape((batch_size, -1, z.shape[-1]))
+        states_list = [hidden_states[:, 0].unsqueeze(1)]  # <BOS>
+        
+        # <BOS> の後から <EOS> の前まで
+        for i in range(1, self.max_length, self.clip_tokenizer.model_max_length):
+            states_list.append(hidden_states[:, i : i + self.clip_tokenizer.model_max_length - 2])  
+            
+        states_list.append(hidden_states[:, -1].unsqueeze(1))  # <EOS>
+        z = torch.cat(states_list, dim=1)    
+        return z
 
     @autocast
     def forward(self, text):
-        tokens = open_clip.tokenize(text)
-        z = self.encode_with_transformer(tokens.to(self.device))
+        tokens = open_clip.tokenize(text, context_length=self.max_length)
+        input_ids = torch.stack([process_input_ids(batch, self.clip_tokenizer) for batch in tokens]).to(self.device)
+        batch_size = input_ids.size()[0]
+        
+        input_ids = input_ids.reshape((-1, self.clip_tokenizer.model_max_length))
+        z = self.encode_with_transformer(input_ids)
         if not self.return_pooled and self.legacy:
-            return z
+            return self.process_hidden_state(z, batch_size)
+        
+        hidden_state = z[self.layer]
+        hidden_state = self.process_hidden_state(hidden_state, batch_size)
         if self.return_pooled:
             assert not self.legacy
-            return z[self.layer], z["pooled"]
-        return z[self.layer]
+            pooled = z["pooled"][::self.max_length // 75]
+            return hidden_state, pooled
+        
+        return hidden_state
 
     def encode_with_transformer(self, text):
         x = self.model.token_embedding(text)  # [batch_size, n_ctx, d_model]
