@@ -100,7 +100,7 @@ def train(fabric, model, optimizer, scheduler, dataloader):
     sampling_epochs = sampling_cfg.every_n_epochs
     
     state = {"state_dict": model}
-    if not cfg.save_weight_only:
+    if not cfg.get("save_weight_only", False):
         state.update({"optimizer": optimizer})
         
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):

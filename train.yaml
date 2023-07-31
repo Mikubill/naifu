@@ -18,7 +18,7 @@ trainer:
   min_snr_val: 5
 
   checkpoint_dir: checkopint
-  checkpoint_freq: 1
+  checkpoint_freq: 10
   save_weight_only: true
   max_epochs: 60
   max_steps: -1
