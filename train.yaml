@@ -18,7 +18,8 @@ trainer:
   min_snr_val: 5
 
   checkpoint_dir: checkopint
-  checkpoint_freq: 10
+  checkpoint_freq: 1
+  save_weight_only: true
   max_epochs: 60
   max_steps: -1
 
@@ -54,7 +55,7 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  # Note: To use adafactor, you need disable schedulers 
+  # Note: To use adafactor, you need to disable scheduler
   # name: transformers.Adafactor
   # params: 
   #   relative_step: True
