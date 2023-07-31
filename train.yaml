@@ -51,6 +51,7 @@ dataset:
     - data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
+  max_token_length: 150 # [75, 150, 225]
   debug_arb: false
   allow_duplicates: false
 

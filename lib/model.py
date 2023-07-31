@@ -66,8 +66,13 @@ class StableDiffusionModel(pl.LightningModule):
             param.requires_grad = False
         self.first_stage_model = encoder
         self.scale_factor = model_params.scale_factor
-
+        
         self.model = UnetWrapper(model_params.network_config.params)
+        for conditioner in model_params.conditioner_config.params.emb_models:
+            if "CLIPEmbedder" not in conditioner.target:
+                continue
+            conditioner.params["max_length"] = self.config.dataset.get("max_token_length", 75) + 2
+            
         self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
         self.noise_scheduler = DDIMScheduler(
             beta_start=0.00085,
