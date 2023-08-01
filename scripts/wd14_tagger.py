@@ -2,6 +2,7 @@ import cv2, os
 import pandas as pd
 import numpy as np
 import argparse
+import re
 
 from typing import Tuple, List, Dict
 from PIL import Image
@@ -9,7 +10,7 @@ from tqdm.auto import tqdm
 
 from pathlib import Path
 from huggingface_hub import hf_hub_download
-import re
+from onnxruntime import InferenceSession
 
 # Code from https://github.com/toriato/stable-diffusion-webui-wd14-tagger
 # Partily from https://github.com/AdjointOperator/End2End-Tagger/
@@ -57,7 +58,6 @@ class WDInterrogator():
         
     def load(self):
         model_path, tags_path = self.download()
-        from onnxruntime import InferenceSession
         self.model = InferenceSession(str(model_path), providers=["CUDAExecutionProvider"])
         self.tags = pd.read_csv(tags_path)
         self.useless_tags = set(
@@ -207,6 +207,10 @@ interrogators = {
         "wd14-convnext", 
         repo_id="SmilingWolf/wd-v1-4-convnext-tagger"
     ),
+    "wd-v1-4-moat-tagger-v2": WDInterrogator(
+        "wd-v1-4-moat-tagger-v2",
+        repo_id="SmilingWolf/wd-v1-4-moat-tagger-v2"
+    ),
 }
 
 if __name__ == "__main__":
@@ -222,16 +226,18 @@ if __name__ == "__main__":
     for path in tqdm(os.listdir(args.path)):
         imgpath = os.path.join(args.path, path)
         name, ext = os.path.splitext(os.path.basename(imgpath))
-        # check if its image
-        if ext not in [".jpg", ".png", ".jpeg"]:
+        if ext not in [".jpg", ".png", ".jpeg", ".webp"]:
             continue
         
         interrogator = interrogators[args.interrogator]
         ratings, tags = interrogator.interrogate(Image.open(imgpath))
         tags = interrogator.postprocess_tags(tags, threshold=args.threshold)
-        if args.prefix != "":
-            args.prefix += ", "
-            
-        # write tags to file
+
         with open(os.path.join(args.path, f"{name}.txt"), "w") as f:
-            f.write(args.prefix+", ".join(tags.keys()))
+            if args.prefix and tags:
+                text_to_write = args.prefix + ", " + ", ".join(tags.keys())
+            elif args.prefix:
+                text_to_write = args.prefix
+            else:
+                text_to_write = ", ".join(tags.keys())
+            f.write(text_to_write)

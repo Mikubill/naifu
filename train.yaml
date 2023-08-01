@@ -1,7 +1,7 @@
 name: test-run
 
 trainer:
-  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors
+  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
   resolution: 1024
   seed: 1138
@@ -22,7 +22,7 @@ trainer:
   save_weights_only: true
   max_epochs: 60
   max_steps: -1
-
+  
 lightning:
   accelerator: gpu
   devices: -1
@@ -62,7 +62,7 @@ optimizer:
   #   relative_step: True
   name: bitsandbytes.optim.PagedAdamW8bit
   params:
-    lr: 5e-7
+    lr: 2e-6
     weight_decay: 1e-2
 
 scheduler:
