@@ -226,16 +226,18 @@ if __name__ == "__main__":
     for path in tqdm(os.listdir(args.path)):
         imgpath = os.path.join(args.path, path)
         name, ext = os.path.splitext(os.path.basename(imgpath))
-        # check if its image
-        if ext not in [".jpg", ".png", ".jpeg"]:
+        if ext not in [".jpg", ".png", ".jpeg", ".webp"]:
             continue
         
         interrogator = interrogators[args.interrogator]
         ratings, tags = interrogator.interrogate(Image.open(imgpath))
         tags = interrogator.postprocess_tags(tags, threshold=args.threshold)
-        if args.prefix != "":
-            args.prefix += ", "
-            
-        # write tags to file
+
         with open(os.path.join(args.path, f"{name}.txt"), "w") as f:
-            f.write(args.prefix+", ".join(tags.keys()))
+            if args.prefix and tags:
+                text_to_write = args.prefix + ", " + ", ".join(tags.keys())
+            elif args.prefix:
+                text_to_write = args.prefix
+            else:
+                text_to_write = ", ".join(tags.keys())
+            f.write(text_to_write)
