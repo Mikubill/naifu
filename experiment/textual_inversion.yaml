@@ -60,14 +60,14 @@ lightning:
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
 
-s3:
-  enabled: true
-  args:
-    anon: false
-    key: 'access-key'
-    secret: 'access-secret'
-    endpoint_url: 'endpoint_url'
-    default_block_size: 5242880 # For Cloudflare R2 this need to be >= 50MB
+#s3:
+#  enabled: true
+#  args:
+#    anon: false
+#    key: 'access-key'
+#    secret: 'access-secret'
+#    endpoint_url: 'endpoint_url'
+#    default_block_size: 5242880 # For Cloudflare R2 this need to be >= 50MB
 
 arb:
   enabled: true
