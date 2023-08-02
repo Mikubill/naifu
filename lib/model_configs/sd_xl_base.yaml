@@ -4,18 +4,6 @@ model:
     scale_factor: 0.13025
     disable_first_stage_autocast: True
 
-    denoiser_config:
-      target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
-      params:
-        num_idx: 1000
-
-        weighting_config:
-          target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
-        scaling_config:
-          target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
-        discretization_config:
-          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
-
     network_config:
       target: sgm.modules.diffusionmodules.openaimodel.UNetModel
       params:

@@ -2,7 +2,7 @@ name: test-run
 
 trainer:
   model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors
-  batch_size: 4
+  batch_size: 1
   resolution: 1024
   seed: 1138
   wandb_id: "sdxl1.0-pvc-test"
@@ -26,7 +26,7 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: bf16-mixed
+  precision: bf16-true
 
 # 1024
 arb:
@@ -39,7 +39,7 @@ arb:
   dim_limit:  1536
 
 cache:
-  enabled: true
+  enabled: false
   cache_bsz: 8
   cache_dir: cache
   target: ["images"] #[images, prompts]

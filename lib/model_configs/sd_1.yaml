@@ -2,16 +2,7 @@ model:
   base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
-  
     scale_factor: 0.18215
-    scheduler_config: # 10000 warmup steps
-      target: ldm.lr_scheduler.LambdaLinearScheduler
-      params:
-        warm_up_steps: [ 10000 ]
-        cycle_lengths: [ 10000000000000 ] # incredibly large number to prevent corner cases
-        f_start: [ 1.e-6 ]
-        f_max: [ 1. ]
-        f_min: [ 1. ]
 
     network_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
@@ -59,4 +50,5 @@ model:
             target: sgm.encoders.FrozenCLIPEmbedder
             params:
               freeze: true
-              layer: penultimate
+              layer: hidden
+              layer_idx: 11

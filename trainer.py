@@ -10,8 +10,8 @@ import lightning as pl
 
 from lib.args import parse_args
 from lib.model import StableDiffusionModel
+from lib.precision import HalfPrecisionPlugin
 
-import transformers
 from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from lightning.pytorch.loggers import WandbLogger
 from data.store import AspectRatioDataset
 from lightning.pytorch.utilities.model_summary import ModelSummary
+from torch.profiler import profile, record_function, ProfilerActivity
 
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
@@ -213,12 +214,20 @@ def cast_precision(tensor, precision):
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
+    
     setup_torch(config)
     if args.model_path != None:
         config.trainer.model_path = args.model_path 
+        
+    plugins = None
+    target_precision = config.lightning.precision
+    if target_precision in ["16-true", "bf16-true"]:
+        plugins = HalfPrecisionPlugin(target_precision)
+        model.to(torch.float16 if target_precision == "16-true" else torch.bfloat16)
+        del config.lightning.precision
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
-    fabric = pl.Fabric(loggers=[logger], **config.lightning)
+    fabric = pl.Fabric(loggers=logger, plugins=plugins, **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
@@ -239,7 +248,7 @@ def main(args):
     cast_precision(model.model, config.trainer.get("model_precision"))
     
     if config.cache.enabled:
-        dataset.setup_cache(model.encode_first_stage, model.conditioner)
+        dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
         
     fabric.barrier()
     torch.cuda.empty_cache()        

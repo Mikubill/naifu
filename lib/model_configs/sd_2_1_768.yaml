@@ -44,7 +44,8 @@ model:
             target: sgm.modules.encoders.modules.FrozenOpenCLIPEmbedder
             params:
               freeze: true
-              layer: penultimate
+              layer: hidden
+              layer_idx: 23
 
     first_stage_config:
       target: sgm.models.autoencoder.AutoencoderKLInferenceWrapper

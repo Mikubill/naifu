@@ -40,14 +40,33 @@ class StableDiffusionModel(pl.LightningModule):
         config_file = Path(self.model_path).with_suffix(".yaml")
         if not config_file.is_file():
             # model_type = "v1"
+            sd_legacy = True
             config_file = "lib/model_configs/sd_1.yaml"
             if key_name_v2_1 in sd and sd[key_name_v2_1].shape[-1] == 1024:
                 # model_type = "v2"
                 config_file = "lib/model_configs/sd_2_1.yaml"
             elif key_name_sd_xl_base in sd:
+                sd_legacy = False
                 config_file = "lib/model_configs/sd_xl_base.yaml"
             elif key_name_sd_xl_refiner in sd:
+                sd_legacy = False
                 config_file = "lib/model_configs/sd_xl_refiner.yaml"
+        
+        # sd 1.x fix
+        sd1x_clip_key = "cond_stage_model.transformer.text_model.encoder.layers.0.self_attn.k_proj.weight"
+        if sd1x_clip_key in sd:
+            new_dict = {}
+            unused_keys = []
+            for key in sd.keys():
+                if "cond_stage_model.transformer.text_model" in key:
+                    newkey = key.replace("cond_stage_model.transformer", "cond_stage_model.embedders.0.transformer")
+                    unused_keys.append(key)
+                    new_dict[newkey] = sd[key]
+                elif "model_ema" in key:
+                    unused_keys.append(key)
+            sd.update(new_dict)
+            for key in unused_keys:
+                del sd[key]
             
         self.model_config = OmegaConf.load(config_file)
         model_params = self.model_config.model.params
@@ -72,8 +91,13 @@ class StableDiffusionModel(pl.LightningModule):
             if "CLIPEmbedder" not in conditioner.target:
                 continue
             conditioner.params["max_length"] = self.config.dataset.get("max_token_length", 75) + 2
+        
+        conditioner = GeneralConditioner(**model_params.conditioner_config.params)
+        if sd_legacy:
+            self.cond_stage_model = conditioner
+        else:
+            self.conditioner = conditioner
             
-        self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
         self.noise_scheduler = DDIMScheduler(
             beta_start=0.00085,
             beta_end=0.012,
@@ -94,7 +118,8 @@ class StableDiffusionModel(pl.LightningModule):
             print(f"Failed to compile model: {e}")
             
         self.cast_dtype = torch.float32
-        self.conditioner.to(torch.float16)    
+        self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
+        self.get_conditioner().to(torch.float16)    
         if config.trainer.use_ema: 
             self.model_ema = LitEma(self.model.parameters(), decay=0.9999)
             print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
@@ -176,11 +201,11 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             self.first_stage_model.cpu()
             latents = batch["latents"] 
-            
+        
         if "conds" not in batch.keys():
-            cond = self.conditioner(batch)
+            cond = self.get_conditioner()(batch)
         else:
-            self.conditioner.cpu()
+            self.get_conditioner().cpu()
             cond = batch["conds"]
 
         # Sample noise that we'll add to the latents
