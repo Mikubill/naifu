@@ -36,7 +36,8 @@ class LoRABaseModel(torch.nn.Module):
             if module.__class__.__name__ not in target_replace_module:
                 continue 
             for child_name, child_module in module.named_modules():
-                if child_module.__class__.__name__ == "Linear" or (child_module.__class__.__name__ == "Conv2d" and child_module.kernel_size == (1, 1)):
+                if child_module.__class__.__name__ in ["Linear", "LoRACompatibleLinear"] \
+                    or (child_module.__class__.__name__ in ["Conv2d", "LoRACompatibleConv"] and child_module.kernel_size == (1, 1)):
                     
                     lora_name = prefix + '.' + name + '.' + child_name
                     lora_name = lora_name.replace('.', '_')
@@ -64,7 +65,7 @@ class LoRAModule(torch.nn.Module):
         self.lora_dim = lora_dim
         self.dropout = nn.Dropout(dropout) if dropout else nn.Identity()
         
-        if base_layer.__class__.__name__ == 'Conv2d':
+        if base_layer.__class__.__name__ in ["Conv2d", "LoRACompatibleConv"]:
             in_dim = base_layer.in_channels
             out_dim = base_layer.out_channels
             self.lora_down = torch.nn.Conv2d(in_dim, lora_dim, (1, 1), bias=False)

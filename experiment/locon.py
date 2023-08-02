@@ -39,9 +39,9 @@ class LoConBaseModel(torch.nn.Module):
                 for child_name, child_module in module.named_modules():
                     lora_name = prefix + '.' + name + '.' + child_name
                     lora_name = lora_name.replace('.', '_')
-                    if child_module.__class__.__name__ == "Linear":
+                    if child_module.__class__.__name__ == "Linear" or child_module.__class__.__name__ == "LoRACompatibleLinear":
                         lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
-                    elif child_module.__class__.__name__ == "Conv2d":
+                    elif child_module.__class__.__name__ == "Conv2d" or child_module.__class__.__name__ == "LoRACompatibleConv":
                         k_size, *_ = child_module.kernel_size
                         if k_size == 1:
                             lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
@@ -53,9 +53,9 @@ class LoConBaseModel(torch.nn.Module):
             elif name in target_replace_module:
                 lora_name = prefix + '.' + name 
                 lora_name = lora_name.replace('.', '_')
-                if module.__class__.__name__ == "Linear":
+                if module.__class__.__name__ == "Linear" or child_module.__class__.__name__ == "LoRACompatibleLinear":
                     lora_module = LoConModule(lora_name, module, self.multiplier, self.r, alpha, dropout)
-                elif module.__class__.__name__ == "Conv2d":
+                elif module.__class__.__name__ == "Conv2d" or child_module.__class__.__name__ == "LoRACompatibleConv":
                     k_size, *_ = module.kernel_size
                     if k_size == 1:
                         lora_module = LoConModule(lora_name, module, self.multiplier, self.r, alpha, dropout)
@@ -86,7 +86,7 @@ class LoConModule(torch.nn.Module):
         self.lora_dim = lora_dim
         self.dropout = nn.Dropout(dropout) if dropout else nn.Identity()
         
-        if base_layer.__class__.__name__ == 'Conv2d':
+        if base_layer.__class__.__name__ in ['Conv2d', 'LoRACompatibleConv']:
             in_dim = base_layer.in_channels
             k_size = base_layer.kernel_size
             stride = base_layer.stride
