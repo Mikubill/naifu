@@ -223,7 +223,6 @@ def main(args):
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
         plugins = HalfPrecisionPlugin(target_precision)
-        model.to(torch.float16 if target_precision == "16-true" else torch.bfloat16)
         del config.lightning.precision
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
