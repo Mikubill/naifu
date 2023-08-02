@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from lib.model import get_class
 from experiment.custom_encoder import CustomEncoderDiffusionModel
-from pytorch_lightning.utilities import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 
 def unfreeze_and_extract_params(*models):
     params_to_optim = []

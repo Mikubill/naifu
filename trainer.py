@@ -5,17 +5,19 @@ import os
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
 import torch
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback, SampleCallback
 from lib.model import StableDiffusionModel
 from lib.compat import pl_compat_fix
+from lib.half import HalfPrecisionPlugin
 
 from omegaconf import OmegaConf
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import SingleDeviceStrategy
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.strategies import SingleDeviceStrategy
+
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -96,11 +98,17 @@ def main(args):
 
     if config.lightning.get("enable_checkpointing") == None:
         config.lightning.enable_checkpointing = enable_checkpointing
+        
+    plugins = None
+    target_precision = config.lightning.precision
+    if target_precision in ["16-true", "bf16-true"]:
+        plugins = HalfPrecisionPlugin(target_precision)
+        model.to(torch.float16 if target_precision == "16-true" else torch.bfloat16)
+        del config.lightning.precision
 
     config, callbacks = pl_compat_fix(config, callbacks)
-    trainer = pl.Trainer(logger=logger, callbacks=callbacks, strategy=strategy, **config.lightning)
+    trainer = pl.Trainer(logger=logger, callbacks=callbacks, strategy=strategy, plugins=plugins, **config.lightning)
     trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
-
 
 if __name__ == "__main__":
     args = parse_args()

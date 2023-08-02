@@ -5,7 +5,7 @@ import os
 import tarfile
 import tempfile
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import requests
 import torch
 import torch.nn.functional as F
@@ -14,7 +14,7 @@ from pathlib import Path
 from tqdm.auto import tqdm
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import StableDiffusionPipeline, DDIMScheduler
-from pytorch_lightning.utilities import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
 from lib.utils import convert_to_sd, convert_to_df
@@ -265,33 +265,12 @@ class StableDiffusionModel(pl.LightningModule):
             optimizer=optimizer,
             **self.config.lr_scheduler.params
         )
-
-        warmup_config = self.config.lr_scheduler.warmup
-        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
-            for pg in optimizer.param_groups:
-                pg["lr"] = min(pg["lr"], warmup_config.init_lr)
-
         return [[optimizer], [scheduler]]
 
-    def lr_scheduler_step(self, *args):
-        warmup_config = self.config.lr_scheduler.warmup
-        if not warmup_config.enabled or self.trainer.global_step > warmup_config.num_warmup:
-            super().lr_scheduler_step(*args)
-
-    def optimizer_step(self, epoch, batch_idx, optimizer, *args, **kwargs):
-        super().optimizer_step(epoch, batch_idx, optimizer, *args, **kwargs)
-
-        warmup_config = self.config.lr_scheduler.warmup
-        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
-            f = min(1.0, float(self.trainer.global_step + 1) / float(warmup_config.num_warmup))
-            if warmup_config.strategy == "cos":
-                f = (math.cos(math.pi*(1+f))+1)/2.
-            delta = self.config.optimizer.params.lr-warmup_config.init_lr
-            for pg in optimizer.param_groups:
-                if pg["lr"] >= warmup_config.init_lr:
-                    pg["lr"] = warmup_config.init_lr+f*delta
-
     def on_train_start(self):
+        if self.config.get("cast_vae_fp32", True):
+            self.vae.to(torch.float32)
+        
         if self.config.trainer.use_ema:
             self.ema.to(self.device, dtype=self.unet.dtype)
 

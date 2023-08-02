@@ -39,7 +39,7 @@ lightning:
   accelerator: gpu
   devices: -1
   max_epochs: 20
-  precision: 16
+  precision: bf16-true
   log_every_n_steps: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
@@ -66,22 +66,16 @@ dataset:
   allow_duplicates: false
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: bitsandbytes.optim.PagedAdamW8bit
   params:
     lr: 5e-6
     weight_decay: 1e-2
     eps: 1e-8
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.CosineAnnealingLR
-  warmup:
-    enabled: false
-    init_lr: 2e-8
-    num_warmup: 50
-    strategy: "cos"
+  name: transformers.get_constant_schedule_with_warmup
   params:
-    T_max: 20
-    eta_min: 1e-7
+    num_warmup_steps: 50
     last_epoch: -1
 
 monitor:

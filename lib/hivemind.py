@@ -2,7 +2,7 @@
 from functools import partial
 from hivemind import Float16Compression, Uniform8BitQuantization
 from hivemind.compression import SizeAdaptiveCompression
-from pytorch_lightning.strategies import HivemindStrategy
+from lightning.pytorch.strategies import HivemindStrategy
 from hivemind.optim.power_sgd_averager import PowerSGDGradientAverager
 from .model import get_class
 

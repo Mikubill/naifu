@@ -3,9 +3,9 @@ import re
 from lib.model import StableDiffusionModel, get_class
 import torch
 from pathlib import Path
-from pytorch_lightning import Callback
+from lightning.pytorch import Callback
 from transformers import CLIPTokenizer, CLIPTextModel
-from pytorch_lightning.utilities import rank_zero_only
+from lightning.pytorch.utilities import rank_zero_only
 
 class Embedding:
     def __init__(self, vec, name, step=None):
