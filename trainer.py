@@ -87,7 +87,7 @@ def main(args):
         strategy = config.lightning.strategy
         del config.lightning["strategy"]
 
-    if config.get("s3") and config.s3.enabled:
+    if config.get("s3") and config.s3.enabled: 
         fsspec.config.conf['s3'] = dict(config.s3.args)
     
     if not config.get("custom_embeddings") or not config.custom_embeddings.freeze_unet:
