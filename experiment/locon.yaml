@@ -1,14 +1,5 @@
 name: test-run
 
-s3:
-  enabled: true
-  args:
-    anon: false
-    key: 'access-key'
-    secret: 'access-secret'
-    endpoint_url: 'endpoint_url'
-    default_block_size: 5242880 #for cloudflare this need to be >= 50MB
-
 lora:
   use_locon: true
   rank: 16
@@ -47,7 +38,7 @@ trainer:
 
 checkpoint:
   monitor: 'epoch'
-  dirpath: checkpoint
+  dirpath: 'checkpoint' # Use S3: 's3://bucketname/whatever'
   filename: 'sample-nd-epoch{epoch:02d}-loss{train_loss:.2f}'
   auto_insert_metric_name: false
   every_n_epochs: 3
@@ -64,6 +55,15 @@ lightning:
   precision: bf16-true
   log_every_n_steps: 1
   accumulate_grad_batches: 1
+
+s3:
+  enabled: true
+  args:
+    anon: false
+    key: 'access-key'
+    secret: 'access-secret'
+    endpoint_url: 'endpoint_url'
+    default_block_size: 5242880 # For Cloudflare R2 this need to be >= 50MB
 
 arb:
   enabled: true
