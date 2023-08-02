@@ -209,6 +209,8 @@ def cast_precision(tensor, precision):
         tensor.to(torch.bfloat16)
     elif precision == "fp16":
         tensor.to(torch.float16)
+    else:
+        tensor.to(precision)
     return tensor
 
 def main(args):
@@ -221,9 +223,6 @@ def main(args):
         
     plugins = None
     model_precision = config.trainer.get("model_precision", None)
-    if model_precision in ["fp16", "bf16"]:
-        model_precision = torch.float16 if model_precision == "fp16" else torch.bfloat16
-        
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
         plugins = HalfPrecisionPlugin(target_precision)
@@ -251,7 +250,7 @@ def main(args):
     fabric.to_device(model)
     
     if model_precision != None:
-        model.to(model_precision)
+        cast_precision(model, model_precision)
         model.first_stage_model.to(torch.float32)
     
     if config.cache.enabled:
