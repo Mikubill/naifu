@@ -83,13 +83,9 @@ optimizer:
     eps: 1e-7
 
 lr_scheduler:
-  name: torch.optim.lr_scheduler.ConstantLR
-  warmup: 
-    enabled: false
-    init_lr: 2e-8
-    num_warmup: 50
-    strategy: "cos"
+  name: transformers.get_constant_schedule_with_warmup
   params:
+    num_warmup_steps: 50
     last_epoch: -1
 
 monitor:
