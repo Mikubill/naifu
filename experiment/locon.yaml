@@ -17,7 +17,7 @@ lora:
 trainer:
   model_path: "/notebooks/storage/animesfw"
   batch_size: 2
-  resolution: 768
+  resolution: 512
   center_crop: false
   gradient_checkpointing: true
   clip_skip: 2
@@ -59,12 +59,12 @@ lightning:
 arb:
   enabled: true
   debug: false
-  base_res: [768, 768]
-  max_size: [1152, 768]
+  base_res: [512, 512]
+  max_size: [768, 512]
   divisible: 64
   max_ar_error: 4
-  min_dim: 512
-  dim_limit: 1792
+  min_dim: 256
+  dim_limit: 1024
 
 dataset:
   img_path: 
