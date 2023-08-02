@@ -18,18 +18,19 @@ def process_file(src, dst, file_type):
 
 def process_directory(src, dst=None, file_type="pt"):
     src_path = Path(src)
-    if dst:
-        dst_path = Path(dst)
-    else:
-        dst_path = src_path if src_path.is_dir() else src_path.parent
+    src_dir = src_path if src_path.is_dir() else src_path.parent
+    dst_path = Path(dst) if dst else None
 
-    if src_path.is_file() and src_path.suffix == '.ckpt':
-        dst_file = dst_path / (src_path.stem + '.' + file_type)
-        process_file(src_path, dst_file, file_type)
-    else:
-        for pt_file in src_path.rglob('*.ckpt'):
-            dst_file = dst_path / (pt_file.stem + '.' + file_type)
-            process_file(pt_file, dst_file, file_type)
+    for pt_file in src_path.rglob('*.ckpt'):
+        if dst_path:
+            relative = pt_file.relative_to(src_dir)
+            target_dir = dst_path / relative.parent
+            target_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            target_dir = pt_file.parent
+
+        dst_file = target_dir / (pt_file.stem + '.' + file_type)
+        process_file(pt_file, dst_file, file_type)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
