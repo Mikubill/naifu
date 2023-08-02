@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import diffusers
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
 
 class LoConBaseModel(torch.nn.Module):
@@ -145,10 +145,6 @@ class LoConDiffusionModel(StableDiffusionModel):
 
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
-        if self.config.lora.lowvram:
-            self.unet.to(self.device, dtype=torch.float16)
-            self.lora.to(self.device, dtype=torch.float32)
-            self.text_encoder.to(self.device, dtype=torch.float16)
         
     def on_save_checkpoint(self, checkpoint):
         checkpoint["state_dict"] = {k: v for k, v in checkpoint["state_dict"].items() if k.startswith("lora.")}
@@ -234,11 +230,5 @@ class LoConDiffusionModel(StableDiffusionModel):
             optimizer=optimizer,
             **self.config.lr_scheduler.params
         )
-        
-        warmup_config = self.config.lr_scheduler.warmup
-        if warmup_config.enabled and self.trainer.global_step < warmup_config.num_warmup:
-            for pg in optimizer.param_groups:
-                pg["lr"] = min(pg["lr"], warmup_config.init_lr)
-            
         return [[optimizer], [scheduler]]
     

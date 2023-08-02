@@ -1,9 +1,9 @@
 # Compatibility for different versions of libraries
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 def pl_compat_fix(config, callbacks):
     
-    # remove some params since its changed from pytorch_lightning 1.9
+    # remove some params since its changed from lightning.pytorch 1.9
     major, minor, _ = pl.__version__.split('.')
     if int(major) >= 2:
         # gpus=x => devices=x
@@ -26,18 +26,18 @@ def pl_compat_fix(config, callbacks):
         # from lightning.pytorch.callbacks import GradientAccumulationScheduler
         # trainer = Trainer(callbacks=GradientAccumulationScheduler({"1": 5, "10": 3}))
         if isinstance(config.lightning.get("accumulate_grad_batches"), dict):
-            from pytorch_lightning.callbacks import GradientAccumulationScheduler
+            from lightning.pytorch.callbacks import GradientAccumulationScheduler
             callbacks.append(GradientAccumulationScheduler(config.lightning.accumulate_grad_batches))
             del config.lightning.accumulate_grad_batches
             
         x = config.lightning.get("auto_lr_find")
         if x: 
-            from pytorch_lightning.callbacks import BatchSizeFinder
+            from lightning.pytorch.callbacks import BatchSizeFinder
             callbacks.append(BatchSizeFinder())
             
         x = config.lightning.get("auto_scale_batch_size")
         if x:
-            from pytorch_lightning.callbacks import LearningRateFinder
+            from lightning.pytorch.callbacks import LearningRateFinder
             callbacks.append(LearningRateFinder())
             
         x = config.lightning.get("replace_sampler_ddp")

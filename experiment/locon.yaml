@@ -11,9 +11,8 @@ lora:
   train_text_encoder: true
   unet_lr: 1e-4
   encoder_lr: 5e-5
-  lowvram: false
   override_prompt: ""
-  dropout: 0.1
+  dropout: 0.0
 
 trainer:
   model_path: "/notebooks/storage/animesfw"
@@ -53,7 +52,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 40
-  precision: bf16-mixed
+  precision: bf16-true
   log_every_n_steps: 1
   accumulate_grad_batches: 1
 

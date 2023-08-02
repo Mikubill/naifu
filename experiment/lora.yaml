@@ -6,8 +6,7 @@ lora:
   train_unet: true
   train_text_encoder: true
   unet_lr: 2e-4
-  encoder_lr: 2e-4
-  lowvram: false
+  encoder_lr: 7e-5
   lora_alpha: 1
   override_prompt: ""
   dropout: 0.0
@@ -50,7 +49,7 @@ lightning:
   auto_select_gpus: true
   # limit_train_batches: 100
   max_epochs: 20
-  precision: 16
+  precision: bf16-true
   log_every_n_steps: 1
   accumulate_grad_batches: 1
 
