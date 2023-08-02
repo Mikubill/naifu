@@ -56,14 +56,14 @@ lightning:
   log_every_n_steps: 1
   accumulate_grad_batches: 1
 
-s3:
-  enabled: true
-  args:
-    anon: false
-    key: 'access-key'
-    secret: 'access-secret'
-    endpoint_url: 'endpoint_url'
-    default_block_size: 5242880 # For Cloudflare R2 this need to be >= 50MB
+#s3:
+#  enabled: true
+#  args:
+#    anon: false
+#    key: 'access-key'
+#    secret: 'access-secret'
+#    endpoint_url: 'endpoint_url'
+#    default_block_size: 5242880 # For Cloudflare R2 this need to be >= 50MB
 
 arb:
   enabled: true
