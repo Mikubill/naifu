@@ -33,7 +33,7 @@ trainer:
 
 checkpoint:
   monitor: 'epoch'
-  dirpath: checkpoint
+  dirpath: 's3://bucker_name/'
   filename: 'sample-nd-epoch{epoch:02d}-loss{train_loss:.2f}'
   auto_insert_metric_name: false
   every_n_epochs: 3
