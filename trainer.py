@@ -134,7 +134,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
             
             with fabric.no_backward_sync(model.model, enabled=is_accumulating):
                 loss = model(batch)
-                fabric.backward(loss)
+                fabric.backward(loss / grad_accum_steps)
 
             if not is_accumulating:
                 if grad_clip_val > 0:
