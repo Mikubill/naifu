@@ -236,7 +236,7 @@ def main(args):
         del config.lightning.precision
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
-    fabric = pl.Fabric(loggers=logger, plugins=plugins, **config.lightning)
+    fabric = pl.Fabric(loggers=[logger], plugins=plugins, **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     

@@ -47,7 +47,6 @@ class LoConBaseModel(torch.nn.Module):
                 for child_name, child_module in module.named_modules():
                     lora_name = prefix + '.' + name + '.' + child_name
                     lora_name = lora_name.replace('.', '_')
-                    print(lora_name)
                     
                     if child_module.__class__.__name__ == "Linear":
                         lora_module = LoConModule(lora_name, child_module, self.multiplier, self.r, alpha, dropout)
