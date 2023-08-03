@@ -120,7 +120,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
         
     prog_bar = None
     if fabric.is_global_zero:
-        prog_bar = tqdm(dataloader, total=len(dataloader)-1 // grad_accum_steps, desc=f"Epoch {current_epoch}")
+        prog_bar = tqdm(dataloader, total=len(dataloader) // grad_accum_steps - 1, desc=f"Epoch {current_epoch}")
 
     while not should_stop:
         if fabric.is_global_zero:
