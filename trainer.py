@@ -135,32 +135,32 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
             with fabric.no_backward_sync(model.model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
-
-            if not is_accumulating:
-                if grad_clip_val > 0:
-                    fabric.clip_gradients(model, optimizer, max_norm=grad_clip_val)
-                    
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True) 
-                last_lr = optimizer.param_groups[0].get("lr", 0)
                 
-                # use float as epoch
-                if scheduler is not None:
-                    scheduler.step(current_epoch + batch_idx / len(dataloader))
-                    last_lr = scheduler.get_last_lr()[0]
+            if is_accumulating:
+                continue
+
+            if grad_clip_val > 0:
+                fabric.clip_gradients(model, optimizer, max_norm=grad_clip_val)
                     
-                if cfg.wandb_id != "":
-                    fabric.log("train_loss", loss, step=global_step)
-                    fabric.log("learn_rate", last_lr, step=global_step)
-
-                if cfg.use_ema and fabric.is_global_zero: 
-                    model.model_ema(model.model)
-
-                if fabric.is_global_zero:
-                    prog_bar.update(1)
-                    prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True) 
+            last_lr = optimizer.param_groups[0].get("lr", 0)
                 
-                # prog_bar.set_postfix_str(f"lr: {scheduler.get_last_lr()[0]:.3e}")
+            # use float as epoch
+            if scheduler is not None:
+                scheduler.step(current_epoch + batch_idx / len(dataloader))
+                last_lr = scheduler.get_last_lr()[0]
+                    
+            if cfg.wandb_id != "":
+                fabric.log("train_loss", loss, step=global_step)
+                fabric.log("learn_rate", last_lr, step=global_step)
+
+            if cfg.use_ema and fabric.is_global_zero: 
+                model.model_ema(model.model)
+
+            if fabric.is_global_zero:
+                prog_bar.update(1)
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
                 
             if cfg.max_steps > 0 and global_step >= cfg.max_steps:
                 should_stop = True
