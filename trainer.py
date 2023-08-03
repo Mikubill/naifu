@@ -136,7 +136,16 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
                 
+            if cfg.max_steps > 0 and global_step >= cfg.max_steps:
+                should_stop = True
+                break
+            
+            if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
+                with ema_scope(model, enabled=cfg.use_ema, context=None):
+                    sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
+                
             if is_accumulating:
+                # skip here if we are accumulating
                 continue
 
             if grad_clip_val > 0:
@@ -161,14 +170,6 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
             if fabric.is_global_zero:
                 prog_bar.update(1)
                 prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
-                
-            if cfg.max_steps > 0 and global_step >= cfg.max_steps:
-                should_stop = True
-                break
-            
-            if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
-                with ema_scope(model, enabled=cfg.use_ema, context=None):
-                    sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
