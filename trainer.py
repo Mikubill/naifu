@@ -156,9 +156,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                 if cfg.use_ema and fabric.is_global_zero: 
                     model.model_ema(model.model)
 
-            if fabric.is_global_zero:
-                prog_bar.update(1)
-                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
+                if fabric.is_global_zero:
+                    prog_bar.update(1)
+                    prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
+                
                 # prog_bar.set_postfix_str(f"lr: {scheduler.get_last_lr()[0]:.3e}")
                 
             if cfg.max_steps > 0 and global_step >= cfg.max_steps:
