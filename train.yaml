@@ -5,7 +5,7 @@ trainer:
   batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: "sdxl1.0-pvc-test"
+  wandb_id: ""
   use_ema: false
   use_xformers: false
   accumulate_grad_batches: 1
@@ -17,7 +17,7 @@ trainer:
   min_snr_val: 5
 
   checkpoint_dir: checkopint
-  checkpoint_freq: 10
+  checkpoint_freq: 1
   save_weights_only: true
   max_epochs: 60
   max_steps: -1
@@ -94,4 +94,13 @@ sampling:
     - "1girl, solo, shirt, thighhighs, skirt, hands on hips, white shirt, crystal, flandre scarlet, blonde hair, grey skirt, red bow, red eyes, black thighhighs, wings, white background,"
     - "1girl,sitting,fantasy,masterpiece,best quality,(long blonde hair),(blue eyes),(floating hair),(black ribbed sweater:1.1),(red plaid skirt:1.1),(cat ears)"
 
-  
+# 
+# lora:
+#   enabled: false
+#   rank: 16
+#   conv_rank: 16
+#   lora_alpha: 8
+#   conv_alpha: 8
+#   multipier: 1.0
+#   unet_lr: 1e-4
+#   dropout: 0.0

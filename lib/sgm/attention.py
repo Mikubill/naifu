@@ -310,10 +310,7 @@ class BasicTransformerBlock(nn.Module):
                 {"n_times_crossframe_attn_in_self": n_times_crossframe_attn_in_self}
             )
 
-        # return mixed_checkpoint(self._forward, kwargs, self.parameters(), self.checkpoint)
-        return checkpoint(
-            self._forward, (x, context), self.parameters(), self.checkpoint
-        )
+        return checkpoint(self._forward, (x, context), self.checkpoint)
 
     def _forward(
         self, x, context=None, additional_tokens=None, n_times_crossframe_attn_in_self=0

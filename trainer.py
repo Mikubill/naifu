@@ -11,6 +11,7 @@ import lightning as pl
 from lib.args import parse_args
 from lib.model import StableDiffusionModel
 from lib.precision import HalfPrecisionPlugin
+from lib.lora import LoConBaseModel
 
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -86,7 +87,7 @@ def ema_scope(sd, enabled=False, context=None):
             if context is not None:
                 print(f"{context}: Restored training weights")
 
-def train(fabric, model, optimizer, scheduler, dataloader):
+def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
     cfg = model.config.trainer
     grad_accum_steps = cfg.accumulate_grad_batches
     grad_clip_val = cfg.gradient_clip_val
@@ -101,6 +102,10 @@ def train(fabric, model, optimizer, scheduler, dataloader):
     sampling_epochs = sampling_cfg.every_n_epochs
     
     state = {"state_dict": model}
+    
+    if cfg.get("lora") and cfg.lora.enabled:
+        state = {"state_dict": model.lora}
+        
     if not cfg.get("save_weights_only", False):
         state.update({"optimizer": optimizer})
         
@@ -115,7 +120,7 @@ def train(fabric, model, optimizer, scheduler, dataloader):
         
     prog_bar = None
     if fabric.is_global_zero:
-        prog_bar = tqdm(dataloader, total=len(dataloader)-1, desc=f"Epoch {current_epoch}")
+        prog_bar = tqdm(dataloader, total=len(dataloader)-1 // grad_accum_steps, desc=f"Epoch {current_epoch}")
 
     while not should_stop:
         if fabric.is_global_zero:
@@ -124,6 +129,7 @@ def train(fabric, model, optimizer, scheduler, dataloader):
             prog_bar.set_description(f"Epoch {current_epoch}")
         
         for batch_idx, batch in enumerate(dataloader):
+            global_step += 1  
             is_accumulating = global_step % grad_accum_steps != 0
             
             with fabric.no_backward_sync(model.model, enabled=is_accumulating):
@@ -136,7 +142,6 @@ def train(fabric, model, optimizer, scheduler, dataloader):
                     
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True) 
-                global_step += 1
                 last_lr = optimizer.param_groups[0].get("lr", 0)
                 
                 # use float as epoch
@@ -150,7 +155,7 @@ def train(fabric, model, optimizer, scheduler, dataloader):
 
                 if cfg.use_ema and fabric.is_global_zero: 
                     model.model_ema(model.model)
-                  
+
             if fabric.is_global_zero:
                 prog_bar.update(1)
                 prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
@@ -244,7 +249,16 @@ def main(args):
     scheduler = None
     if config.get("scheduler"):
         scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
-    
+        
+    if config.get("lora") and config.lora.enabled:
+        lora = LoConBaseModel(model.model, config.lora)
+        for param in model.parameters():
+            param.requires_grad = False
+        
+        lora.inject()
+        lora.requires_grad_(True)
+        model.lora = lora
+        
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
