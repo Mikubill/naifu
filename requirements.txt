@@ -19,3 +19,6 @@ tensorboard
 # hivemind>=1.1.2
 # protobuf>=3.20.0
 # git+https://github.com/learning-at-home/hivemind
+
+# For S3 Object Storage
+# s3fs
