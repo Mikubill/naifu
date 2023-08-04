@@ -232,7 +232,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.log("train_loss", loss)
             
         # print lr
-        print(self.optimizers().param_groups[0]['lr'])
+        # print(self.optimizers().param_groups[0]['lr'])
 
         return loss
 
