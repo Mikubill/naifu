@@ -44,7 +44,7 @@ def pl_compat_fix(config, callbacks):
         if x != None:
             config.lightning.use_distributed_sampler = x
             
-        for keys in ["gpus", "auto_select_gpus", "accumulate_grad_batches", "auto_lr_find", "auto_scale_batch_size", "replace_sampler_ddp", "move_metrics_to_cpu"]:
+        for keys in ["gpus", "auto_select_gpus", "auto_lr_find", "auto_scale_batch_size", "replace_sampler_ddp", "move_metrics_to_cpu"]:
             if keys in config.lightning:
                 del config.lightning[keys]
         

@@ -4,11 +4,15 @@ import math
 import os
 import tarfile
 import tempfile
+from typing import Any, Callable, Optional, Union
 
 import lightning.pytorch as pl
+from lightning.pytorch.core.optimizer import LightningOptimizer
+from lightning.pytorch.utilities.types import LRSchedulerTypeUnion
 import requests
 import torch
 import torch.nn.functional as F
+from torch.optim.optimizer import Optimizer
 import torch.utils.checkpoint
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -226,6 +230,9 @@ class StableDiffusionModel(pl.LightningModule):
             self.log("train_loss", loss, prog_bar=True)
         else:
             self.log("train_loss", loss)
+            
+        # print lr
+        # print(self.optimizers().param_groups[0]['lr'])
 
         return loss
 
@@ -265,6 +272,9 @@ class StableDiffusionModel(pl.LightningModule):
             optimizer=optimizer,
             **self.config.lr_scheduler.params
         )
+        if "transformers" in self.config.lr_scheduler.name:
+            scheduler = {'scheduler': scheduler, 'interval': 'step', 'frequency': 1}
+            
         return [[optimizer], [scheduler]]
 
     def on_train_start(self):
