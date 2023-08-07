@@ -2,26 +2,29 @@
 import os
 
 # Hide welcome message from bitsandbytes
-os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
+os.environ.update({
+    "BITSANDBYTES_NOWELCOME": "1",
+    "DIFFUSERS_VERBOSITY": "error"
+})
 
 import torch
 import lightning.pytorch as pl
 
 from lib.args import parse_args
 from lib.callbacks import HuggingFaceHubCallback, SampleCallback
-from lib.model import StableDiffusionModel
+from lib.model import StableDiffusionModel, get_pipeline
 from lib.compat import pl_compat_fix
-from lib.half import HalfPrecisionPlugin
+from lib.precision import HalfPrecisionPlugin
 
 from omegaconf import OmegaConf
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.strategies import SingleDeviceStrategy
-
+from lightning.pytorch import seed_everything
 
 def main(args):
     config = OmegaConf.load(args.config)
-    torch.manual_seed(config.trainer.seed)
+    seed_everything(config.trainer.seed)
 
     if args.model_path == None:
         args.model_path = config.trainer.model_path
@@ -37,16 +40,17 @@ def main(args):
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
 
+    pipeline = get_pipeline(args.model_path)
     if config.get("lora"):
         if config.lora.get("use_locon"):
             from experiment.locon import LoConDiffusionModel
-            model = LoConDiffusionModel(args.model_path, config, config.trainer.batch_size)
+            model = LoConDiffusionModel(pipeline, config)
         else:
             from experiment.lora import LoRADiffusionModel
-            model = LoRADiffusionModel(args.model_path, config, config.trainer.batch_size)
+            model = LoRADiffusionModel(pipeline, config)
         strategy = config.lightning.strategy = "auto"
     else:
-        model = StableDiffusionModel(args.model_path, config, config.trainer.batch_size)
+        model = StableDiffusionModel(pipeline, config)
 
     major, minor = torch.__version__.split('.')[:2]
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
@@ -69,7 +73,7 @@ def main(args):
 
     logger = None
     if config.monitor.wandb_id != "":
-        logger = WandbLogger(project=config.monitor.wandb_id)
+        logger = WandbLogger(project=config.monitor.wandb_id, log_model=True,)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
 
     if config.get("custom_embeddings") != None and config.custom_embeddings.enabled:

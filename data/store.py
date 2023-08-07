@@ -4,9 +4,8 @@ import random
 import torch
 import os, binascii
 
-from lib.augment import AugmentTransforms
-from pathlib import Path
 from PIL import Image
+from pathlib import Path
 from torchvision import transforms
 from tqdm.auto import tqdm
 from lib.utils import get_local_rank
@@ -31,11 +30,9 @@ class ImageStore(torch.utils.data.IterableDataset):
         img_path,
         size=512,
         center_crop=False,
-        max_length=225,
         ucg=0,
         rank=0,
         tag_processor=[],
-        tokenizer=None,
         important_tags=[],
         allow_duplicates=False,
         **kwargs
@@ -44,8 +41,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.tag_processor = tag_processor
         self.center_crop = center_crop
         self.ucg = ucg
-        self.max_length = max_length
-        self.tokenizer=tokenizer
         self.rank = rank
         self.dataset = img_path
         self.use_latent_cache = False
@@ -118,17 +113,6 @@ class ImageStore(torch.utils.data.IterableDataset):
             latent = vae.encode(image.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
             self.latents_cache[entry[0]] = latent.detach().squeeze(0).cpu()
 
-    def tokenize(self, prompt):
-        '''
-        Handle token truncation in collate_fn()
-        '''
-        return self.tokenizer(
-            prompt,
-            padding="do_not_pad",
-            truncation=True,
-            max_length=self.max_length,
-        ).input_ids 
-
     def read_img(self, filepath):  
         if self.allow_duplicates and "@" in filepath:
             filepath = filepath[filepath.index("@")+1:]    
@@ -149,13 +133,10 @@ class ImageStore(torch.utils.data.IterableDataset):
         return tags, reject
         
     def collate_fn(self, examples):
-        input_ids = [example["prompt_ids"] for example in examples]
+        prompts = [example["prompts"] for example in examples]
         pixel_values = [example["images"] for example in examples]
-
         pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-        
-        return [input_ids, pixel_values]
+        return [prompts, pixel_values]
 
     def __len__(self):
         return self._length // get_world_size()
@@ -171,7 +152,7 @@ class ImageStore(torch.utils.data.IterableDataset):
                 instance_image = self.read_img(instance_path)
                 example["images"] = self.image_transforms(instance_image)
                 
-            example["prompt_ids"] = self.tokenize(instance_prompt)
+            example["prompts"] = instance_prompt
             yield example
 
 
@@ -275,7 +256,7 @@ class AspectRatioDataset(ImageStore):
 
         example = {
             f"images": image,
-            f"prompt_ids": self.tokenize(prompt)
+            f"prompts": prompt
         }
         return example
     

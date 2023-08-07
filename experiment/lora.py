@@ -97,8 +97,8 @@ class LoRAModule(torch.nn.Module):
 
 
 class LoRADiffusionModel(StableDiffusionModel):
-    def __init__(self, model_path, config, batch_size):
-        super().__init__(model_path, config, batch_size)
+    def __init__(self, *args):
+        super().__init__(*args)
         
     def init_model(self):
         super().init_model()

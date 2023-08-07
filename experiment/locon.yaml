@@ -23,12 +23,11 @@ trainer:
   clip_skip: 2
   seed: 34
   precision: fp32
-  half_encoder: true
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
   attention_slicing: false
-  vae_slicing: true
+  vae_slicing: false
 
   offset_noise: true
   offset_noise_val: 0.02
@@ -68,7 +67,7 @@ arb:
 
 dataset:
   img_path: 
-    - "/notebooks/rurudo_lion"
+    - "/notebooks/PVC-XL"
   tag_processor: 
     - data.processors.shuffle_prompts
   center_crop: false
@@ -78,7 +77,7 @@ dataset:
   important_tags: []
 
 optimizer:
-  name: bitsandbytes.optim.PagedAdamW8bit
+  name: torch.optim.AdamW
   # name: lion_pytorch.Lion
   # name: dadaptation.DAdaptAdam
   params:

@@ -20,12 +20,11 @@ trainer:
   clip_skip: 2
   seed: 34
   precision: fp32
-  half_encoder: true
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
   attention_slicing: false
-  vae_slicing: true
+  vae_slicing: false
 
   offset_noise: false
   offset_noise_val: 0.1

@@ -15,7 +15,7 @@ trainer:
   lr_scale: sqrt
   train_text_encoder: false
   attention_slicing: false
-  vae_slicing: true
+  vae_slicing: false
 
   offset_noise: false
   offset_noise_val: 0.1

@@ -25,44 +25,55 @@ from lib.utils import convert_to_sd, convert_to_df
 
 # define the LightningModule
 
+def get_class(name: str):
+    import importlib
+
+    module_name, class_name = name.rsplit(".", 1)
+    module = importlib.import_module(module_name, package=None)
+    return getattr(module, class_name)
+
+
+def get_pipeline(model_path):
+    if Path(model_path).is_file():
+        # use autoconvert
+        from_safetensors = Path(model_path).with_suffix(".safetensors").is_file()
+        if from_safetensors:
+            from safetensors import safe_open
+
+            checkpoint = {}
+            with safe_open(model_path, framework="pt", device="cpu") as f:
+                for key in f.keys():
+                    checkpoint[key] = f.get_tensor(key)
+        else:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            checkpoint = torch.load(model_path, map_location=device)
+
+        # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
+        # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
+        while "state_dict" in checkpoint:
+            checkpoint = checkpoint["state_dict"]
+
+        pipeline = convert_to_df(checkpoint, return_pipe=True)
+    else:
+        pipeline = StableDiffusionPipeline.from_pretrained(model_path)
+        
+    return pipeline
+
 
 class StableDiffusionModel(pl.LightningModule):
-    def __init__(self, model_path, config, batch_size):
+    def __init__(self, pipeline, config, batch_size=0):
         super().__init__()
         self.config = config
-        self.model_path = model_path
+        self.pipeline = pipeline
         self.lr = self.config.optimizer.params.lr
-        self.batch_size = batch_size
+        self.batch_size = batch_size if batch_size > 0 else self.config.trainer.batch_size
         self.init_model()
-
+        
     def init_model(self):
         config = self.config
         scheduler_cls = DDIMScheduler
-
-        if Path(self.model_path).is_file():
-            # use autoconvert
-            from_safetensors = Path(self.model_path).with_suffix(".safetensors").is_file()
-            if from_safetensors:
-                from safetensors import safe_open
-
-                checkpoint = {}
-                with safe_open(self.model_path, framework="pt", device="cpu") as f:
-                    for key in f.keys():
-                        checkpoint[key] = f.get_tensor(key)
-            else:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                checkpoint = torch.load(self.model_path, map_location=device)
-
-            # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
-            # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
-            while "state_dict" in checkpoint:
-                checkpoint = checkpoint["state_dict"]
-
-            self.pipeline = convert_to_df(checkpoint, return_pipe=True)
-        else:
-            self.pipeline = StableDiffusionPipeline.from_pretrained(self.model_path)
-
         self.pipeline.set_progress_bar_config(disable=True)
+    
         self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = \
             self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.tokenizer, self.pipeline.scheduler
         self.unet.to(self.device, dtype=torch.float32)
@@ -71,7 +82,7 @@ class StableDiffusionModel(pl.LightningModule):
         try:
             torch.compile(self.unet, mode="max-autotune", fullgraph=True, dynamic=True)
         except Exception as e:
-            print(f"Skip: unable to compile model - {e}")
+            print(f"Skip compiling: {e}")
 
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
@@ -133,7 +144,11 @@ class StableDiffusionModel(pl.LightningModule):
         )
         return dataloader
 
-    def encode_tokens(self, input_ids):
+    def encode_tokens(self, prompts):
+        tokenizer = self.tokenizer
+        input_ids = self.tokenizer(prompts, padding="do_not_pad", truncation=True, max_length=225).input_ids 
+        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+        
         z = []
         if input_ids.shape[1] > 77:
             # todo: Handle end-of-sentence truncation
@@ -180,8 +195,8 @@ class StableDiffusionModel(pl.LightningModule):
         return latents
 
     def training_step(self, batch, batch_idx):
-        input_ids, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+        prompts, latents = batch[0], batch[1]
+        encoder_hidden_states = self.encode_tokens(prompts).to(self.unet.dtype)
         if not self.use_latent_cache:
             latents = self.encode_pixels(latents).to(self.unet.dtype)
 
@@ -225,14 +240,11 @@ class StableDiffusionModel(pl.LightningModule):
             raise FloatingPointError("Error infinite or NaN loss detected")
 
         # Logging to TensorBoard by default
-        major, minor, _ = pl.__version__.split('.')
+        major, minor = pl.__version__.split('.')[:2]
         if int(major) >= 2:
             self.log("train_loss", loss, prog_bar=True)
         else:
             self.log("train_loss", loss)
-            
-        # print lr
-        # print(self.optimizers().param_groups[0]['lr'])
 
         return loss
 
@@ -259,6 +271,7 @@ class StableDiffusionModel(pl.LightningModule):
             rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
 
         params_to_optim = [{'params': self.unet.parameters()}]
+        
         if self.config.trainer.get("train_text_encoder") == True:
             text_encoder_group = {'params': self.text_encoder.parameters()}
             if self.config.trainer.get("text_encoder_lr"):
@@ -314,22 +327,3 @@ class StableDiffusionModel(pl.LightningModule):
         checkpoint["state_dict"] = {}
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
-
-
-def download(url, model_path="model"):
-    print(f'Downloading: "{url}" to {model_path}\n')
-    r = requests.get(url, stream=True)
-    file_size = int(r.headers.get("content-length", 0))
-
-    r.raw.read = functools.partial(r.raw.read, decode_content=True)
-    with tqdm.wrapattr(r.raw, "read", total=file_size) as r_raw:
-        file = tarfile.open(fileobj=r_raw, mode="r|gz")
-        file.extractall(path=model_path)
-
-
-def get_class(name: str):
-    import importlib
-
-    module_name, class_name = name.rsplit(".", 1)
-    module = importlib.import_module(module_name, package=None)
-    return getattr(module, class_name)
