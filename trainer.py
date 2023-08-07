@@ -73,7 +73,7 @@ def main(args):
 
     logger = None
     if config.monitor.wandb_id != "":
-        logger = WandbLogger(project=config.monitor.wandb_id, log_model=True,)
+        logger = WandbLogger(project=config.monitor.wandb_id)
         callbacks.append(LearningRateMonitor(logging_interval='step'))
 
     if config.get("custom_embeddings") != None and config.custom_embeddings.enabled:
