@@ -33,6 +33,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         ucg=0,
         rank=0,
         tag_processor=[],
+        image_processor=[],
         important_tags=[],
         allow_duplicates=False,
         **kwargs
@@ -57,6 +58,9 @@ class ImageStore(torch.utils.data.IterableDataset):
         
         if isinstance(self.dataset, str):
             self.dataset = [self.dataset]
+            
+        if isinstance(tag_processor, str):
+            tag_processor = [tag_processor]
             
         self.tag_processor = []
         for processor in tag_processor:
@@ -105,7 +109,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         self._length = len(self.entries)
         random.shuffle(self.entries)
         
-    def cache_latents(self, vae, store=None, config=None):
+    def cache_latents(self, vae, config=None):
         self.use_latent_cache = True
         self.latents_cache = {}
         for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
@@ -142,7 +146,8 @@ class ImageStore(torch.utils.data.IterableDataset):
         return self._length // get_world_size()
 
     def __iter__(self):
-        for entry in self.entries[get_local_rank()::get_world_size()]:
+        local_rank = get_local_rank() if get_local_rank() != -1 else 0
+        for entry in self.entries[local_rank::get_world_size()]:
             example = {}
             instance_path, instance_prompt = entry
             
@@ -157,7 +162,7 @@ class ImageStore(torch.utils.data.IterableDataset):
 
 
 class AspectRatioDataset(ImageStore):
-    def __init__(self, arb_config, debug_arb=False, **kwargs):
+    def __init__(self, arb_config={}, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
         self.debug = debug_arb
         self.prompt_cache = {}
@@ -187,17 +192,17 @@ class AspectRatioDataset(ImageStore):
             id_size_map[entry] = size
         return id_size_map
             
-    def cache_latents(self, vae, store, config):
+    def cache_latents(self, vae, config):
         self.use_latent_cache = True
         self.latents_cache = {}
         progress_bar = tqdm(total=len(self.entries), desc=f"Caching latents", disable=get_local_rank() not in [0, -1])
-        for entry in store.buckets.keys():
-            size = store.resolutions[entry]
-            imgs = store.buckets[entry][:]
+        for entry in self.buckets.buckets.keys():
+            size = self.buckets.resolutions[entry]
+            imgs = self.buckets.buckets[entry][:]
             for img in imgs:
                 img_data = self.read_img(img)
                 img_data_actual = torch.stack([self.transformer(img_data, size, config.dataset.center_crop)]).float()
-                img_data_base = torch.stack([self.transformer(img_data, config.arb.base_res, True)]).float()
+                img_data_base = torch.stack([self.transformer(img_data, self.arb_config["base_res"], True)]).float()
                 latent = vae.encode(img_data_actual.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
                 latent_base = vae.encode(img_data_base.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
                 self.latents_cache[str(img)] = {

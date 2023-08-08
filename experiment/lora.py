@@ -127,10 +127,13 @@ class LoRADiffusionModel(StableDiffusionModel):
     def training_step(self, batch, batch_idx):
         with torch.set_grad_enabled(self.config.lora.train_text_encoder):
             input_ids, latents = batch[0], batch[1]
-            encoder_hidden_states = self.encode_tokens(input_ids).to(self.unet.dtype)
+            encoder_hidden_states = self.encode_tokens(input_ids)
             
         if not self.dataset.use_latent_cache:
-            latents = self.encode_pixels(latents).to(self.unet.dtype)
+            latents = self.encode_pixels(latents)
+            
+        encoder_hidden_states = encoder_hidden_states.to(self.unet.dtype)
+        latents = latents.to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)

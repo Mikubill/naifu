@@ -45,8 +45,7 @@ def get_pipeline(model_path):
                 for key in f.keys():
                     checkpoint[key] = f.get_tensor(key)
         else:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            checkpoint = torch.load(model_path, map_location=device)
+            checkpoint = torch.load(model_path, map_location="cpu")
 
         # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
         # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
@@ -113,15 +112,31 @@ class StableDiffusionModel(pl.LightningModule):
     def setup(self, stage):
         local_rank = get_local_rank()
         world_size = get_world_size()
-        dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
-
         arb_config = {
             "bsz": self.config.trainer.batch_size,
             "seed": self.config.trainer.seed,
             "world_size": world_size,
             "global_rank": local_rank,
-            **self.config.arb
         }
+        if self.config.get("arb", None) is None:
+            # calculate arb from resolution
+            dataset_cls = AspectRatioDataset
+            base = self.config.trainer.resolution
+            c_size = 1.5
+            c_div = 8
+            c_mult = 2
+            arb_config.update({
+                "base_res": (base, base),
+                "max_size": (int(base*c_size), base),
+                "divisible": base // c_div,
+                "max_ar_error": 4,
+                "min_dim": base // c_mult,
+                "dim_limit": base * c_mult,
+                "debug": False,
+            })
+        else:
+            dataset_cls = AspectRatioDataset if self.config.arb.enabled else ImageStore
+            arb_config.update(**self.config.arb)
 
         # init Dataset
         self.dataset = dataset_cls(
@@ -129,7 +144,6 @@ class StableDiffusionModel(pl.LightningModule):
             size=self.config.trainer.resolution,
             seed=self.config.trainer.seed,
             rank=local_rank,
-            init=not self.config.arb.enabled,
             tokenizer=self.tokenizer,
             **self.config.dataset
         )
@@ -196,9 +210,12 @@ class StableDiffusionModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         prompts, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(prompts).to(self.unet.dtype)
+        encoder_hidden_states = self.encode_tokens(prompts)
         if not self.use_latent_cache:
-            latents = self.encode_pixels(latents).to(self.unet.dtype)
+            latents = self.encode_pixels(latents)
+        
+        encoder_hidden_states = encoder_hidden_states.to(self.unet.dtype)
+        latents = latents.to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -298,7 +315,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.to(self.device, dtype=self.unet.dtype)
 
         if self.use_latent_cache:
-            self.dataset.cache_latents(self.vae, self.data_sampler.buckets if self.config.arb.enabled else None, self.config)
+            self.dataset.cache_latents(self.vae, self.config)
 
     def on_train_epoch_start(self) -> None:
         if self.use_latent_cache:

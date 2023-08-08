@@ -33,9 +33,6 @@ def main(args):
     if config.lightning.accelerator in ["gpu", "cpu"]:
         strategy = "ddp"
 
-    if config.arb.enabled:
-        config.lightning.replace_sampler_ddp = False
-
     if config.trainer.use_hivemind:
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
@@ -110,8 +107,15 @@ def main(args):
         model.to(torch.float16 if target_precision == "16-true" else torch.bfloat16)
         del config.lightning.precision
 
+    # config.lightning.replace_sampler_ddp = False
     config, callbacks = pl_compat_fix(config, callbacks)
-    trainer = pl.Trainer(logger=logger, callbacks=callbacks, strategy=strategy, plugins=plugins, **config.lightning)
+    trainer = pl.Trainer(
+        logger=logger, 
+        callbacks=callbacks, 
+        strategy=strategy, 
+        plugins=plugins, 
+        **config.lightning
+    )
     trainer.fit(model=model, ckpt_path=args.resume if args.resume else None)
 
 if __name__ == "__main__":
