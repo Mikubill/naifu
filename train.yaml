@@ -50,8 +50,10 @@ dataset:
   center_crop: false
   ucg: 0.1
   debug_arb: false
-  cache_latents: false
   allow_duplicates: false
+  cache_latents: false
+  # cache_bsz: 8
+  # cache_dir: cache
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit
@@ -102,4 +104,3 @@ sampling:
 #   max_ar_error: 4
 #   min_dim: 256
 #   dim_limit: 1024
-

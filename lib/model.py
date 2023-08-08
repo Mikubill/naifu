@@ -315,7 +315,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.to(self.device, dtype=self.unet.dtype)
 
         if self.use_latent_cache:
-            self.dataset.cache_latents(self.vae, self.config)
+            self.dataset.cache_latents(self.encode_pixels)
 
     def on_train_epoch_start(self) -> None:
         if self.use_latent_cache:
