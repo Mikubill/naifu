@@ -217,7 +217,7 @@ if __name__ == "__main__":
     # give a path to folder with images, use tqdm for progress bar
     args = argparse.ArgumentParser()
     args.add_argument("--path", type=str, default="/notebooks")
-    args.add_argument("--interrogator", type=str, default="wd14-swinv2-v2")
+    args.add_argument("--interrogator", type=str, default="wd-v1-4-moat-tagger-v2")
     args.add_argument("--threshold", type=float, default=0.5)
     args.add_argument("--prefix", type=str, default="")
     args = args.parse_args()
