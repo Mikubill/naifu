@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", default=None, type=str, required=True, help="Path to the file or directory to process.")
     parser.add_argument("--dst", default=None, type=str, help="Path to the destination file or directory.")
-    parser.add_argument("--type", default="pt", type=str, choices=["pt", "safetensors"], help="File type to save as.")
+    parser.add_argument("--type", default="safetensors", type=str, choices=["pt", "safetensors"], help="File type to save as.")
     args = parser.parse_args()
 
     assert args.src is not None, "Must provide a source path!"
