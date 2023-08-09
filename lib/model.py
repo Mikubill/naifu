@@ -41,11 +41,11 @@ def get_pipeline(model_path):
             from safetensors import safe_open
 
             checkpoint = {}
-            with safe_open(model_path, framework="pt", device="cpu") as f:
+            with safe_open(model_path, framework="pt", device="cuda") as f:
                 for key in f.keys():
                     checkpoint[key] = f.get_tensor(key)
         else:
-            checkpoint = torch.load(model_path, map_location="cpu")
+            checkpoint = torch.load(model_path, map_location="cuda")
 
         # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
         # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
