@@ -35,14 +35,31 @@ def setup_torch(config):
 
 def setup_model(config, farbic):
     model_path = config.trainer.model_path
-    model = StableDiffusionModel(model_path, config)    
+    model = StableDiffusionModel(model_path, config) 
+    
     arb_config = {
         "bsz": config.trainer.batch_size,
         "seed": config.trainer.seed,
         "world_size": farbic.world_size,
         "global_rank": farbic.global_rank,
-        **config.arb
     }
+    if config.get("arb", None) is None:
+        # calculate arb from resolution
+        base = config.trainer.resolution
+        c_size = 1.5
+        c_div = 8
+        c_mult = 2
+        arb_config.update({
+            "base_res": (base, base),
+            "max_size": (int(base*c_size), base),
+            "divisible": base // c_div,
+            "max_ar_error": 4,
+            "min_dim": base // c_mult,
+            "dim_limit": base * c_mult,
+            "debug": False,
+        })
+    else:
+        arb_config.update(**config.arb) 
 
     # init Dataset
     dataset = AspectRatioDataset(
