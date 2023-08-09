@@ -20,12 +20,11 @@ trainer:
   clip_skip: 2
   seed: 34
   precision: fp32
-  half_encoder: true
   use_ema: false
   use_hivemind: false
   lr_scale: sqrt
   attention_slicing: false
-  vae_slicing: true
+  vae_slicing: false
 
   offset_noise: false
   offset_noise_val: 0.1
@@ -52,16 +51,6 @@ lightning:
   precision: bf16-true
   log_every_n_steps: 1
   accumulate_grad_batches: 1
-
-arb:
-  enabled: true
-  debug: false
-  base_res: [512, 512]
-  max_size: [768, 512]
-  divisible: 64
-  max_ar_error: 4
-  min_dim: 256
-  dim_limit: 1024
 
 dataset:
   img_path: 
@@ -109,9 +98,16 @@ sampling:
     - "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
   prompts: 
     - "masterpiece, best quality, 1girl, kitagawa_marin"
-
-encoder:
-  # Leave blank to load from model
-  text: 
-  vae: 
   
+# arb config will be calculated automatically if not specified
+# to override, uncomment and specify values
+#
+# arb:
+#   enabled: false
+#   debug: false
+#   base_res: [512, 512]
+#   max_size: [768, 512]
+#   divisible: 64
+#   max_ar_error: 4
+#   min_dim: 256
+#   dim_limit: 1024

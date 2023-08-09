@@ -15,7 +15,6 @@ class AspectRatioBucket:
         id_size_map,
         max_size=(768, 512),
         divisible=64,
-        step_size=8,
         min_dim=256,
         base_res=(512, 512),
         bsz=1,

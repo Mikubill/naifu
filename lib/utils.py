@@ -3,7 +3,6 @@ import re
 import torch
 
 from io import BytesIO
-from typing import Optional
 
 from omegaconf import OmegaConf
 import requests

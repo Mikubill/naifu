@@ -22,7 +22,7 @@ def process_directory(src, dst=None, file_type="pt"):
     dst_path = Path(dst) if dst else None
     
     if src_path.is_file() and src_path.suffix == '.ckpt':
-        dst_file = src_dir / (src_path.stem + '.' + file_type)
+        dst_file = dst_path / (src_path.stem + '.' + file_type) if dst_path.is_dir() else dst_path
         process_file(src_path, dst_file, file_type)
     else:
         for pt_file in src_path.rglob('*.ckpt'):

@@ -12,3 +12,4 @@ scripts/img_process.py
 samples/
 *.ckpt
 *.safetensors
+cache/
