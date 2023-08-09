@@ -262,9 +262,9 @@ def main(args):
     params_to_optim = [{'params': model.model.parameters()}]
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     
-    if fabric.is_global_zero:
+    if fabric.is_global_zero and os.name != 'nt':
         print(f"\n{ModelSummary(model, max_depth=1)}")
-     
+
     scheduler = None
     if config.get("scheduler"):
         scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
