@@ -48,7 +48,7 @@ def setup_model(config, farbic):
         base = config.trainer.resolution
         c_size = 1.5
         c_div = 8
-        c_mult = 2
+        c_mult = 1.75
         arb_config.update({
             "base_res": (base, base),
             "max_size": (int(base*c_size), base),
