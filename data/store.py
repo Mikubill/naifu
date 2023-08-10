@@ -188,13 +188,14 @@ class ImageStore(torch.utils.data.IterableDataset):
             instance_image = self.read_img(instance_path)
             img = self.image_transforms(instance_image)
             prompts = instance_prompt
+            w, h = self.size
             
             inst = {
                 "images": img, 
                 "prompts": prompts,
-                "original_size_as_tuple": (self.size, self.size),
+                "original_size_as_tuple": (h, w),
                 "crop_coords_top_left": (0,0),
-                "target_size_as_tuple": (self.size, self.size),   
+                "target_size_as_tuple": (h, w),   
             }
             return inst
     
@@ -364,11 +365,13 @@ class AspectRatioDataset(ImageStore):
             prompt, _ = self.process_tags(self.prompt_cache[item_id])
             if random.random() < self.ucg:
                 prompt = ''
+                
+            w, h = size
             result.update({
                 "prompts": prompt,
-                "original_size_as_tuple": torch.asarray(size),
+                "original_size_as_tuple": torch.asarray((h, w)),
                 "crop_coords_top_left": torch.asarray((0,0)),
-                "target_size_as_tuple": torch.asarray(size),
+                "target_size_as_tuple": torch.asarray((h, w)),
             })
             
         if not cache_images:
