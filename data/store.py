@@ -188,14 +188,13 @@ class ImageStore(torch.utils.data.IterableDataset):
             instance_image = self.read_img(instance_path)
             img = self.image_transforms(instance_image)
             prompts = instance_prompt
-            w, h = self.size
             
             inst = {
                 "images": img, 
                 "prompts": prompts,
-                "original_size_as_tuple": (h, w),
+                "original_size_as_tuple": (self.size, self.size),
                 "crop_coords_top_left": (0,0),
-                "target_size_as_tuple": (h, w),   
+                "target_size_as_tuple": (self.size, self.size),
             }
             return inst
     
