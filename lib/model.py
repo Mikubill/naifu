@@ -1,18 +1,9 @@
 
-import functools
 import math
-import os
-import tarfile
-import tempfile
-from typing import Any, Callable, Optional, Union
 
 import lightning.pytorch as pl
-from lightning.pytorch.core.optimizer import LightningOptimizer
-from lightning.pytorch.utilities.types import LRSchedulerTypeUnion
-import requests
 import torch
 import torch.nn.functional as F
-from torch.optim.optimizer import Optimizer
 import torch.utils.checkpoint
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -36,16 +27,17 @@ def get_class(name: str):
 def get_pipeline(model_path):
     if Path(model_path).is_file():
         # use autoconvert
-        from_safetensors = Path(model_path).with_suffix(".safetensors").is_file()
+        from_safetensors = Path(model_path).suffix == ".safetensors"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         if from_safetensors:
             from safetensors import safe_open
 
             checkpoint = {}
-            with safe_open(model_path, framework="pt", device="cuda") as f:
+            with safe_open(model_path, framework="pt", device=device) as f:
                 for key in f.keys():
                     checkpoint[key] = f.get_tensor(key)
         else:
-            checkpoint = torch.load(model_path, map_location="cuda")
+            checkpoint = torch.load(model_path, map_location=device)
 
         # NOTE: this while loop isn't great but this controlnet checkpoint has one additional
         # "state_dict" key https://huggingface.co/thibaud/controlnet-canny-sd21
