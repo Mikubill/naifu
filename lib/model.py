@@ -143,6 +143,7 @@ class StableDiffusionModel(pl.LightningModule):
         if config.trainer.use_ema:
             self.ema = ExponentialMovingAverage(self.unet.parameters(), decay=0.995)
 
+        self.vae_scale_factor = 0.18215 if not self.is_sdxl else 0.13025
         self.use_latent_cache = self.config.dataset.get("cache_latents")
 
     def setup(self, stage):
@@ -273,7 +274,7 @@ class StableDiffusionModel(pl.LightningModule):
             for nx in range(pixels.shape[0]):
                 px = pixels[nx, ...].unsqueeze(0)
                 latent_dist = vae.encode(px).latent_dist
-                latents = latent_dist.sample() * 0.18215
+                latents = latent_dist.sample() * self.vae_scale_factor
                 result.append(latents)
 
             result = torch.stack(result).squeeze(1)
@@ -281,7 +282,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         # Convert images to latent space
         latent_dist = vae.encode(pixels).latent_dist
-        latents = latent_dist.sample() * 0.18215
+        latents = latent_dist.sample() * self.vae_scale_factor
         return latents
 
     def training_step(self, batch, batch_idx):

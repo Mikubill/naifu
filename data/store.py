@@ -115,7 +115,7 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.latents_cache = {}
         for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
             image = torch.stack([self.image_transforms(self.read_img(entry[0]))])
-            latent = vae.encode(image.to(vae.device, dtype=vae.dtype)).latent_dist.sample() * 0.18215
+            latent = vae(image.to(vae.device, dtype=vae.dtype))
             self.latents_cache[entry[0]] = latent.detach().squeeze(0).cpu()
 
     def read_img(self, filepath):  
