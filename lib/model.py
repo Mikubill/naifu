@@ -104,6 +104,8 @@ class StableDiffusionModel(pl.LightningModule):
             self.tokenizer, self.noise_scheduler = self.pipeline.tokenizer, self.pipeline.scheduler
         else:
             self.unet, self.noise_scheduler = self.pipeline.unet, self.pipeline.scheduler
+            self.vae, self.text_encoder, self.text_encoder_2, self.tokenizer, self.tokenizer_2 = \
+                self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.text_encoder_2, self.pipeline.tokenizer, self.pipeline.tokenizer_2
             self.is_sdxl = True
 
         self.unet.to(self.device)
@@ -121,10 +123,12 @@ class StableDiffusionModel(pl.LightningModule):
             self.text_encoder.train()
             self.text_encoder.requires_grad_(True)
             if self.is_sdxl:
-                raise NotImplementedError("train_text_encoder is not supported for SDXL")
+                self.text_encoder_2.train()
+                self.text_encoder_2.requires_grad_(True)
         else:
-            if not self.is_sdxl:
-                self.text_encoder.requires_grad_(False)
+            self.text_encoder.requires_grad_(False)
+            if self.is_sdxl:
+                self.text_encoder_2.requires_grad_(False)
 
         if config.trainer.gradient_checkpointing:
             self.unet.enable_gradient_checkpointing()
@@ -411,6 +415,10 @@ class StableDiffusionModel(pl.LightningModule):
     def on_train_epoch_start(self) -> None:
         if self.use_latent_cache and hasattr(self, "vae"):
             self.vae.to("cpu")
+            
+        if self.is_sdxl:
+            self.text_encoder.to("cpu")
+            self.text_encoder_2.to("cpu")
 
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.trainer.use_ema:

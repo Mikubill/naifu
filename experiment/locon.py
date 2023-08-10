@@ -143,7 +143,7 @@ class LoConDiffusionModel(StableDiffusionModel):
             if self.config.trainer.gradient_checkpointing:
                 self.text_encoder.gradient_checkpointing_enable()
             
-        self.lora = LoConBaseModel(self.unet, getattr(self, "text_encoder", None), self.config.lora)
+        self.lora = LoConBaseModel(self.unet, self.text_encoder, self.config.lora)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
 
