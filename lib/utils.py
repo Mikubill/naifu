@@ -15,7 +15,9 @@ from transformers import (
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
+    EulerDiscreteScheduler,
     UNet2DConditionModel,
+    StableDiffusionXLPipeline,
     StableDiffusionPipeline
 )
 from diffusers.pipelines.stable_diffusion.convert_from_ckpt import (
@@ -61,16 +63,6 @@ def state_dict_prefix_replace(state_dict, replace_prefix):
         for x in replace:
             state_dict[x[1]] = state_dict.pop(x[0])
     return state_dict
-
-def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, gamma:float):
-    alphas = noise_scheduler.alphas_cumprod[timesteps.to("cpu")]
-    prediction_type = noise_scheduler.config.prediction_type
-    snrs = alphas / (1 - alphas)
-    comp = torch.tensor(gamma) / snrs if prediction_type == "epsilon" else torch.tensor(gamma) / (snrs+1)
-    weights = torch.minimum(comp, torch.ones_like(comp)).to(eps_pred.device)
-    losses = torch.nn.functional.mse_loss(eps_pred, eps, reduction="none").mean(dim=tuple(range(1, eps.ndim)))
-    loss = (losses * weights).mean()
-    return loss
 
 def convert_to_sd(state_dict):
     unet_state_dict = {k.replace("unet.", "", 1): v for k, v in state_dict.items() if k.startswith("unet")}
@@ -128,7 +120,7 @@ def convert_to_df(checkpoint, return_pipe=False):
 
     original_config_file = BytesIO(requests.get(config_url).content)
     original_config = OmegaConf.load(original_config_file)
-
+    
     # Convert the text model.
     if (
         "cond_stage_config" in original_config.model.params
@@ -140,6 +132,7 @@ def convert_to_df(checkpoint, return_pipe=False):
             model_type = "SDXL"
         else:
             model_type = "SDXL-Refiner"
+        image_size = 1024 
 
     if (
         "parameterization" in original_config["model"]["params"]
@@ -155,21 +148,38 @@ def convert_to_df(checkpoint, return_pipe=False):
             image_size = 512 if global_step == 875000 else 768
     else:
         prediction_type = "epsilon"
-        image_size = 512
+        image_size = 512 
 
     num_train_timesteps = getattr(original_config.model.params, "timesteps", None) or 1000
-    beta_start = getattr(original_config.model.params, "linear_start", None) or 0.02
-    beta_end = getattr(original_config.model.params, "linear_end", None) or 0.085
-    scheduler = DDIMScheduler(
-        beta_end=beta_end,
-        beta_schedule="scaled_linear",
-        beta_start=beta_start,
-        num_train_timesteps=num_train_timesteps,
-        steps_offset=1,
-        clip_sample=False,
-        set_alpha_to_one=False,
-        prediction_type=prediction_type,
-    )
+    if model_type in ["SDXL", "SDXL-Refiner"]:
+        scheduler_dict = {
+            "beta_schedule": "scaled_linear",
+            "beta_start": 0.00085,
+            "beta_end": 0.012,
+            "interpolation_type": "linear",
+            "num_train_timesteps": num_train_timesteps,
+            "prediction_type": "epsilon",
+            "sample_max_value": 1.0,
+            "set_alpha_to_one": False,
+            "skip_prk_steps": True,
+            "steps_offset": 1,
+            "timestep_spacing": "leading",
+        }
+        scheduler = EulerDiscreteScheduler.from_config(scheduler_dict)
+        scheduler_type = "euler"
+    else:
+        beta_start = getattr(original_config.model.params, "linear_start", None) or 0.02
+        beta_end = getattr(original_config.model.params, "linear_end", None) or 0.085
+        scheduler = DDIMScheduler(
+            beta_end=beta_end,
+            beta_schedule="scaled_linear",
+            beta_start=beta_start,
+            num_train_timesteps=num_train_timesteps,
+            steps_offset=1,
+            clip_sample=False,
+            set_alpha_to_one=False,
+            prediction_type=prediction_type,
+        )
     # make sure scheduler works correctly with DDIM
     scheduler.register_to_config(clip_sample=False)
 
@@ -204,22 +214,52 @@ def convert_to_df(checkpoint, return_pipe=False):
 
         if len(text_model_dict) < 10:
             text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+    elif model_type in ["SDXL", "SDXL-Refiner"]:
+        tokenizer = None
+        text_encoder = None
+        tokenizer_2 = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", pad_token="!")
+        text_encoder_2 = convert_open_clip_checkpoint(
+            checkpoint, 
+            config_name="laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+            prefix="conditioner.embedders.1.model." if model_type == "SDXL" else "conditioner.embedders.0.model.",
+            has_projection=True, 
+            projection_dim=1280,
+        )
+        if model_type == "SDXL":
+            tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+            text_encoder = convert_ldm_clip_checkpoint(checkpoint)
     
     if not return_pipe:
-        return converted_unet_checkpoint, converted_vae_checkpoint, text_model_dict
+        if model_type in ["SDXL", "SDXL-Refiner"]:
+            return converted_unet_checkpoint, converted_vae_checkpoint, text_encoder, text_encoder_2
+        else:
+            return converted_unet_checkpoint, converted_vae_checkpoint, text_model_dict
     else:
         vae = AutoencoderKL(**vae_config)
         vae.load_state_dict(converted_vae_checkpoint)
         unet.load_state_dict(converted_unet_checkpoint)
-        text_model.load_state_dict(text_model_dict)
-        pipe = StableDiffusionPipeline(
-            unet=unet,
-            vae=vae,
-            text_encoder=text_model,
-            tokenizer=tokenizer,
-            scheduler=scheduler,
-            safety_checker=None,
-            feature_extractor=None,
-            requires_safety_checker=False,
-        )
-        return pipe
+        
+        if model_type in ["SDXL", "SDXL-Refiner"]:
+            return StableDiffusionXLPipeline(
+                vae=vae,
+                text_encoder=text_encoder,
+                tokenizer=tokenizer,
+                text_encoder_2=text_encoder_2,
+                tokenizer_2=tokenizer_2,
+                unet=unet,
+                scheduler=scheduler,
+                force_zeros_for_empty_prompt=True,
+                add_watermarker=False,
+            )
+        else:
+            text_model.load_state_dict(text_model_dict)
+            return StableDiffusionPipeline(
+                unet=unet,
+                vae=vae,
+                text_encoder=text_model,
+                tokenizer=tokenizer,
+                scheduler=scheduler,
+                safety_checker=None,
+                feature_extractor=None,
+                requires_safety_checker=False,
+            )

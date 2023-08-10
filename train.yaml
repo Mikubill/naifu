@@ -2,6 +2,7 @@ name: test-run
 
 trainer:
   model_path: /notebooks/storage/animesfw
+  # model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 2
   resolution: 512
   center_crop: false
@@ -63,9 +64,8 @@ optimizer:
     eps: 1e-8
 
 lr_scheduler:
-  name: transformers.get_constant_schedule_with_warmup
+  name: transformers.get_constant_schedule
   params:
-    num_warmup_steps: 50
     last_epoch: -1
 
 monitor:

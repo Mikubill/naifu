@@ -161,10 +161,15 @@ class ImageStore(torch.utils.data.IterableDataset):
         return cropped_arrays
 
     def collate_fn(self, examples):
-        prompts = [example["prompts"] for example in examples]
         pixel_values = self.crop_align([example["images"] for example in examples])
-        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        return [prompts, pixel_values]
+        result = {
+            "pixel_values": torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float(),
+            "prompts": [example["prompts"] for example in examples],
+            "target_size_as_tuple": [example["target_size_as_tuple"] for example in examples],
+            "original_size_as_tuple": [example["original_size_as_tuple"] for example in examples],
+            "crop_coords_top_left": [example["crop_coords_top_left"] for example in examples],
+        }
+        return result
 
     def __len__(self):
         return self._length // get_world_size()
@@ -308,14 +313,29 @@ class AspectRatioDataset(ImageStore):
             import h5py
             with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
                 latent = torch.asarray(cache[f"{item_id}.latents"][:])
-                latent_size = cache[f"{item_id}.size"][:]
-                estimate_size = latent_size[1] // 8, latent_size[0] // 8,
+                original_size = cache[f"{item_id}.size"][:]
+                estimate_size = original_size[1] // 8, original_size[0] // 8,
                 if latent.shape != (4, *estimate_size):
                     print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
-                example.update({"images": latent})
+                    
+                w, h = original_size
+                _, w1, h1 = latent.shape
+                example.update({
+                    "images": latent,
+                    "original_size_as_tuple": (h, w),
+                    "target_size_as_tuple": (h1*8, w1*8),
+                    "crop_coords_top_left": (0, 0)
+                })
         else:
-            image = self.transformer(self.read_img(item_id), size)
-            example.update({"images": image})
+            base_img = self.read_img(item_id)
+            image = self.transformer(base_img, size)
+            w, h = size
+            example.update({
+                "images": image,
+                "original_size_as_tuple": (base_img.height, base_img.width),
+                "target_size_as_tuple": (h, w),
+                "crop_coords_top_left": (0, 0),
+            })
             
         return example
     

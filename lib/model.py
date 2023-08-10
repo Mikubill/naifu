@@ -6,12 +6,11 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from pathlib import Path
-from tqdm.auto import tqdm
 from data.store import AspectRatioDataset, ImageStore
-from diffusers import StableDiffusionPipeline, DDIMScheduler
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
 from lightning.pytorch.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
-from lib.utils import get_local_rank, get_world_size, min_snr_weighted_loss
+from lib.utils import get_local_rank, get_world_size
 from lib.utils import convert_to_sd, convert_to_df
 
 # define the LightningModule
@@ -51,6 +50,41 @@ def get_pipeline(model_path):
     return pipeline
 
 
+def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, snr_gamma):
+    """
+    Computes SNR as per https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
+    """
+    alphas_cumprod = noise_scheduler.alphas_cumprod
+    sqrt_alphas_cumprod = alphas_cumprod**0.5
+    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
+
+    # Expand the tensors.
+    # Adapted from https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L1026
+    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
+    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
+    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
+
+    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
+    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
+    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
+
+    # Compute SNR.
+    snr = (alpha / sigma) ** 2
+
+    mse_loss_weights = (
+        torch.stack([snr, snr_gamma * torch.ones_like(timesteps)], dim=1).min(dim=1)[0] / snr
+    )
+    # We first calculate the original loss. Then we mean over the non-batch dimensions and
+    # rebalance the sample-wise losses with their respective loss weights.
+    # Finally, we take the mean of the rebalanced loss.
+    loss = F.mse_loss(eps_pred.float(), eps.float(), reduction="none")
+    loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
+    loss = loss.mean()
+    return loss
+
+
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self, pipeline, config, batch_size=0):
         super().__init__()
@@ -62,12 +96,17 @@ class StableDiffusionModel(pl.LightningModule):
         
     def init_model(self):
         config = self.config
-        scheduler_cls = DDIMScheduler
         self.pipeline.set_progress_bar_config(disable=True)
-    
-        self.unet, self.vae, self.text_encoder, self.tokenizer, self.noise_scheduler = \
-            self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.tokenizer, self.pipeline.scheduler
-        self.unet.to(self.device, dtype=torch.float32)
+        
+        self.is_sdxl = False
+        if isinstance(self.pipeline, StableDiffusionXLPipeline):
+            self.unet, self.vae, self.noise_scheduler = self.pipeline.unet, self.pipeline.vae, self.pipeline.scheduler
+            self.is_sdxl = True
+        else:
+            self.unet, self.vae, self.text_encoder = self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder
+            self.tokenizer, self.noise_scheduler = self.pipeline.tokenizer, self.pipeline.scheduler
+        
+        self.unet.to(self.device)
         self.unet.train()
 
         try:
@@ -76,11 +115,14 @@ class StableDiffusionModel(pl.LightningModule):
             print(f"Skip compiling: {e}")
 
         self.vae.requires_grad_(False)
-        self.text_encoder.requires_grad_(False)
-
         if config.trainer.get("train_text_encoder"):
             self.text_encoder.train()
             self.text_encoder.requires_grad_(True)
+            if self.is_sdxl:
+                raise NotImplementedError("train_text_encoder is not supported for SDXL")
+        else:
+            if not self.is_sdxl:
+                self.text_encoder.requires_grad_(False)
 
         if config.trainer.gradient_checkpointing:
             self.unet.enable_gradient_checkpointing()
@@ -116,7 +158,7 @@ class StableDiffusionModel(pl.LightningModule):
             base = self.config.trainer.resolution
             c_size = 1.5
             c_div = 8
-            c_mult = 2
+            c_mult = 1.75 if base >= 1024 else 2
             arb_config.update({
                 "base_res": (base, base),
                 "max_size": (int(base*c_size), base),
@@ -136,7 +178,6 @@ class StableDiffusionModel(pl.LightningModule):
             size=self.config.trainer.resolution,
             seed=self.config.trainer.seed,
             rank=local_rank,
-            tokenizer=self.tokenizer,
             **self.config.dataset
         )
 
@@ -149,9 +190,48 @@ class StableDiffusionModel(pl.LightningModule):
             persistent_workers=True,
         )
         return dataloader
+    
+    def encode_tokens_xl(self, batch):
+        time_ids_list = []
+        for o, t, c in zip(batch["original_size_as_tuple"], batch["target_size_as_tuple"], batch["crop_coords_top_left"]):
+            add_time_ids = torch.tensor([list(o + t + c)])
+            time_ids_list.append(add_time_ids)
+        time_ids_list = torch.cat(time_ids_list, dim=0).to(self.device)
+        
+        text_encoders = [self.pipeline.text_encoder, self.pipeline.text_encoder_2]
+        tokenizers = [self.pipeline.tokenizer, self.pipeline.tokenizer_2]
+        prompt_embeds_list = []
+        for i, text_encoder in enumerate(text_encoders):
+            tokenizer = tokenizers[i]
+            text_input_ids = tokenizer(
+                batch["prompts"],
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            ).input_ids
 
-    def encode_tokens(self, prompts):
-        tokenizer = self.tokenizer
+            text_encoder.to(self.device)
+            prompt_embeds = text_encoder(
+                text_input_ids.to(self.device),
+                output_hidden_states=True,
+            )
+
+            # We are only ALWAYS interested in the pooled output of the final text encoder
+            pooled_prompt_embeds = prompt_embeds[0]
+            prompt_embeds = prompt_embeds.hidden_states[-2]
+            bs_embed, seq_len, _ = prompt_embeds.shape
+            prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
+            prompt_embeds_list.append(prompt_embeds)
+
+        prompt_embeds = torch.concat(prompt_embeds_list, dim=-1).to(self.unet.dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1).to(self.unet.dtype)
+        return prompt_embeds, pooled_prompt_embeds, time_ids_list
+
+    def encode_tokens(self, prompts, tokenizer=None):
+        if tokenizer is None:
+            tokenizer = self.tokenizer
+            
         input_ids = self.tokenizer(prompts, padding="do_not_pad", truncation=True, max_length=225).input_ids 
         input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
         
@@ -201,12 +281,17 @@ class StableDiffusionModel(pl.LightningModule):
         return latents
 
     def training_step(self, batch, batch_idx):
-        prompts, latents = batch[0], batch[1]
-        encoder_hidden_states = self.encode_tokens(prompts)
+        prompts, latents = batch["prompts"], batch["pixel_values"]
+        if self.is_sdxl:
+            prompt_embeds, pooled_prompt_embeds, time_ids_list = self.encode_tokens_xl(batch)
+        else:
+            encoder_hidden_states = self.encode_tokens(prompts)
+            encoder_hidden_states = encoder_hidden_states.to(self.unet.dtype)
+            
         if not self.use_latent_cache:
             latents = self.encode_pixels(latents)
         
-        encoder_hidden_states = encoder_hidden_states.to(self.unet.dtype)
+        # Cast to the correct dtype
         latents = latents.to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
@@ -229,7 +314,16 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        if self.is_sdxl:
+            unet_added_conditions = {
+                "time_ids": time_ids_list,
+                "text_embeds": pooled_prompt_embeds
+            }
+            noise_pred = self.unet(
+                noisy_latents, timesteps, prompt_embeds, added_cond_kwargs=unet_added_conditions
+            ).sample
+        else:
+            noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
         # Get the target for loss depending on the prediction type
         if self.noise_scheduler.config.prediction_type == "epsilon":
@@ -243,7 +337,7 @@ class StableDiffusionModel(pl.LightningModule):
             loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")
         else:
             gamma = self.config.trainer.get("min_snr_val")
-            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
+            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma)
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
@@ -329,10 +423,17 @@ class StableDiffusionModel(pl.LightningModule):
             checkpoint["model_ema"] = self.ema.state_dict()
 
     def on_load_checkpoint(self, checkpoint):
-        unet_sd, vae_sd, te_sd = convert_to_df(checkpoint["state_dict"])
-        self.unet.load_state_dict(unet_sd)
-        self.vae.load_state_dict(vae_sd)
-        self.text_encoder.load_state_dict(te_sd)
+        if self.is_sdxl:
+            unet_sd, vae_sd, te, te2 = convert_to_df(checkpoint["state_dict"])
+            self.unet.load_state_dict(unet_sd)
+            self.vae.load_state_dict(vae_sd)
+            self.text_encoder.load_state_dict(te.state_dict())
+            self.text_encoder_2.load_state_dict(te2.state_dict())
+        else:
+            unet_sd, vae_sd, te_sd = convert_to_df(checkpoint["state_dict"])
+            self.unet.load_state_dict(unet_sd)
+            self.vae.load_state_dict(vae_sd)
+            self.text_encoder.load_state_dict(te_sd)
         checkpoint["state_dict"] = {}
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])
