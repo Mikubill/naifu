@@ -15,7 +15,7 @@ lora:
   dropout: 0.0
 
 trainer:
-  model_path: "/notebooks/storage/animesfw"
+  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 2
   resolution: 512
   center_crop: false
@@ -56,15 +56,15 @@ lightning:
   accumulate_grad_batches: 1
 
 dataset:
-  img_path: 
-    - "/notebooks/PVC-XL"
-  tag_processor: 
-    - data.processors.shuffle_prompts
+  img_path: /notebooks/rurudo_lion
+  tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
   debug_arb: false
   process_tags: false
-  important_tags: []
+  cache_latents: true
+  # cache_bsz: 8
+  # cache_dir: cache
 
 optimizer:
   name: torch.optim.AdamW

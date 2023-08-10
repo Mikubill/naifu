@@ -33,6 +33,9 @@ class LoConBaseModel(torch.nn.Module):
             names.add(lora.lora_name)
             
     def create_modules(self, prefix, model, target_replace_module, alpha, dropout):
+        if model is None:
+            return []
+        
         blocks = []
         for name, module in model.named_modules():
             if module.__class__.__name__ in target_replace_module:
@@ -127,84 +130,34 @@ class LoConDiffusionModel(StableDiffusionModel):
         
     def init_model(self):
         super().init_model()
-        
-        self.unet.train()
-        if self.config.lora.train_text_encoder:
-            self.text_encoder.train()
             
-        self.text_encoder.requires_grad_(False)
+        self.unet.train()
         self.unet.requires_grad_(False)
         
-        if self.config.trainer.gradient_checkpointing:
-            self.text_encoder.gradient_checkpointing_enable()
+        if self.config.lora.train_text_encoder and not self.is_sdxl:
+            self.text_encoder.train()
+        
+        if hasattr(self, "text_encoder"):
+            self.text_encoder.requires_grad_(False)
+            self.text_encoder.text_model.embeddings.requires_grad_(True)
+            if self.config.trainer.gradient_checkpointing:
+                self.text_encoder.gradient_checkpointing_enable()
             
-        self.lora = LoConBaseModel(self.unet, self.text_encoder, self.config.lora)
+        self.lora = LoConBaseModel(self.unet, getattr(self, "text_encoder", None), self.config.lora)
         self.lora.inject(self.config.lora.train_unet, self.config.lora.train_text_encoder)
         self.lora.requires_grad_(True)
-        self.text_encoder.text_model.embeddings.requires_grad_(True)
 
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
         
     def on_save_checkpoint(self, checkpoint):
         checkpoint["state_dict"] = {k: v for k, v in checkpoint["state_dict"].items() if k.startswith("lora.")}
-    
-    def training_step(self, batch, batch_idx):
+
+    def encode_tokens(self, prompts, tokenizer=None):
         with torch.set_grad_enabled(self.config.lora.train_text_encoder):
-            input_ids, latents = batch[0], batch[1]
-            encoder_hidden_states = self.encode_tokens(input_ids)
-            
-        if not self.dataset.use_latent_cache:
-            latents = self.encode_pixels(latents)
+            return super().encode_tokens(prompts, tokenizer)
         
-        encoder_hidden_states = encoder_hidden_states.to(self.unet.dtype)
-        latents = latents.to(self.unet.dtype)
-
-        # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents)
-        
-        # https://www.crosslabs.org/blog/diffusion-with-offset-noise
-        if self.config.trainer.get("offset_noise"):
-            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
-        
-        bsz = latents.shape[0]
-            
-        # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
-        timesteps = timesteps.long()
-
-        # Add noise to the latents according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-
-        # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
-        
-        # Get the target for loss depending on the prediction type
-        if self.noise_scheduler.config.prediction_type == "epsilon":
-            target = noise
-        elif self.noise_scheduler.config.prediction_type == "v_prediction":
-            target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
-        else:
-            raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
-
-        if not self.config.trainer.get("min_snr"):
-            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
-        else:
-            gamma = self.config.trainer.get("min_snr_val")
-            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma=gamma)
-        
-        # Logging to TensorBoard by default
-        major, minor, _ = pl.__version__.split('.')
-        if int(major) >= 2:
-            self.log("train_loss", loss, prog_bar=True)
-        else:
-            self.log("train_loss", loss)
-            
-        return loss
-    
     def configure_optimizers(self):
-        
         enumerate_params = lambda loras: itertools.chain.from_iterable([lora.parameters() for lora in loras])
         params_to_optim = []
         if self.config.lora.train_unet:

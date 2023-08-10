@@ -319,7 +319,7 @@ class AspectRatioDataset(ImageStore):
                     print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
                     
                 w, h = original_size
-                _, w1, h1 = latent.shape
+                _, h1, w1 = latent.shape
                 example.update({
                     "images": latent,
                     "original_size_as_tuple": (h, w),

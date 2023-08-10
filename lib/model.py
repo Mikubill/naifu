@@ -103,7 +103,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet, self.vae, self.text_encoder = self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder
             self.tokenizer, self.noise_scheduler = self.pipeline.tokenizer, self.pipeline.scheduler
         else:
-            self.unet, self.vae, self.noise_scheduler = self.pipeline.unet, self.pipeline.vae, self.pipeline.scheduler
+            self.unet, self.noise_scheduler = self.pipeline.unet, self.pipeline.scheduler
             self.is_sdxl = True
 
         self.unet.to(self.device)
@@ -114,7 +114,9 @@ class StableDiffusionModel(pl.LightningModule):
         except Exception as e:
             print(f"Skip compiling: {e}")
 
-        self.vae.requires_grad_(False)
+        if hasattr(self, "vae"):
+            self.vae.requires_grad_(False)
+            
         if config.trainer.get("train_text_encoder"):
             self.text_encoder.train()
             self.text_encoder.requires_grad_(True)
@@ -162,9 +164,9 @@ class StableDiffusionModel(pl.LightningModule):
             arb_config.update({
                 "base_res": (base, base),
                 "max_size": (int(base*c_size), base),
-                "divisible": base // c_div,
+                "divisible": 64,
                 "max_ar_error": 4,
-                "min_dim": base // c_mult,
+                "min_dim": int(base // c_mult),
                 "dim_limit": int(base * c_mult),
                 "debug": False,
             })
@@ -196,8 +198,8 @@ class StableDiffusionModel(pl.LightningModule):
         for o, t, c in zip(batch["original_size_as_tuple"], batch["target_size_as_tuple"], batch["crop_coords_top_left"]):
             add_time_ids = torch.tensor([list(o + t + c)])
             time_ids_list.append(add_time_ids)
-        time_ids_list = torch.cat(time_ids_list, dim=0).to(self.device)
         
+        time_ids_list = torch.cat(time_ids_list, dim=0).to(self.device)
         text_encoders = [self.pipeline.text_encoder, self.pipeline.text_encoder_2]
         tokenizers = [self.pipeline.tokenizer, self.pipeline.tokenizer_2]
         prompt_embeds_list = []
@@ -263,12 +265,14 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
 
     def encode_pixels(self, pixels):
-        pixels = pixels.to(self.vae.dtype)
+        vae = self.pipeline.vae
+        vae.to(self.device)
+        pixels = pixels.to(vae.dtype)
         if self.config.trainer.get("vae_slicing"):
             result = []
             for nx in range(pixels.shape[0]):
                 px = pixels[nx, ...].unsqueeze(0)
-                latent_dist = self.vae.encode(px).latent_dist
+                latent_dist = vae.encode(px).latent_dist
                 latents = latent_dist.sample() * 0.18215
                 result.append(latents)
 
@@ -276,7 +280,7 @@ class StableDiffusionModel(pl.LightningModule):
             return result
 
         # Convert images to latent space
-        latent_dist = self.vae.encode(pixels).latent_dist
+        latent_dist = vae.encode(pixels).latent_dist
         latents = latent_dist.sample() * 0.18215
         return latents
 
@@ -394,7 +398,7 @@ class StableDiffusionModel(pl.LightningModule):
         return [[optimizer], [scheduler]]
 
     def on_train_start(self):
-        if self.config.get("cast_vae_fp32", True):
+        if self.config.get("cast_vae_fp32", True) and hasattr(self, "vae"):
             self.vae.to(torch.float32)
         
         if self.config.trainer.use_ema:
@@ -404,7 +408,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.dataset.cache_latents(self.encode_pixels)
 
     def on_train_epoch_start(self) -> None:
-        if self.use_latent_cache:
+        if self.use_latent_cache and hasattr(self, "vae"):
             self.vae.to("cpu")
 
     def on_train_batch_end(self, *args, **kwargs):
@@ -434,6 +438,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.unet.load_state_dict(unet_sd)
             self.vae.load_state_dict(vae_sd)
             self.text_encoder.load_state_dict(te_sd)
+            
         checkpoint["state_dict"] = {}
         if self.config.trainer.use_ema:
             self.ema.load_state_dict(checkpoint["model_ema"])

@@ -53,16 +53,16 @@ lightning:
   accumulate_grad_batches: 1
 
 dataset:
-  img_path: 
-    - "/notebooks/PVC-XL"
-  tag_processor: 
-    - data.processors.shuffle_prompts
+  img_path: "/notebooks/PVC-XL"
+  tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.0
   debug_arb: false
   num_workers: 3
   process_tags: false
   cache_latents: false
+  # cache_bsz: 8
+  # cache_dir: cache
 
 optimizer:
   name: torch.optim.AdamW
