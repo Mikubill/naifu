@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from pathlib import Path
 from data.store import AspectRatioDataset, ImageStore
-from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import StableDiffusionPipeline
 from lightning.pytorch.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from lib.utils import get_local_rank, get_world_size
@@ -99,13 +99,13 @@ class StableDiffusionModel(pl.LightningModule):
         self.pipeline.set_progress_bar_config(disable=True)
         
         self.is_sdxl = False
-        if isinstance(self.pipeline, StableDiffusionXLPipeline):
-            self.unet, self.vae, self.noise_scheduler = self.pipeline.unet, self.pipeline.vae, self.pipeline.scheduler
-            self.is_sdxl = True
-        else:
+        if isinstance(self.pipeline, StableDiffusionPipeline):
             self.unet, self.vae, self.text_encoder = self.pipeline.unet, self.pipeline.vae, self.pipeline.text_encoder
             self.tokenizer, self.noise_scheduler = self.pipeline.tokenizer, self.pipeline.scheduler
-        
+        else:
+            self.unet, self.vae, self.noise_scheduler = self.pipeline.unet, self.pipeline.vae, self.pipeline.scheduler
+            self.is_sdxl = True
+
         self.unet.to(self.device)
         self.unet.train()
 
@@ -165,7 +165,7 @@ class StableDiffusionModel(pl.LightningModule):
                 "divisible": base // c_div,
                 "max_ar_error": 4,
                 "min_dim": base // c_mult,
-                "dim_limit": base * c_mult,
+                "dim_limit": int(base * c_mult),
                 "debug": False,
             })
         else:
