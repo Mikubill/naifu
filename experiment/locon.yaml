@@ -15,7 +15,7 @@ lora:
   dropout: 0.0
 
 trainer:
-  model_path: /notebooks/ComfyUI/models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors
+  model_path: "/root/workspace/storage/models/orangemix"
   batch_size: 2
   resolution: 512
   center_crop: false
@@ -56,13 +56,13 @@ lightning:
   accumulate_grad_batches: 1
 
 dataset:
-  img_path: /notebooks/rurudo_lion
+  img_path: "/notebooks/PVC-XL"
   tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
   debug_arb: false
   process_tags: false
-  cache_latents: true
+  cache_latents: false
   # cache_bsz: 8
   # cache_dir: cache
 
