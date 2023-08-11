@@ -1,9 +1,6 @@
-import math
 from abc import abstractmethod
-from functools import partial
 from typing import Iterable
 
-import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
@@ -77,10 +74,11 @@ class Upsample(nn.Module):
     """
 
     def __init__(
-        self, channels, use_conv, dims=2, out_channels=None, padding=1, third_up=False
+        self, channels, use_conv, dims=2, out_channels=None, padding=1, third_up=False, use_checkpoint=False
     ):
         super().__init__()
         self.channels = channels
+        self.use_checkpoint = use_checkpoint
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.dims = dims
@@ -90,7 +88,7 @@ class Upsample(nn.Module):
                 dims, self.channels, self.out_channels, 3, padding=padding
             )
 
-    def forward(self, x):
+    def _forward(self, x):
         assert x.shape[1] == self.channels
         
         # Cast to float32 to as 'upsample_nearest2d_out_frame' op does not support bfloat16
@@ -119,6 +117,9 @@ class Upsample(nn.Module):
             x = self.conv(x)
         return x
     
+    def forward(self, x):
+        return checkpoint(self._forward, (x, ), self.use_checkpoint)
+    
     
 class Downsample(nn.Module):
     """
@@ -130,10 +131,11 @@ class Downsample(nn.Module):
     """
 
     def __init__(
-        self, channels, use_conv, dims=2, out_channels=None, padding=1, third_down=False
+        self, channels, use_conv, dims=2, out_channels=None, padding=1, third_down=False, use_checkpoint=False
     ):
         super().__init__()
         self.channels = channels
+        self.use_checkpoint = use_checkpoint
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.dims = dims
@@ -158,10 +160,14 @@ class Downsample(nn.Module):
         else:
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
-
-    def forward(self, x):
+            
+    def _forward(self, x):
         assert x.shape[1] == self.channels
         return self.op(x)
+
+    def forward(self, x):
+        return checkpoint(self._forward, (x, ), self.use_checkpoint)
+        # return self.op(x)
 
 
 class ResBlock(TimestepBlock):
@@ -220,11 +226,11 @@ class ResBlock(TimestepBlock):
         self.updown = up or down
 
         if up:
-            self.h_upd = Upsample(channels, False, dims)
-            self.x_upd = Upsample(channels, False, dims)
+            self.h_upd = Upsample(channels, False, dims, use_checkpoint=use_checkpoint)
+            self.x_upd = Upsample(channels, False, dims, use_checkpoint=use_checkpoint)
         elif down:
-            self.h_upd = Downsample(channels, False, dims)
-            self.x_upd = Downsample(channels, False, dims)
+            self.h_upd = Downsample(channels, False, dims, use_checkpoint=use_checkpoint)
+            self.x_upd = Downsample(channels, False, dims, use_checkpoint=use_checkpoint)
         else:
             self.h_upd = self.x_upd = nn.Identity()
 
@@ -551,7 +557,11 @@ class UNetModel(nn.Module):
                             down=True,
                         )
                         if resblock_updown else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
+                            ch, 
+                            conv_resample, 
+                            dims=dims, 
+                            out_channels=out_ch, 
+                            use_checkpoint=use_checkpoint
                         )
                     )
                 )
@@ -656,7 +666,7 @@ class UNetModel(nn.Module):
                             up=True,
                         )
                         if resblock_updown
-                        else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch)
+                        else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch, use_checkpoint=use_checkpoint)
                     )
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
