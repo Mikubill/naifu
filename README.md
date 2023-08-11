@@ -2,6 +2,8 @@
 
 Naifu Diffusion is the name for this project of finetuning Stable Diffusion on images and captions.
 
+This branch is aiming to train stable diffusion model stably with diffusers. To make use of all new features, such as SDXL Training and efficient/experiment strategies, checkout sgm branch.
+
 Colab demo: https://colab.research.google.com/drive/1Xf1tnsP4fu8y5MoYbK1pz08jmyMiTrvv
 
 ## Features
