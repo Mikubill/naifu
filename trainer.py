@@ -317,11 +317,7 @@ def main(args):
             cache_parts = glob.glob(cache_parts_path)
             if len(cache_parts) > 1:
                 combine_h5_files(cache_file_path, *cache_parts)
-                
-                # if cache is merged, remove parts
-                for cache_part in cache_parts:
-                    os.remove(cache_part)
-        
+
     fabric.barrier()
     torch.cuda.empty_cache()        
     train(fabric, model, optimizer, scheduler, dataloader)
