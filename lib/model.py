@@ -155,7 +155,8 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.cast_dtype = torch.float32
         self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
-        self.get_conditioner().to(torch.float16)    
+        self.get_conditioner().to(torch.float16).requires_grad_(False)
+        
         if config.trainer.use_ema: 
             self.model_ema = LitEma(self.model.parameters(), decay=0.9999)
             rank_zero_print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
