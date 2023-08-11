@@ -311,6 +311,7 @@ def main(args):
         dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
         if fabric.world_size > 1:
             # merge cache files
+            fabric.barrier()
             cache_file_path = str(Path(dataset.cache_dir) / "cache.h5")
             cache_parts_path = str(Path(dataset.cache_dir) / "cache_r*.h5")
             combine_h5_files(cache_file_path, *(glob.glob(cache_parts_path)))
