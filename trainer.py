@@ -314,7 +314,12 @@ def main(args):
             fabric.barrier()
             cache_file_path = str(Path(dataset.cache_dir) / "cache.h5")
             cache_parts_path = str(Path(dataset.cache_dir) / "cache_r*.h5")
-            combine_h5_files(cache_file_path, *(glob.glob(cache_parts_path)))
+            cache_parts = glob.glob(cache_parts_path)
+            combine_h5_files(cache_file_path, *cache_parts)
+            
+            # if cache is merged, remove parts
+            for cache_part in cache_parts:
+                os.remove(cache_part)
         
     fabric.barrier()
     torch.cuda.empty_cache()        
