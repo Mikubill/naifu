@@ -293,7 +293,7 @@ class AspectRatioDataset(ImageStore):
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
-        progress_bar = tqdm(total=len(self.entries), desc=f"Caching", disable=self.rank not in [0, -1])
+        progress_bar = tqdm(total=len(self.entries) // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
             imgs = store.buckets[entry][:]
