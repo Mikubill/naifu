@@ -286,12 +286,15 @@ class AspectRatioDataset(ImageStore):
                 to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 if not to_cache_images and not to_cache_prompts:
                     rank_zero_print(f"Restored cache from {cache_file.absolute()}")
-                    return
+                    return True
         
         if self.world_size > 1:
             cache_file = cache_dir / f"cache_r{self.rank}.h5"  
+            
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
+            
+        return False
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
         progress_bar = tqdm(total=len(self.entries) // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])

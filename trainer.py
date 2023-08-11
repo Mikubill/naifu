@@ -308,8 +308,8 @@ def main(args):
         model.first_stage_model.to(torch.float32)
     
     if config.cache.enabled:
-        dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
-        if fabric.world_size > 1:
+        allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
+        if fabric.world_size > 1 and not allclose:
             # merge cache files
             fabric.barrier()
             cache_file_path = str(Path(dataset.cache_dir) / "cache.h5")
