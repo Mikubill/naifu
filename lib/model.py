@@ -11,6 +11,7 @@ from pathlib import Path
 from diffusers import DDIMScheduler
 from lib.sgm import GeneralConditioner, LitEma
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
+from lib.utils import rank_zero_print
 from lightning.pytorch.utilities import rank_zero_only
 
         
@@ -65,7 +66,7 @@ class StableDiffusionModel(pl.LightningModule):
         
     def init_model(self):
         config = self.config
-        print(f"Loading model from {self.model_path}")
+        rank_zero_print(f"Loading model from {self.model_path}")
         sd = load_torch_file(self.model_path)
         
         key_name_v2_1 = "model.diffusion_model.input_blocks.2.1.transformer_blocks.0.attn2.to_k.weight"
@@ -143,21 +144,21 @@ class StableDiffusionModel(pl.LightningModule):
         
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
+            rank_zero_print(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
-            print(f"Unexpected Keys: {unexpected}")
+            rank_zero_print(f"Unexpected Keys: {unexpected}")
             
         try:
             torch.compile(self.model, mode="max-autotune", fullgraph=True, dynamic=True)
         except Exception as e:
-            print(f"Failed to compile model: {e}")
+            rank_zero_print(f"Failed to compile model: {e}")
             
         self.cast_dtype = torch.float32
         self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
         self.get_conditioner().to(torch.float16)    
         if config.trainer.use_ema: 
             self.model_ema = LitEma(self.model.parameters(), decay=0.9999)
-            print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
+            rank_zero_print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
             
         # self.use_latent_cache = self.config.dataset.get("cache_latents")
 
@@ -229,7 +230,7 @@ class StableDiffusionModel(pl.LightningModule):
         if "latents" not in batch.keys():
             latents = self.encode_first_stage(batch["images"])
             if torch.any(torch.isnan(latents)):
-                print("NaN found in latents, replacing with zeros")
+                rank_zero_print("NaN found in latents, replacing with zeros")
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
                 
             del batch["images"]

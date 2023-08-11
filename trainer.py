@@ -311,7 +311,9 @@ def main(args):
         dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
         if fabric.world_size > 1:
             # merge cache files
-            combine_h5_files("cache.h5", *(glob.glob("cache_p*.h5")))
+            cache_file_path = str(Path(config.cache.path) / "cache.h5")
+            cache_parts_path = str(Path(config.cache.path) / "cache_r*.h5")
+            combine_h5_files(cache_file_path, *(glob.glob(cache_parts_path)))
         
     fabric.barrier()
     torch.cuda.empty_cache()        

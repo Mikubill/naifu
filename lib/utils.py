@@ -1,6 +1,5 @@
-import os
-import re
 import torch
+from lightning.pytorch.utilities import rank_zero_only
 
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
@@ -21,6 +20,11 @@ def count_blocks(state_dict_keys, prefix_string):
             break
         count += 1
     return count
+
+@rank_zero_only
+def rank_zero_print(*args, **kwargs):
+    print(*args, **kwargs)
+
 
 # Modified from https://github.com/comfyanonymous/ComfyUI/blob/master/comfy/model_detection.py
 
@@ -132,7 +136,7 @@ def load_torch_file(ckpt, safe_load=False):
         else:
             pl_sd = torch.load(ckpt, map_location="cpu")
         if "global_step" in pl_sd:
-            print(f"Global Step: {pl_sd['global_step']}")
+            rank_zero_print(f"Global Step: {pl_sd['global_step']}")
         if "state_dict" in pl_sd:
             sd = pl_sd["state_dict"]
         else:

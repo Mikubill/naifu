@@ -11,6 +11,7 @@ from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
 from data.buckets import AspectRatioBucket
+from lib.utils import rank_zero_print
 
 def get_class(name: str):
     import importlib
@@ -216,9 +217,9 @@ class AspectRatioDataset(ImageStore):
             
         self.arb_config = arb_config
         if arb_config["debug"]:
-            print(f"BucketManager initialized using config: {self.arb_config}")
+            rank_zero_print(f"BucketManager initialized using config: {self.arb_config}")
         else:
-            print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
+            rank_zero_print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
         
         for path, prompt in self.entries:
             self.prompt_cache[path] = prompt
@@ -284,7 +285,7 @@ class AspectRatioDataset(ImageStore):
                 to_cache_images = self.cache_images and any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 if not to_cache_images and not to_cache_prompts:
-                    print(f"Restored cache from {cache_file.absolute()}")
+                    rank_zero_print(f"Restored cache from {cache_file.absolute()}")
                     return
         
         if self.world_size > 1:
@@ -365,7 +366,7 @@ class AspectRatioDataset(ImageStore):
                     latent_size = cache[f"{item_id}.size"][:]
                     estimate_size = latent_size[1] // 8, latent_size[0] // 8,
                     if latent.shape != (4, *estimate_size):
-                        print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
+                        rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
                     result.update({"latents": latent})
                 if cache_prompts:
                     prompt = {"crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:])}   

@@ -10,7 +10,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from omegaconf import ListConfig
 from torch.utils.checkpoint import checkpoint
-from .model_util import use_noinit_ops
+from .model_util import use_noinit_ops, rank_zero_print
 from transformers import (
     CLIPTextModel,
     CLIPTextConfig,
@@ -160,7 +160,7 @@ class GeneralConditioner(nn.Module):
                 for param in embedder.parameters():
                     param.requires_grad = False
                 embedder.eval()
-            print(
+            rank_zero_print(
                 f"Initialized embedder #{n}: {embedder.__class__.__name__} "
                 f"with {count_params(embedder, False)} params. Trainable: {embedder.is_trainable}"
             )
