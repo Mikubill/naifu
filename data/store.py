@@ -10,7 +10,6 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
-from lightning.pytorch.utilities import rank_zero_only
 from data.buckets import AspectRatioBucket
 
 def get_class(name: str):
@@ -205,6 +204,8 @@ class AspectRatioDataset(ImageStore):
         self.debug = debug_arb
         self.prompt_cache = {}
         self.kwargs = kwargs
+        self.rank = kwargs.get("rank", 0)
+        self.world_size = kwargs.get("world_size", 1)
         self.cache_enabled = kwargs.get("enabled", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
@@ -268,7 +269,6 @@ class AspectRatioDataset(ImageStore):
 
         return new_img
     
-    @rank_zero_only
     def setup_cache(self, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
         store = self.buckets
@@ -286,7 +286,9 @@ class AspectRatioDataset(ImageStore):
                 if not to_cache_images and not to_cache_prompts:
                     print(f"Restored cache from {cache_file.absolute()}")
                     return
-            
+        
+        if self.world_size > 1:
+            cache_file = cache_dir / f"cache_r{self.rank}.h5"  
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
 
@@ -296,8 +298,20 @@ class AspectRatioDataset(ImageStore):
             size = store.resolutions[entry]
             imgs = store.buckets[entry][:]
             stride = self.cache_bsz
-            for idx in range(0, len(imgs), stride):                
-   
+            start, end = 0, len(imgs)
+
+            if self.world_size > 1:
+                # divide the work among the ranks
+                per_rank = len(imgs) // self.world_size
+                start = self.rank * per_rank
+                end = start + per_rank
+                
+                # handle the case where len(imgs) is not a multiple of self.world_size
+                # give the remaining tasks to the last rank
+                if self.rank == self.world_size - 1:
+                    end = len(imgs)
+
+            for idx in range(start, end, stride):   
                 if self.cache_images and not all([f"{img}.latents" in cache for img in imgs[idx:idx+stride]]):
                     batch = []
                     for img in imgs[idx:idx+stride]:

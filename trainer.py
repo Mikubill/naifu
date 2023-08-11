@@ -1,6 +1,8 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 import copy
+import glob
 import os
+import h5py
 
 # Hide welcome message from bitsandbytes
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
@@ -20,7 +22,7 @@ from contextlib import contextmanager
 from lightning.pytorch.loggers import WandbLogger
 from data.store import AspectRatioDataset
 from lightning.pytorch.utilities.model_summary import ModelSummary
-from torch.profiler import profile, record_function, ProfilerActivity
+from lightning.pytorch.utilities import rank_zero_only
 
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
@@ -237,6 +239,25 @@ def cast_precision(tensor, precision):
         tensor.to(precision)
     return tensor
 
+def copy_group(source_group, target_group, progress_bar=None):
+    for key, item in source_group.items():
+        if isinstance(item, h5py.Dataset):
+            if key in target_group:
+                del target_group[key]
+            source_group.copy(key, target_group)
+            if progress_bar:
+                progress_bar.update(1)
+        elif isinstance(item, h5py.Group):
+            target_subgroup = target_group.require_group(key)  
+            copy_group(item, target_subgroup, progress_bar)
+
+@rank_zero_only
+def combine_h5_files(output, *input_files):
+    with h5py.File(output, 'w') as fo:
+        for input_file in tqdm(input_files):
+            with h5py.File(input_file, 'r') as fi:
+                copy_group(fi, fo, None)
+
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
@@ -288,6 +309,9 @@ def main(args):
     
     if config.cache.enabled:
         dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
+        if fabric.world_size > 1:
+            # merge cache files
+            combine_h5_files("cache.h5", *(glob.glob("cache_p*.h5")))
         
     fabric.barrier()
     torch.cuda.empty_cache()        
