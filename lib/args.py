@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument(
         "--config", 
         type=str, 
-        default=None
+        default="train.yaml"
     )
     parser.add_argument(
         "--local_rank",

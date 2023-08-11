@@ -68,6 +68,7 @@ def convert_to_sd(state_dict):
     unet_state_dict = {k.replace("unet.", "", 1): v for k, v in state_dict.items() if k.startswith("unet")}
     vae_state_dict = {k.replace("vae.", "", 1): v for k, v in state_dict.items() if k.startswith("vae")}
     text_enc_dict = {k.replace("text_encoder.", "", 1): v for k, v in state_dict.items() if k.startswith("text_encoder")}
+    text_enc_dict_2 = {k.replace("text_encoder_2.", "", 1): v for k, v in state_dict.items() if k.startswith("text_encoder_2")}
         
     # Convert the UNet model
     unet_state_dict = diffusers_convert.convert_unet_state_dict(unet_state_dict)
@@ -88,6 +89,9 @@ def convert_to_sd(state_dict):
     else:
         text_enc_dict = diffusers_convert.convert_text_enc_state_dict(text_enc_dict)
         text_enc_dict = {"cond_stage_model.transformer." + k: v for k, v in text_enc_dict.items()}
+        
+    if len(text_enc_dict_2) > 0:
+        pass
 
     # Put together new checkpoint
     return {**unet_state_dict, **vae_state_dict, **text_enc_dict}
