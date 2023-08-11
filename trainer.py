@@ -239,24 +239,27 @@ def cast_precision(tensor, precision):
         tensor.to(precision)
     return tensor
 
-def copy_group(source_group, target_group, progress_bar=None):
+def create_vds_for_group(source_group, target_group, vds_prefix=''):
     for key, item in source_group.items():
         if isinstance(item, h5py.Dataset):
-            if key in target_group:
-                del target_group[key]
-            source_group.copy(key, target_group)
-            if progress_bar:
-                progress_bar.update(1)
+            vds_name = f"{vds_prefix}/{key}"
+            if vds_name in target_group:
+                continue
+            layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
+            layout[:] = h5py.VirtualSource(item)
+            target_group.create_virtual_dataset(vds_name, layout)
+            
         elif isinstance(item, h5py.Group):
-            target_subgroup = target_group.require_group(key)  
-            copy_group(item, target_subgroup, progress_bar)
+            new_target_group = target_group.require_group(key)
+            new_prefix = f"{vds_prefix}/{key}"
+            create_vds_for_group(item, new_target_group, new_prefix)
 
 @rank_zero_only
-def combine_h5_files(output, *input_files):
-    with h5py.File(output, 'w') as fo:
+def combine_h5_files_with_vds(output, *input_files):
+    with h5py.File(output, 'w', libver='latest') as fo:  # using 'latest' for VDS support
         for input_file in tqdm(input_files):
             with h5py.File(input_file, 'r') as fi:
-                copy_group(fi, fo, None)
+                create_vds_for_group(fi, fo)
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -316,7 +319,7 @@ def main(args):
             cache_parts_path = str(Path(dataset.cache_dir) / "cache_r*.h5")
             cache_parts = glob.glob(cache_parts_path)
             if len(cache_parts) > 1:
-                combine_h5_files(cache_file_path, *cache_parts)
+                combine_h5_files_with_vds(cache_file_path, *cache_parts)
 
     fabric.barrier()
     torch.cuda.empty_cache()        

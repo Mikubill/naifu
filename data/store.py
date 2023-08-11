@@ -280,7 +280,6 @@ class AspectRatioDataset(ImageStore):
 
         cache_file = cache_dir / "cache.h5"
         if cache_file.exists():
-            
             with h5py.File(cache_file, "r") as cache:
                 to_cache_images = self.cache_images and any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
