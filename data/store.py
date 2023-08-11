@@ -322,13 +322,15 @@ class AspectRatioDataset(ImageStore):
                         "target_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(), 
                     }
                     conds = token_encode_func(prompt)
-                    conds, vectors = conds["crossattn"], conds["vector"]
+                    conds, vectors = conds["crossattn"], conds.get("vector", None)
                     for idx, img in enumerate(imgs[idx:idx+stride]):
                         img = str(img)
                         cond = conds[idx, ...]
-                        vec = vectors[idx, ...]
                         cache.create_dataset(f"{img}.crossattn", data=cond.detach().half().cpu().numpy())
-                        cache.create_dataset(f"{img}.vec", data=vec.detach().half().cpu().numpy())
+                        
+                        if vectors is not None:
+                            vec = vectors[idx, ...]
+                            cache.create_dataset(f"{img}.vec", data=vec.detach().half().cpu().numpy())
 
                 progress_bar.update(len(imgs[idx:idx+stride]))
         progress_bar.close()
@@ -352,10 +354,9 @@ class AspectRatioDataset(ImageStore):
                         print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
                     result.update({"latents": latent})
                 if cache_prompts:
-                    prompt = {
-                        "crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:]),
-                        "vector": torch.asarray(cache[f"{item_id}.vec"][:]),
-                    }    
+                    prompt = {"crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:])}   
+                    if f"{item_id}.vec" in cache:
+                        prompt.update({"vector": torch.asarray(cache[f"{item_id}.vec"][:])}) 
                     result.update({"conds": prompt})
                 if len(result) == 2:
                     return result

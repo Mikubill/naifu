@@ -393,8 +393,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         else:
             raise NotImplementedError()
         self.legacy = legacy
-        self.clip_tokenizer = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
-        self.clip_tokenizer.pad_token_id = 0  # fix pad token id to make same as open clip tokenizer
+        self.clip_tokenizer = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", pad_token="!") # same as open clip tokenizer
 
     def freeze(self):
         self.model = self.model.eval()
