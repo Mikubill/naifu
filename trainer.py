@@ -47,14 +47,15 @@ def setup_model(config, farbic):
         # calculate arb from resolution
         base = config.trainer.resolution
         c_size = 1.5
-        c_mult = 1.75 if base >= 1024 else 2
+        c_mult_min = 2
+        c_mult_max = 1.75 if base >= 1024 else 2
         arb_config.update({
             "base_res": (base, base),
             "max_size": (int(base*c_size), base),
             "divisible": 64,
             "max_ar_error": 4,
-            "min_dim": int(base // c_mult),
-            "dim_limit": int(base * c_mult),
+            "min_dim": int(base // c_mult_min),
+            "dim_limit": int(base * c_mult_max),
             "debug": False
         })
     else:
