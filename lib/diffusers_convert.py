@@ -19,10 +19,10 @@ unet_conversion_map = [
     ("out.0.bias", "conv_norm_out.bias"),
     ("out.2.weight", "conv_out.weight"),
     ("out.2.bias", "conv_out.bias"),
-    ("add_embedding.linear_1.weight", "label_emb.0.0.weight"),
-    ("add_embedding.linear_1.bias", "label_emb.0.0.bias"),
-    ("add_embedding.linear_2.weight", "label_emb.0.2.weight"),
-    ("add_embedding.linear_2.bias", "label_emb.0.2.bias")
+    # ("add_embedding.linear_1.weight", "label_emb.0.0.weight"),
+    # ("add_embedding.linear_1.bias", "label_emb.0.0.bias"),
+    # ("add_embedding.linear_2.weight", "label_emb.0.2.weight"),
+    # ("add_embedding.linear_2.bias", "label_emb.0.2.bias")
 ]
 
 unet_conversion_map_resnet = [
