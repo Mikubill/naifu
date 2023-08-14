@@ -1,6 +1,5 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 import copy
-import glob
 import os
 import h5py
 import re
@@ -237,27 +236,26 @@ def cast_precision(tensor, precision):
         tensor.to(precision)
     return tensor
 
-def create_vds_for_group(source_group, target_group, vds_prefix=''):
+def create_vds_for_group(source_group, target_group, bar):
     for key, item in source_group.items():
-        if isinstance(item, h5py.Dataset):
-            vds_name = f"{vds_prefix}/{key}"
-            if vds_name in target_group:
-                continue
-            layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
-            layout[:] = h5py.VirtualSource(item)
-            target_group.create_virtual_dataset(vds_name, layout)
-            
-        elif isinstance(item, h5py.Group):
-            new_target_group = target_group.require_group(key)
-            new_prefix = f"{vds_prefix}/{key}"
-            create_vds_for_group(item, new_target_group, new_prefix)
+        if key in target_group:
+            if key.endswith(".latents"):
+                bar.update(1)
+            continue
+        layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
+        layout[:] = h5py.VirtualSource(item)
+        target_group.create_virtual_dataset(key, layout)
+        if key.endswith(".latents"):
+            bar.update(1)
 
 @rank_zero_only
-def combine_h5_files_with_vds(output, *input_files):
-    with h5py.File(output, 'w', libver='latest') as fo:  # using 'latest' for VDS support
-        for input_file in tqdm(input_files):
+def update_cache_index(cache_dir):
+    cache_parts = list(Path(cache_dir).glob("cache*.h5"))
+    with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
+        bar = tqdm(desc="Updating index")
+        for input_file in cache_parts:
             with h5py.File(input_file, 'r') as fi:
-                create_vds_for_group(fi, fo)
+                create_vds_for_group(fi, fo, bar)
                 
 def get_lr_for_name(name, lr_conf):
     for item in lr_conf:
@@ -337,15 +335,11 @@ def main(args):
         model.first_stage_model.to(torch.float32)
     
     if config.cache.enabled:
-        allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
-        if fabric.world_size > 1 and not allclose:
-            # merge cache files
-            fabric.barrier()
-            cache_file_path = str(Path(dataset.cache_dir) / "cache.h5")
-            cache_parts_path = str(Path(dataset.cache_dir) / "cache_r*.h5")
-            cache_parts = glob.glob(cache_parts_path)
-            if len(cache_parts) > 1:
-                combine_h5_files_with_vds(cache_file_path, *cache_parts)
+        update_cache_index(config.cache.cache_dir)
+        dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
+
+        fabric.barrier()
+        update_cache_index(config.cache.cache_dir)
 
     fabric.barrier()
     torch.cuda.empty_cache()        
@@ -354,3 +348,4 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
+

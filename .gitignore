@@ -11,3 +11,5 @@ scripts/img_process.py
 samples/
 cache/
 dataset.json
+*.h5
+*.tmp
