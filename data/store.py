@@ -1,9 +1,10 @@
-import json
+import hashlib
 import os
 import random
 import torch
 import h5py
 import os, binascii
+import re, json
 import numpy as np
 
 from pathlib import Path
@@ -35,7 +36,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         rank=0,
         tag_processor=[],
         world_size=1,
-        important_tags=[],
         allow_duplicates=False,
         **kwargs
     ):
@@ -46,7 +46,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.world_size = world_size
         self.dataset = img_path
         self.allow_duplicates = allow_duplicates
-        self.important_tags = important_tags
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
@@ -58,6 +57,9 @@ class ImageStore(torch.utils.data.IterableDataset):
         
         if isinstance(self.dataset, str):
             self.dataset = [self.dataset]
+            
+        if isinstance(tag_processor, str):
+            tag_processor = [tag_processor]
             
         self.tag_processor = []
         for processor in tag_processor:
@@ -71,15 +73,19 @@ class ImageStore(torch.utils.data.IterableDataset):
         img_item = (x, "")
         fp = os.path.splitext(x)[0]
 
-        with open(fp + ".txt") as f:
-            content = f.read()
-            new_prompt = content
+        try:
+            with open(fp + ".txt") as f:
+                content = f.read()
+                new_prompt = content
+        except FileNotFoundError:
+            rank_zero_print(f"Prompt file not found for {x}")
+            new_prompt = ""
 
         return str(x), new_prompt
 
     def update_store(self):   
         self.entries = []
-        bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
+        bar = tqdm(total=-1, desc=f"Loading images", disable=self.rank not in [0, -1])
         folders = []
         for entry in self.dataset:
             if self.allow_duplicates and not isinstance(entry, str):
@@ -87,7 +93,25 @@ class ImageStore(torch.utils.data.IterableDataset):
             else:
                 folders.append(entry)
         
-        for entry in folders:            
+        for entry in folders:       
+            if Path(entry).suffix == ".json":
+                # load json and extract entries
+                # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": "", "train_width": 1024, "train_height": 1024}}
+                with open(entry, 'r') as f:
+                    data = json.load(f)
+                
+                for img_hash, img_info in data.items():
+                    if not img_info["train_use"]:
+                        continue
+                    prompt = img_info["train_caption"]
+                    _, skip = self.process_tags(prompt)
+                    if skip:
+                        continue
+                    size = (img_info["train_width"], img_info["train_height"])
+                    self.entries.append((img_hash, prompt, size))
+                    bar.update(1)
+                continue
+            
             for x in Path(entry).rglob("*"):
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
@@ -99,14 +123,15 @@ class ImageStore(torch.utils.data.IterableDataset):
                 if self.allow_duplicates:
                     prefix = binascii.hexlify(os.urandom(5))
                     img = f"{prefix}@{img}"
-                
-                self.entries.append((img, prompt))
+                    
+                image_size = self.read_img(x).size
+                self.entries.append((img, prompt, image_size))
                 bar.update(1)
 
         self._length = len(self.entries)
         random.shuffle(self.entries)
 
-    def read_img(self, filepath):  
+    def read_img(self, filepath):
         if self.allow_duplicates and "@" in filepath:
             filepath = filepath[filepath.index("@")+1:]    
         img = Image.open(filepath)
@@ -183,7 +208,7 @@ class ImageStore(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         for entry in self.entries[self.rank::self.world_size]:
-            instance_path, instance_prompt = entry
+            instance_path, instance_prompt, _ = entry
             
             instance_image = self.read_img(instance_path)
             img = self.image_transforms(instance_image)
@@ -211,8 +236,10 @@ class AspectRatioDataset(ImageStore):
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
         self.cache_target = kwargs.get("target", []) if self.cache_enabled else []
+        self.use_legacy_key = kwargs.get("use_legacy_key", False)
+        self.hashes = {}
         
-        for path, prompt in self.entries:
+        for path, prompt, _ in self.entries:
             self.prompt_cache[path] = prompt
             
         self.arb_config = arb_config
@@ -221,23 +248,15 @@ class AspectRatioDataset(ImageStore):
         else:
             rank_zero_print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
         
-        for path, prompt in self.entries:
+        for path, prompt, _ in self.entries:
             self.prompt_cache[path] = prompt
         
+        self.hash_all()
         self.init_buckets()
 
     def init_buckets(self):
-        entries = [x[0] for x in self.entries]
-        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
-        
-    def get_dict(self, entries):
-        id_size_map = {}
-        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
-            fp = entry[entry.index("@")+1:] if self.kwargs.get("allow_duplicates") else entry
-            with Image.open(fp) as img:
-                size = img.size
-            id_size_map[entry] = size
-        return id_size_map
+        id_size_map = {fp: size for fp, prompt, size in self.entries}
+        self.buckets = AspectRatioBucket(id_size_map, **self.arb_config)
         
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
@@ -270,6 +289,46 @@ class AspectRatioDataset(ImageStore):
 
         return new_img
     
+    def hash_all(self):
+        if self.use_legacy_key:
+            return
+         
+        sha1_pattern = re.compile(r"^[a-fA-F0-9]{40}$")
+        store = {}
+        for filepath, caption, size in tqdm(self.entries, desc="Hashing files", disable=self.rank not in [0, -1]):
+            if self.allow_duplicates and "@" in filepath:
+                filepath = filepath.split("@", 1)[-1]
+                
+            if sha1_pattern.match(filepath):
+                self.hashes[filepath] = filepath
+            else:           
+                with open(filepath, "rb") as f:
+                    file_hash = hashlib.sha1(f.read()).hexdigest()
+                self.hashes[filepath] = file_hash
+                
+            if self.rank in [0, -1]:
+                w, h = size
+                store[self.hashes[filepath]] = {
+                    "train_use": True, 
+                    "train_caption": caption, 
+                    "file_path": filepath,
+                    "train_width": w,
+                    "train_height": h,
+                }
+
+        if self.rank in [0, -1]:
+            # save hashes file 
+            # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": ""}}
+            with open("dataset.json", "w") as f:
+                json.dump(store, f, indent=4)
+            
+    def hash(self, fp):
+        if self.allow_duplicates and "@" in filepath:
+            filepath = filepath.split("@", 1)[-1]
+        if self.use_legacy_key:
+            return fp
+        return self.hashes[fp]
+        
     def setup_cache(self, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
         store = self.buckets
@@ -281,8 +340,10 @@ class AspectRatioDataset(ImageStore):
         cache_file = cache_dir / "cache.h5"
         if cache_file.exists():
             with h5py.File(cache_file, "r") as cache:
-                to_cache_images = self.cache_images and any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
-                to_cache_prompts = self.cache_prompts and any(f"{img}.crossattn" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                to_cache_images = self.cache_images and any(f"{self.hash(img)}.latents" not in cache \
+                    for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                to_cache_prompts = self.cache_prompts and any(f"{self.hash(img)}.crossattn" not in cache \
+                    for entry in store.buckets.keys() for img in store.buckets[entry][:])
                 if not to_cache_images and not to_cache_prompts:
                     rank_zero_print(f"Restored cache from {cache_file.absolute()}")
                     return True
@@ -315,7 +376,8 @@ class AspectRatioDataset(ImageStore):
                     end = len(imgs)
 
             for idx in range(start, end, stride):   
-                if self.cache_images and not all([f"{img}.latents" in cache for img in imgs[idx:idx+stride]]):
+                latents_allclose = all([f"{self.hash(img)}.latents" in cache for img in imgs[idx:idx+stride]]) 
+                if self.cache_images and not latents_allclose:
                     batch = []
                     for img in imgs[idx:idx+stride]:
                         img_data = self.read_img(img)
@@ -323,11 +385,17 @@ class AspectRatioDataset(ImageStore):
                         
                     latent = vae_encode_func(torch.stack(batch).cuda())
                     for img, latent in zip(imgs[idx:idx+stride], latent):
-                        img = str(img)
-                        cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
-                        cache.create_dataset(f"{img}.size", data=size)
+                        imghash = self.hash(img)
+                        # last check, if exists overwrite
+                        if f"{imghash}.latents" in cache:
+                            del cache[f"{imghash}.latents"]
+                            del cache[f"{imghash}.size"]
                         
-                if self.cache_prompts and not all([f"{img}.crossattn" in cache for img in imgs[idx:idx+stride]]):
+                        cache.create_dataset(f"{imghash}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
+                        cache.create_dataset(f"{imghash}.size", data=size)
+                        
+                prompts_allclose = all([f"{self.hash(img)}.crossattn" in cache for img in imgs[idx:idx+stride]]) 
+                if self.cache_prompts and not prompts_allclose:
                     prompt_batch = []
                     for img in imgs[idx:idx+stride]:
                         prompt_data = self.prompt_cache[img]
@@ -341,13 +409,20 @@ class AspectRatioDataset(ImageStore):
                     conds = token_encode_func(prompt)
                     conds, vectors = conds["crossattn"], conds.get("vector", None)
                     for idx, img in enumerate(imgs[idx:idx+stride]):
-                        img = str(img)
+                        imghash = self.hash(img)
+                        # last check, if exists overwrite
+                        if f"{imghash}.crossattn" in cache:
+                            del cache[f"{imghash}.crossattn"]
+                            
+                        if f"{imghash}.vec" in cache:
+                            del cache[f"{imghash}.vec"]
+                        
                         cond = conds[idx, ...]
-                        cache.create_dataset(f"{img}.crossattn", data=cond.detach().half().cpu().numpy())
+                        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
                         
                         if vectors is not None:
                             vec = vectors[idx, ...]
-                            cache.create_dataset(f"{img}.vec", data=vec.detach().half().cpu().numpy())
+                            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
 
                 progress_bar.update(len(imgs[idx:idx+stride]))
         progress_bar.close()
@@ -356,24 +431,26 @@ class AspectRatioDataset(ImageStore):
         item_id, size, = item["instance"], item["size"],
         cache_images = "images" in self.cache_target
         cache_prompts = "prompts" in self.cache_target
+
         
         result = {}
         if item_id == "":
             return {}
         
         if self.cache_enabled:
-            with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
+            cachekey = self.hash(item_id)
+            with h5py.File(Path(self.cache_dir) / "cache.h5", "r") as cache:
                 if cache_images:
-                    latent = torch.asarray(cache[f"{item_id}.latents"][:])
-                    latent_size = cache[f"{item_id}.size"][:]
+                    latent = torch.asarray(cache[f"{cachekey}.latents"][:])
+                    latent_size = cache[f"{cachekey}.size"][:]
                     estimate_size = latent_size[1] // 8, latent_size[0] // 8,
                     if latent.shape != (4, *estimate_size):
                         rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
                     result.update({"latents": latent})
                 if cache_prompts:
-                    prompt = {"crossattn": torch.asarray(cache[f"{item_id}.crossattn"][:])}   
-                    if f"{item_id}.vec" in cache:
-                        prompt.update({"vector": torch.asarray(cache[f"{item_id}.vec"][:])}) 
+                    prompt = {"crossattn": torch.asarray(cache[f"{cachekey}.crossattn"][:])}   
+                    if f"{cachekey}.vec" in cache:
+                        prompt.update({"vector": torch.asarray(cache[f"{cachekey}.vec"][:])}) 
                     result.update({"conds": prompt})
                 if len(result) == 2:
                     return result

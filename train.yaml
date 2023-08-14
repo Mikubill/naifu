@@ -31,13 +31,12 @@ cache:
   enabled: true
   cache_bsz: 8
   cache_dir: cache
+  use_legacy_key: false
   target: ["images"] #[images, prompts]
 
 dataset:
-  img_path: 
-    - "/notebooks/PVC-XL"
-  tag_processor: 
-    - data.processors.shuffle_prompts
+  img_path: "/notebooks/PVC-XL"
+  tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
   max_token_length: 150 # [75, 150, 225]
@@ -50,6 +49,10 @@ optimizer:
   # params: 
   #   relative_step: True
   name: bitsandbytes.optim.PagedAdamW8bit
+  # layer_lr: 
+  #   - '^input_blocks\.[0-8]\..*$': 5e-7
+  #   - '^middle_block\.[0-2]\..*$': 5e-7
+  #   - '^output_blocks\.[0-8]\..*$': 5e-7
   params:
     lr: 2e-6
     weight_decay: 1e-2
@@ -57,7 +60,7 @@ optimizer:
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 100
+    num_warmup_steps: 0.5
     last_epoch: -1
 
 sampling:

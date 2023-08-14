@@ -3,6 +3,7 @@ import copy
 import glob
 import os
 import h5py
+import re
 
 # Hide welcome message from bitsandbytes
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
@@ -48,16 +49,13 @@ def setup_model(config, farbic):
     if config.get("arb", None) is None:
         # calculate arb from resolution
         base = config.trainer.resolution
-        c_size = 1.5
-        c_mult_min = 2
-        c_mult_max = 1.75 if base >= 1024 else 2
         arb_config.update({
             "base_res": (base, base),
-            "max_size": (int(base*c_size), base),
+            "max_size": (base, base),
             "divisible": 64,
             "max_ar_error": 4,
-            "min_dim": int(base // c_mult_min),
-            "dim_limit": int(base * c_mult_max),
+            "min_dim": int(base // 2),
+            "dim_limit": int(base * 2),
             "debug": False
         })
     else:
@@ -172,16 +170,16 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                     
             optimizer.step()
             optimizer.zero_grad(set_to_none=True) 
-            last_lr = optimizer.param_groups[0].get("lr", 0)
+            last_lr = [group.get("lr", 0) for group in optimizer.param_groups]
                 
             # use float as epoch
             if scheduler is not None:
                 scheduler.step(current_epoch + batch_idx / len(dataloader))
-                last_lr = scheduler.get_last_lr()[0]
                     
             if cfg.wandb_id != "":
                 fabric.log("train_loss", loss, step=global_step)
-                fabric.log("learn_rate", last_lr, step=global_step)
+                for i, lr in enumerate(last_lr):
+                    fabric.log(f"lr-{optimizer.__class__.__name__}-{i}", lr, step=global_step)
 
             if cfg.use_ema and fabric.is_global_zero: 
                 model.model_ema(model.model)
@@ -260,6 +258,13 @@ def combine_h5_files_with_vds(output, *input_files):
         for input_file in tqdm(input_files):
             with h5py.File(input_file, 'r') as fi:
                 create_vds_for_group(fi, fo)
+                
+def get_lr_for_name(name, lr_conf):
+    for item in lr_conf:
+        regex_pattern, lr = list(item.items())[0]
+        if re.match(regex_pattern, name):
+            return lr
+    return None
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -283,9 +288,30 @@ def main(args):
     fabric.seed_everything(config.trainer.seed)
     
     model, dataset, dataloader = setup_model(config, fabric)
-    params_to_optim = [{'params': model.model.parameters()}]
+    lr_conf = config.optimizer.get("layer_lr", None)
+    if lr_conf:
+        lr_groups = {}  # Dictionary to store parameters grouped by their LR
+        params_without_lr = []
+        
+        for name, param in model.model.diffusion_model.named_parameters():
+            layer_lr = get_lr_for_name(name, lr_conf)
+            if layer_lr:
+                if layer_lr not in lr_groups:
+                    lr_groups[layer_lr] = []
+                lr_groups[layer_lr].append(param)
+            else:
+                params_without_lr.append(param)
+
+        params_to_optim = []
+        for lr, params in lr_groups.items():
+            params_to_optim.append({'params': params, 'lr': lr})
+        if params_without_lr:
+            params_to_optim.append({'params': params_without_lr})
+    else:
+        params_to_optim = [{'params': model.model.parameters()}]   
+
+
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
-    
     if fabric.is_global_zero and os.name != 'nt':
         print(f"\n{ModelSummary(model, max_depth=1)}")
 

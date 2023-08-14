@@ -117,8 +117,10 @@ class StableDiffusionModel(pl.LightningModule):
         
         encoder = AutoencoderKLWrapper(**model_params.first_stage_config.params).eval()
         encoder.train = disabled_train
+        encoder.requires_grad_(False)
         for param in encoder.parameters():
             param.requires_grad = False
+            
         self.first_stage_model = encoder
         self.scale_factor = model_params.scale_factor
         
@@ -155,7 +157,7 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.cast_dtype = torch.float32
         self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
-        self.get_conditioner().to(torch.float16).requires_grad_(False)
+        self.get_conditioner().to(torch.float16)
         
         if config.trainer.use_ema: 
             self.model_ema = LitEma(self.model.parameters(), decay=0.9999)
