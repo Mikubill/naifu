@@ -239,18 +239,16 @@ def cast_precision(tensor, precision):
 def create_vds_for_group(source_group, target_group, bar):
     for key, item in source_group.items():
         if key in target_group:
-            if key.endswith(".latents"):
-                bar.update(1)
+            if key.endswith(".latents"): bar.update(1)
             continue
         layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
         layout[:] = h5py.VirtualSource(item)
         target_group.create_virtual_dataset(key, layout)
-        if key.endswith(".latents"):
-            bar.update(1)
+        if key.endswith(".latents"): bar.update(1)
 
 @rank_zero_only
 def update_cache_index(cache_dir):
-    cache_parts = list(Path(cache_dir).glob("cache*.h5"))
+    cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
     with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
         bar = tqdm(desc="Updating index")
         for input_file in cache_parts:
@@ -336,10 +334,11 @@ def main(args):
     
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
-        dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
+        allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
 
         fabric.barrier()
-        update_cache_index(config.cache.cache_dir)
+        if not allclose:
+            update_cache_index(config.cache.cache_dir)
 
     fabric.barrier()
     torch.cuda.empty_cache()        
