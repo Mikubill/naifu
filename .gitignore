@@ -13,3 +13,4 @@ samples/
 *.ckpt
 *.safetensors
 cache/
+dataset.json

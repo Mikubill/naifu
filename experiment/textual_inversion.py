@@ -1,4 +1,3 @@
-import math
 import re
 from lib.model import StableDiffusionModel, get_class
 import torch
@@ -6,6 +5,7 @@ from pathlib import Path
 from lightning.pytorch import Callback
 from transformers import CLIPTokenizer, CLIPTextModel
 from lightning.pytorch.utilities import rank_zero_only
+from lib.utils import rank_zero_print
 
 class Embedding:
     def __init__(self, vec, name, step=None):
@@ -99,7 +99,7 @@ class CustomEmbeddingsCallback(Callback):
                 notused.append(n)
                 
         if len(notused) > 0:        
-            print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: {notused}")
+            rank_zero_print(f"Some embeddings will not be trained due to a lack of corresponding prompt entries: {notused}")
                     
     def parse_prompt(self, prompt: str):
         """Parse a prompt string into a list of embedding names and a list of tokens.
@@ -120,7 +120,7 @@ class CustomEmbeddingsCallback(Callback):
         emb_path = self.save_path / f"{emb_name}_s0.pt"
         embedding = Embedding(vec, emb_name, step=0)
         embedding.save(emb_path)
-        print(f"Created: {emb_path} \t[{vec.shape[0]},{vec.shape[1]}]")
+        rank_zero_print(f"Created: {emb_path} \t[{vec.shape[0]},{vec.shape[1]}]")
         return emb_name, vec
 
     @staticmethod
@@ -146,7 +146,7 @@ class CustomEmbeddingsCallback(Callback):
             raise Exception(f"Couldn't identify {filename} as neither textual inversion embedding nor diffuser concept.")
 
         vec = emb.detach().to(model.device, dtype=torch.float32)
-        print(f"Loaded: {path} \t[{vec.shape[0]},{vec.shape[1]}]")
+        rank_zero_print(f"Loaded: {path} \t[{vec.shape[0]},{vec.shape[1]}]")
         return filename, vec
 
     @staticmethod
@@ -276,7 +276,7 @@ class CustomEmbeddingsCallback(Callback):
         new_lr, scaled = pl_module.get_scaled_lr(self.config.trainer.lr)
         if scaled:
             self.config.trainer.lr = new_lr
-            rank_zero_only(print(f"Using scaled embeddings LR: {self.config.trainer.lr}"))
+            rank_zero_print(f"Using scaled embeddings LR: {self.config.trainer.lr}")
         
         assert len(optimizers) == 1, "Expect only one optimizer in StableDiffusionModel"
         if not self.config.freeze_unet:

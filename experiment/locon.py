@@ -6,7 +6,8 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import diffusers
 import lightning.pytorch as pl
-from lib.model import StableDiffusionModel, get_class, min_snr_weighted_loss
+from lib.model import StableDiffusionModel, get_class
+from lib.utils import rank_zero_print
 
 class LoConBaseModel(torch.nn.Module):
     
@@ -24,8 +25,8 @@ class LoConBaseModel(torch.nn.Module):
             unet_modules = ["Transformer2DModel", "ResnetBlock2D", "Downsample2D", "Upsample2D"]
         self.unet_loras = self.create_modules('lora_unet', unet, unet_modules, alpha, dropout)
             
-        print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
-        print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
+        rank_zero_print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
+        rank_zero_print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
         
         names = set()
         for lora in self.text_encoder_loras + self.unet_loras:
@@ -163,7 +164,7 @@ class LoConDiffusionModel(StableDiffusionModel):
         if self.config.lora.train_unet:
             new_unet_lr, scaled = self.get_scaled_lr(self.config.lora.unet_lr)
             if scaled:
-                print(f"Using scaled unet LR (LoRA): {new_unet_lr}")
+                rank_zero_print(f"Using scaled unet LR (LoRA): {new_unet_lr}")
             params_to_optim.append({
                 'params': enumerate_params(self.lora.unet_loras),
                 'lr': new_unet_lr
@@ -172,7 +173,7 @@ class LoConDiffusionModel(StableDiffusionModel):
         if self.config.lora.train_text_encoder:
             new_encoder_lr, scaled = self.get_scaled_lr(self.config.lora.encoder_lr)
             if scaled:
-                print(f"Using scaled text_encoder LR (LoRA): {new_encoder_lr}")
+                rank_zero_print(f"Using scaled text_encoder LR (LoRA): {new_encoder_lr}")
             params_to_optim.append({
                 'params': enumerate_params(self.lora.text_encoder_loras),
                 'lr': new_encoder_lr

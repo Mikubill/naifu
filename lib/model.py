@@ -1,5 +1,6 @@
 
-import math
+import math, glob, h5py, time
+from tqdm import tqdm
 
 import lightning.pytorch as pl
 import torch
@@ -8,10 +9,10 @@ import torch.utils.checkpoint
 from pathlib import Path
 from data.store import AspectRatioDataset, ImageStore
 from diffusers import StableDiffusionPipeline
-from lightning.pytorch.utilities import rank_zero_only
 from torch_ema import ExponentialMovingAverage
 from lib.utils import get_local_rank, get_world_size
-from lib.utils import convert_to_sd, convert_to_df
+from lib.utils import convert_to_sd, convert_to_df, rank_zero_print
+from lightning.pytorch.utilities import rank_zero_only
 
 # define the LightningModule
 
@@ -22,6 +23,27 @@ def get_class(name: str):
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
+def create_vds_for_group(source_group, target_group, vds_prefix=''):
+    for key, item in source_group.items():
+        if isinstance(item, h5py.Dataset):
+            vds_name = f"{vds_prefix}/{key}"
+            if vds_name in target_group:
+                continue
+            layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
+            layout[:] = h5py.VirtualSource(item)
+            target_group.create_virtual_dataset(vds_name, layout)
+            
+        elif isinstance(item, h5py.Group):
+            new_target_group = target_group.require_group(key)
+            new_prefix = f"{vds_prefix}/{key}"
+            create_vds_for_group(item, new_target_group, new_prefix)
+            
+@rank_zero_only
+def combine_h5_files_with_vds(output, *input_files):
+    with h5py.File(output, 'w', libver='latest') as fo:  # using 'latest' for VDS support
+        for input_file in tqdm(input_files):
+            with h5py.File(input_file, 'r') as fi:
+                create_vds_for_group(fi, fo)
 
 def get_pipeline(model_path):
     if Path(model_path).is_file():
@@ -48,7 +70,6 @@ def get_pipeline(model_path):
         pipeline = StableDiffusionPipeline.from_pretrained(model_path)
         
     return pipeline
-
 
 def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, snr_gamma):
     """
@@ -114,7 +135,7 @@ class StableDiffusionModel(pl.LightningModule):
         try:
             torch.compile(self.unet, mode="max-autotune", fullgraph=True, dynamic=True)
         except Exception as e:
-            print(f"Skip compiling: {e}")
+            rank_zero_print(f"Skip compiling: {e}")
 
         if hasattr(self, "vae"):
             self.vae.requires_grad_(False)
@@ -163,16 +184,15 @@ class StableDiffusionModel(pl.LightningModule):
             # calculate arb from resolution
             dataset_cls = AspectRatioDataset
             base = self.config.trainer.resolution
-            c_size = 1.5
-            c_mult_min = 2
-            c_mult_max = 1.75 if base >= 1024 else 2
+            c_size = 1.5 if base < 1024 else 1
+            c_mult = 2
             arb_config.update({
                 "base_res": (base, base),
                 "max_size": (int(base*c_size), base),
                 "divisible": 64,
                 "max_ar_error": 4,
-                "min_dim": int(base // c_mult_min),
-                "dim_limit": int(base * c_mult_max),
+                "min_dim": int(base // c_mult),
+                "dim_limit": int(base * c_mult),
                 "debug": False
             })
         else:
@@ -380,7 +400,7 @@ class StableDiffusionModel(pl.LightningModule):
         new_lr, scaled = self.get_scaled_lr(self.config.optimizer.params.lr)
         if scaled:
             self.config.optimizer.params.lr = new_lr
-            rank_zero_only(print(f"Using scaled LR: {self.config.optimizer.params.lr}"))
+            rank_zero_print(f"Using scaled LR: {self.config.optimizer.params.lr}")
 
         params_to_optim = [{'params': self.unet.parameters()}]
         
@@ -410,7 +430,20 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.to(self.device, dtype=self.unet.dtype)
 
         if self.use_latent_cache:
-            self.dataset.cache_latents(self.encode_pixels)
+            allclose = self.dataset.cache_latents(self.encode_pixels)
+
+            world_size = get_world_size()
+            cache_dir = self.config.dataset.get("cache_dir", "cache")
+            if not allclose and world_size > 1:
+                self.trainer.strategy.barrier()
+                cache_file_path = str(Path(cache_dir) / "cache.h5")
+                cache_parts_path = str(Path(cache_dir) / "cache_r*.h5")
+                cache_parts = glob.glob(cache_parts_path)
+                if len(cache_parts) > 1:
+                    combine_h5_files_with_vds(cache_file_path, *cache_parts)
+                    
+            # wait for all processes to finish combining the cache
+            self.trainer.strategy.barrier()
 
     def on_train_epoch_start(self) -> None:
         if self.use_latent_cache and hasattr(self, "vae"):
@@ -425,7 +458,10 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.update()
 
     def on_save_checkpoint(self, checkpoint):
-        state_dict = convert_to_sd(checkpoint["state_dict"])
+        state_dict = checkpoint["state_dict"]
+        if not self.is_sdxl:
+            state_dict = convert_to_sd(checkpoint["state_dict"])
+            
         if self.config.checkpoint.get("extended"):
             if self.config.checkpoint.extended.save_fp16_weights:
                 state_dict = {k: v.to(torch.float16) for k, v in state_dict.items()}

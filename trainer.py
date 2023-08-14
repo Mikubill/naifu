@@ -21,6 +21,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.strategies import SingleDeviceStrategy
 from lightning.pytorch import seed_everything
+from lib.utils import rank_zero_print
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -37,6 +38,7 @@ def main(args):
         from lib.hivemind import init_hivemind
         strategy = init_hivemind(config)
 
+    rank_zero_print(f"Loading model from {args.model_path}")
     pipeline = get_pipeline(args.model_path)
     if config.get("lora"):
         if config.lora.get("use_locon"):

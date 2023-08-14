@@ -46,7 +46,7 @@ lightning:
   gradient_clip_val: 0.0
 
 dataset:
-  img_path: "/notebooks/rurudo_lion"
+  img_path: "/notebooks/Blue_Archive"
   tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1

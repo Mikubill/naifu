@@ -29,6 +29,7 @@ from diffusers.pipelines.stable_diffusion.convert_from_ckpt import (
     create_vae_diffusers_config
 )
 from . import diffusers_convert
+from lightning.pytorch.utilities import rank_zero_only
 
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
@@ -36,6 +37,10 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
+
+@rank_zero_only
+def rank_zero_print(*args, **kwargs):
+    print(*args, **kwargs)
 
 def get_world_size() -> int:
     # if config is not None and config.lightning.accelerator == "tpu":
@@ -169,8 +174,8 @@ def convert_to_df(checkpoint, return_pipe=False):
             "steps_offset": 1,
             "timestep_spacing": "leading",
         }
-        scheduler = EulerDiscreteScheduler.from_config(scheduler_dict)
-        scheduler_type = "euler"
+        scheduler = DDIMScheduler.from_config(scheduler_dict)
+        # scheduler_type = "euler"
     else:
         beta_start = getattr(original_config.model.params, "linear_start", None) or 0.02
         beta_end = getattr(original_config.model.params, "linear_end", None) or 0.085

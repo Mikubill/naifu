@@ -1,18 +1,18 @@
-import json
+import hashlib
 import os
 import random
 import torch
+import h5py
 import os, binascii
+import re, json
 import numpy as np
 
-from PIL import Image
 from pathlib import Path
+from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
-from lib.utils import get_local_rank
 from data.buckets import AspectRatioBucket
-from lib.utils import get_local_rank, get_world_size
-from lightning.pytorch.utilities import rank_zero_only
+from lib.utils import rank_zero_print, get_local_rank, get_world_size
 
 def get_class(name: str):
     import importlib
@@ -35,19 +35,18 @@ class ImageStore(torch.utils.data.IterableDataset):
         ucg=0,
         rank=0,
         tag_processor=[],
-        important_tags=[],
         allow_duplicates=False,
         **kwargs
     ):
         self.size = size
-        self.tag_processor = tag_processor
         self.center_crop = center_crop
         self.ucg = ucg
-        self.rank = rank
+        self.rank = get_local_rank()
+        self.world_size = get_world_size()
         self.dataset = img_path
         self.use_latent_cache = False
         self.allow_duplicates = allow_duplicates
-        self.important_tags = important_tags
+        
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
@@ -75,15 +74,19 @@ class ImageStore(torch.utils.data.IterableDataset):
         img_item = (x, "")
         fp = os.path.splitext(x)[0]
 
-        with open(fp + ".txt") as f:
-            content = f.read()
-            new_prompt = content
+        try:
+            with open(fp + ".txt") as f:
+                content = f.read()
+                new_prompt = content
+        except FileNotFoundError:
+            rank_zero_print(f"Prompt file not found for {x}")
+            new_prompt = ""
 
         return str(x), new_prompt
 
     def update_store(self):   
         self.entries = []
-        bar = tqdm(total=-1, desc=f"Loading captions", disable=self.rank not in [0, -1])
+        bar = tqdm(total=-1, desc=f"Loading images", disable=self.rank not in [0, -1])
         folders = []
         for entry in self.dataset:
             if self.allow_duplicates and not isinstance(entry, str):
@@ -91,7 +94,25 @@ class ImageStore(torch.utils.data.IterableDataset):
             else:
                 folders.append(entry)
         
-        for entry in folders:            
+        for entry in folders:       
+            if Path(entry).suffix == ".json":
+                # load json and extract entries
+                # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": "", "train_width": 1024, "train_height": 1024}}
+                with open(entry, 'r') as f:
+                    data = json.load(f)
+                
+                for img_hash, img_info in data.items():
+                    if not img_info["train_use"]:
+                        continue
+                    prompt = img_info["train_caption"]
+                    _, skip = self.process_tags(prompt)
+                    if skip:
+                        continue
+                    size = (img_info["train_width"], img_info["train_height"])
+                    self.entries.append((img_hash, prompt, size))
+                    bar.update(1)
+                continue
+            
             for x in Path(entry).rglob("*"):
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
@@ -103,8 +124,9 @@ class ImageStore(torch.utils.data.IterableDataset):
                 if self.allow_duplicates:
                     prefix = binascii.hexlify(os.urandom(5))
                     img = f"{prefix}@{img}"
-                
-                self.entries.append((img, prompt))
+                    
+                image_size = self.read_img(x).size
+                self.entries.append((img, prompt, image_size))
                 bar.update(1)
 
         self._length = len(self.entries)
@@ -113,10 +135,12 @@ class ImageStore(torch.utils.data.IterableDataset):
     def cache_latents(self, vae, config=None):
         self.use_latent_cache = True
         self.latents_cache = {}
-        for entry in tqdm(self.entries, desc=f"Caching latents", disable=get_local_rank() not in [0, -1]):
+        for entry in tqdm(self.entries, desc=f"Caching latents", disable=self.rank not in [0, -1]):
             image = torch.stack([self.image_transforms(self.read_img(entry[0]))])
             latent = vae(image.to(vae.device, dtype=vae.dtype))
             self.latents_cache[entry[0]] = latent.detach().squeeze(0).cpu()
+            
+        return False
 
     def read_img(self, filepath):  
         if self.allow_duplicates and "@" in filepath:
@@ -172,26 +196,30 @@ class ImageStore(torch.utils.data.IterableDataset):
         return result
 
     def __len__(self):
-        return self._length // get_world_size()
+        return self._length // self.world_size
 
     def __iter__(self):
-        local_rank = get_local_rank() if get_local_rank() != -1 else 0
-        for entry in self.entries[local_rank::get_world_size()]:
+        local_rank = self.rank if self.rank != -1 else 0
+        for entry in self.entries[local_rank::self.world_size]:
             example = {}
-            instance_path, instance_prompt = entry
+            instance_path, instance_prompt, size = entry
             
             if self.use_latent_cache:
                 example["images"] = self.latents_cache[instance_path]
             else:
                 instance_image = self.read_img(instance_path)
                 example["images"] = self.image_transforms(instance_image)
-                
+            
+            w, h  = size
             example["prompts"] = instance_prompt
+            example["target_size_as_tuple"] = (h, w)
+            example["original_size_as_tuple"] = (h, w)
+            example["crop_coords_top_left"] = (0, 0)
             yield example
 
 
 class AspectRatioDataset(ImageStore):
-    def __init__(self, arb_config={}, debug_arb=False, **kwargs):
+    def __init__(self, arb_config, debug_arb=False, **kwargs):
         super().__init__(**kwargs)
         self.debug = debug_arb
         self.prompt_cache = {}
@@ -199,75 +227,27 @@ class AspectRatioDataset(ImageStore):
         self.cache_enabled = kwargs.get("cache_latents", False)
         self.cache_dir = kwargs.get("cache_dir", "cache")
         self.cache_bsz = kwargs.get("cache_bsz", 4)
+        self.use_legacy_key = kwargs.get("use_legacy_key", False)
+        self.hashes = {}
 
         self.arb_config = arb_config
         if arb_config["debug"]:
-            print(f"BucketManager initialized using config: {self.arb_config}")
+            rank_zero_print(f"BucketManager initialized using config: {self.arb_config}")
         else:
-            print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
+            rank_zero_print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
         
-        for path, prompt in self.entries:
+        for path, prompt, size in self.entries:
             self.prompt_cache[path] = prompt
         
+        if self.cache_enabled:
+            self.hash_all()
+            
         self.init_buckets()
-
+        
     def init_buckets(self):
-        entries = [x[0] for x in self.entries]
-        self.buckets = AspectRatioBucket(self.get_dict(entries), **self.arb_config)
-        
-    def get_dict(self, entries):
-        id_size_map = {}
-        for entry in tqdm(iter(entries), desc=f"Loading resolutions", disable=self.rank not in [0, -1]):
-            fp = entry[entry.index("@")+1:] if self.kwargs.get("allow_duplicates") else entry
-            with Image.open(fp) as img:
-                size = img.size
-            id_size_map[entry] = size
-        return id_size_map
-            
-    @rank_zero_only
-    def cache_latents(self, vae):
-        import h5py
-        
-        cache_dir = Path(self.cache_dir)
-        store = self.buckets
-        if not cache_dir.exists():
-            cache_dir.mkdir(parents=True, exist_ok=True)
+        id_size_map = {fp: size for fp, prompt, size in self.entries}
+        self.buckets = AspectRatioBucket(id_size_map, **self.arb_config)
 
-        cache_file = cache_dir / "cache.h5"
-        if cache_file.exists():
-            
-            with h5py.File(cache_file, "r") as cache:
-                to_cache_images = any(f"{img}.latents" not in cache for entry in store.buckets.keys() for img in store.buckets[entry][:])
-                if not to_cache_images:
-                    print(f"Restored cache from {cache_file.absolute()}")
-                    return
-            
-        with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
-            self.fulfill_cache(cache, vae, store)
-
-    def fulfill_cache(self, cache, vae_encode_func, store):
-        progress_bar = tqdm(total=len(self.entries), desc=f"Caching", disable=self.rank not in [0, -1])
-        for entry in store.buckets.keys():
-            size = store.resolutions[entry]
-            imgs = store.buckets[entry][:]
-            stride = self.cache_bsz
-            for idx in range(0, len(imgs), stride):                
-   
-                if not all([f"{img}.latents" in cache for img in imgs[idx:idx+stride]]):
-                    batch = []
-                    for img in imgs[idx:idx+stride]:
-                        img_data = self.read_img(img)
-                        batch.append(self.transformer(img_data, size, center_crop=True))
-                        
-                    latent = vae_encode_func(torch.stack(batch).cuda())
-                    for img, latent in zip(imgs[idx:idx+stride], latent):
-                        img = str(img)
-                        cache.create_dataset(f"{img}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
-                        cache.create_dataset(f"{img}.size", data=size)
-
-                progress_bar.update(len(imgs[idx:idx+stride]))
-        progress_bar.close()
-        
     def denormalize(self, img, mean=0.5, std=0.5):
         res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
         res = torch.clamp(res, 0, 1)
@@ -298,6 +278,122 @@ class AspectRatioDataset(ImageStore):
         new_img = image_transforms(img)
         return new_img
 
+    def hash_all(self):
+        if self.use_legacy_key:
+            return
+         
+        sha1_pattern = re.compile(r"^[a-fA-F0-9]{40}$")
+        store = {}
+        for filepath, caption, size in tqdm(self.entries, desc="Hashing files", disable=self.rank not in [0, -1]):
+            if self.allow_duplicates and "@" in filepath:
+                filepath = filepath.split("@", 1)[-1]
+                
+            if sha1_pattern.match(filepath):
+                self.hashes[filepath] = filepath
+            else:           
+                with open(filepath, "rb") as f:
+                    file_hash = hashlib.sha1(f.read()).hexdigest()
+                self.hashes[filepath] = file_hash
+                
+            if self.rank in [0, -1]:
+                w, h = size
+                store[self.hashes[filepath]] = {
+                    "train_use": True, 
+                    "train_caption": caption, 
+                    "file_path": filepath,
+                    "train_width": w,
+                    "train_height": h,
+                }
+
+        if self.rank in [0, -1]:
+            # save hashes file 
+            # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": ""}}
+            with open("dataset.json", "w") as f:
+                json.dump(store, f, indent=4)
+            
+    def hash(self, fp):
+        if self.cache_enabled and len(self.hashes) == 0:
+            # read hashes from dataset.json
+            with open("dataset.json", "r") as f:
+                store = json.load(f)
+            self.hashes = {v["file_path"]: k for k, v in store.items()}
+                    
+        if self.allow_duplicates and "@" in filepath:
+            filepath = filepath.split("@", 1)[-1]
+            
+        if self.use_legacy_key:
+            return fp
+        
+        return self.hashes[fp]
+        
+    def cache_latents(self, vae):
+        import h5py
+        
+        cache_dir = Path(self.cache_dir)
+        store = self.buckets
+        if not cache_dir.exists():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+        cache_file = cache_dir / "cache.h5"
+        if cache_file.exists():
+            with h5py.File(cache_file, "r") as cache:
+                to_cache_images = any(f"{self.hash(img)}.latents" not in cache \
+                    for entry in store.buckets.keys() for img in store.buckets[entry][:])
+                if not to_cache_images:
+                    rank_zero_print(f"Restored cache from {cache_file.absolute()}")
+                    return True
+            
+        if self.world_size > 1:
+            cache_file = cache_dir / f"cache_r{self.rank}.h5"  
+            
+        with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
+            self.fulfill_cache(cache, vae, store)
+            
+        return False
+
+    def fulfill_cache(self, cache, vae_encode_func, store):
+        progress_bar = tqdm(total=len(self.entries) // self.world_size, \
+            desc=f"Caching", disable=self.rank not in [0, -1])
+        
+        for entry in store.buckets.keys():
+            size = store.resolutions[entry]
+            imgs = store.buckets[entry][:]
+            stride = self.cache_bsz
+            start, end = 0, len(imgs)
+
+            if self.world_size > 1:
+                # divide the work among the ranks
+                per_rank = len(imgs) // self.world_size
+                start = self.rank * per_rank
+                end = start + per_rank
+                
+                # handle the case where len(imgs) is not a multiple of self.world_size
+                # give the remaining tasks to the last rank
+                if self.rank == self.world_size - 1:
+                    end = len(imgs)
+                    
+            for idx in range(start, end, stride):   
+                latents_allclose = all([f"{self.hash(img)}.latents" in cache for img in imgs[idx:idx+stride]]) 
+                if not latents_allclose:
+                    batch = []
+                    for img in imgs[idx:idx+stride]:
+                        img_data = self.read_img(img)
+                        batch.append(self.transformer(img_data, size, center_crop=True))
+                        
+                    latent = vae_encode_func(torch.stack(batch).cuda())
+                    for img, latent in zip(imgs[idx:idx+stride], latent):
+                        imghash = self.hash(img)
+                        # last check, if exists overwrite
+                        if f"{imghash}.latents" in cache:
+                            del cache[f"{imghash}.latents"]
+                            del cache[f"{imghash}.size"]
+                        
+                        cache.create_dataset(f"{imghash}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
+                        cache.create_dataset(f"{imghash}.size", data=size)
+
+                progress_bar.update(len(imgs[idx:idx+stride]))
+        progress_bar.close()
+        
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
 
@@ -311,12 +407,13 @@ class AspectRatioDataset(ImageStore):
         example = {f"prompts": prompt}
         if self.cache_enabled:
             import h5py
-            with h5py.File(Path(self.cache_dir) / "cache.h5") as cache:
-                latent = torch.asarray(cache[f"{item_id}.latents"][:])
-                original_size = cache[f"{item_id}.size"][:]
+            cachekey = self.hash(item_id)
+            with h5py.File(Path(self.cache_dir) / "cache.h5", "r") as cache:
+                latent = torch.asarray(cache[f"{cachekey}.latents"][:])
+                original_size = cache[f"{cachekey}.size"][:]
                 estimate_size = original_size[1] // 8, original_size[0] // 8,
                 if latent.shape != (4, *estimate_size):
-                    print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
+                    rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
                     
                 w, h = original_size
                 _, h1, w1 = latent.shape
@@ -340,7 +437,7 @@ class AspectRatioDataset(ImageStore):
         return example
     
     def __len__(self):
-        return len(self.buckets.res_map) // get_world_size() 
+        return len(self.buckets.res_map) // self.world_size
 
     def __iter__(self):
         for batch, size in self.buckets.generator():
