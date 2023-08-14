@@ -23,27 +23,24 @@ def get_class(name: str):
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
-def create_vds_for_group(source_group, target_group, vds_prefix=''):
+def create_vds_for_group(source_group, target_group, bar):
     for key, item in source_group.items():
-        if isinstance(item, h5py.Dataset):
-            vds_name = f"{vds_prefix}/{key}"
-            if vds_name in target_group:
-                continue
-            layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
-            layout[:] = h5py.VirtualSource(item)
-            target_group.create_virtual_dataset(vds_name, layout)
-            
-        elif isinstance(item, h5py.Group):
-            new_target_group = target_group.require_group(key)
-            new_prefix = f"{vds_prefix}/{key}"
-            create_vds_for_group(item, new_target_group, new_prefix)
-            
+        if key in target_group:
+            if key.endswith(".latents"): bar.update(1)
+            continue
+        layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
+        layout[:] = h5py.VirtualSource(item)
+        target_group.create_virtual_dataset(key, layout)
+        if key.endswith(".latents"): bar.update(1)
+
 @rank_zero_only
-def combine_h5_files_with_vds(output, *input_files):
-    with h5py.File(output, 'w', libver='latest') as fo:  # using 'latest' for VDS support
-        for input_file in tqdm(input_files):
+def update_cache_index(cache_dir):
+    cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
+    with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
+        bar = tqdm(desc="Updating index")
+        for input_file in cache_parts:
             with h5py.File(input_file, 'r') as fi:
-                create_vds_for_group(fi, fo)
+                create_vds_for_group(fi, fo, bar)
 
 def get_pipeline(model_path):
     if Path(model_path).is_file():
@@ -430,17 +427,11 @@ class StableDiffusionModel(pl.LightningModule):
             self.ema.to(self.device, dtype=self.unet.dtype)
 
         if self.use_latent_cache:
-            allclose = self.dataset.cache_latents(self.encode_pixels)
-
-            world_size = get_world_size()
             cache_dir = self.config.dataset.get("cache_dir", "cache")
-            if not allclose and world_size > 1:
-                self.trainer.strategy.barrier()
-                cache_file_path = str(Path(cache_dir) / "cache.h5")
-                cache_parts_path = str(Path(cache_dir) / "cache_r*.h5")
-                cache_parts = glob.glob(cache_parts_path)
-                if len(cache_parts) > 1:
-                    combine_h5_files_with_vds(cache_file_path, *cache_parts)
+            update_cache_index(cache_dir)
+            allclose = self.dataset.cache_latents(self.encode_pixels)
+            if not allclose:
+                update_cache_index(cache_dir)
                     
             # wait for all processes to finish combining the cache
             self.trainer.strategy.barrier()

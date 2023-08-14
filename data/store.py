@@ -334,18 +334,14 @@ class AspectRatioDataset(ImageStore):
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        cache_file = cache_dir / "cache.h5"
-        if cache_file.exists():
-            with h5py.File(cache_file, "r") as cache:
-                to_cache_images = any(f"{self.hash(img)}.latents" not in cache \
-                    for entry in store.buckets.keys() for img in store.buckets[entry][:])
-                if not to_cache_images:
-                    rank_zero_print(f"Restored cache from {cache_file.absolute()}")
-                    return True
+        with h5py.File("cache_index.tmp", "r", libver='latest', driver='core') as cache:
+            to_cache_images = any(f"{self.hash(img)}.latents" not in cache \
+                for entry in store.buckets.keys() for img in store.buckets[entry][:])
+            if not to_cache_images:
+                rank_zero_print(f"Restored cache from {cache_dir.absolute()}")
+                return True
             
-        if self.world_size > 1:
-            cache_file = cache_dir / f"cache_r{self.rank}.h5"  
-            
+        cache_file = cache_dir / f"cache_r{self.rank}.h5"      
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae, store)
             
@@ -408,7 +404,7 @@ class AspectRatioDataset(ImageStore):
         if self.cache_enabled:
             import h5py
             cachekey = self.hash(item_id)
-            with h5py.File(Path(self.cache_dir) / "cache.h5", "r") as cache:
+            with h5py.File("cache_index.tmp", "r", libver='latest', driver='core') as cache:
                 latent = torch.asarray(cache[f"{cachekey}.latents"][:])
                 original_size = cache[f"{cachekey}.size"][:]
                 estimate_size = original_size[1] // 8, original_size[0] // 8,
