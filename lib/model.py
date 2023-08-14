@@ -1,5 +1,5 @@
 
-import math, glob, h5py, time
+import math, h5py, os
 from tqdm import tqdm
 
 import lightning.pytorch as pl
@@ -35,12 +35,18 @@ def create_vds_for_group(source_group, target_group, bar):
 
 @rank_zero_only
 def update_cache_index(cache_dir):
-    cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
-    with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
-        bar = tqdm(desc="Updating index")
-        for input_file in cache_parts:
-            with h5py.File(input_file, 'r') as fi:
-                create_vds_for_group(fi, fo, bar)
+    try:
+        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
+        with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
+            bar = tqdm(desc="Updating index")
+            for input_file in cache_parts:
+                with h5py.File(input_file, 'r') as fi:
+                    create_vds_for_group(fi, fo, bar)
+    except Exception as e:
+        print(f"Warn: unable to lock cache_index.tmp - {e}")
+        if os.path.exists("cache_index.tmp"):
+            os.remove("cache_index.tmp")
+        update_cache_index(cache_dir)
 
 def get_pipeline(model_path):
     if Path(model_path).is_file():

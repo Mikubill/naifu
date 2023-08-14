@@ -122,9 +122,5 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    try:
-        main(args)
-    except Exception:
-        torch.cuda.empty_cache()
-        os.remove("cache_index.tmp")
+    main(args)
 

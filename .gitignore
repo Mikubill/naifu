@@ -14,3 +14,5 @@ samples/
 *.safetensors
 cache/
 dataset.json
+*.h5
+*.tmp
