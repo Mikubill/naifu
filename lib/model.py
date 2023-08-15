@@ -52,7 +52,7 @@ def get_pipeline(model_path):
     if Path(model_path).is_file():
         # use autoconvert
         from_safetensors = Path(model_path).suffix == ".safetensors"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() == 1 else "cpu"
         if from_safetensors:
             from safetensors import safe_open
 
