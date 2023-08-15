@@ -35,7 +35,7 @@ cache:
   target: ["images"] #[images, prompts]
 
 dataset:
-  img_path: "/notebooks/rurudo_lion"
+  img_path: "/tmp/VBP2-p1p2/_classified"
   tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
