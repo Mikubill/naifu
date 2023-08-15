@@ -12,8 +12,8 @@ trainer:
   gradient_clip_val: 0.0
 
   offset_noise: true
-  offset_noise_val: 0.01
-  min_snr: true
+  offset_noise_val: 0.0375
+  min_snr: false
   min_snr_val: 5
 
   checkpoint_dir: checkopint
