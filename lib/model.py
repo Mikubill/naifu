@@ -43,10 +43,8 @@ def update_cache_index(cache_dir):
                 with h5py.File(input_file, 'r') as fi:
                     create_vds_for_group(fi, fo, bar)
     except Exception as e:
-        print(f"Warn: unable to lock cache_index.tmp - {e}")
-        if os.path.exists("cache_index.tmp"):
-            os.remove("cache_index.tmp")
-        update_cache_index(cache_dir)
+        print(f"Warn: unable to write cache_index.tmp - remove if exists: {e}")
+        exit()
 
 def get_pipeline(model_path):
     if Path(model_path).is_file():
