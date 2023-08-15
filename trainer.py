@@ -340,8 +340,9 @@ def main(args):
     
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
+        fabric.barrier()
+        
         allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
-
         fabric.barrier()
         if not allclose:
             update_cache_index(config.cache.cache_dir)
