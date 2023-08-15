@@ -435,7 +435,11 @@ class StableDiffusionModel(pl.LightningModule):
         if self.use_latent_cache:
             cache_dir = self.config.dataset.get("cache_dir", "cache")
             update_cache_index(cache_dir)
+            self.trainer.strategy.barrier()
+
             allclose = self.dataset.cache_latents(self.encode_pixels)
+            self.trainer.strategy.barrier()
+
             if not allclose:
                 update_cache_index(cache_dir)
                     
