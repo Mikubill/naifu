@@ -337,7 +337,7 @@ class AspectRatioDataset(ImageStore):
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        with h5py.File("cache_index.tmp", "r", libver='latest', driver='core') as cache:
+        with h5py.File("cache_index.tmp", "r") as cache:
             to_cache_images = self.cache_images and any(f"{self.hash(img)}.latents" not in cache \
                 for entry in store.buckets.keys() for img in store.buckets[entry][:])
             to_cache_prompts = self.cache_prompts and any(f"{self.hash(img)}.crossattn" not in cache \
@@ -435,7 +435,7 @@ class AspectRatioDataset(ImageStore):
         
         if self.cache_enabled:
             cachekey = self.hash(item_id)
-            with h5py.File("cache_index.tmp", "r", libver='latest', driver='core') as cache:
+            with h5py.File("cache_index.tmp", "r") as cache:
                 if cache_images:
                     latent = torch.asarray(cache[f"{cachekey}.latents"][:])
                     latent_size = cache[f"{cachekey}.size"][:]
