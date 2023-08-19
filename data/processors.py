@@ -81,3 +81,105 @@ def tags_only(input:str):
     ofa = inp["ofa"]
     gpt = inp["gpt"]
     return ','.join(tags).replace('_', ' '), False
+
+def clean_limited_shuffle_dropout_processor(prompt: str) -> (str, bool):
+    """
+    cleaning:
+        - remove tags that are subsets of other tags
+        - remove noisy symbols and urls from human inputs
+
+    limited shuffling:
+        - shuffle tags in the prompt, excluding the starting sentence
+        - shuffles from the first <SHUFFLE_START_OFFSET>th tag
+        - shuffles with a limited shuffle distance of <MAX_SHUFFLE_OFFSET>
+
+    random dropout:
+        - dropout images with synthetic tags <SYNTHETIC_MARKER> with a probability of <SYNTHETIC_DROPOUT_RATE>
+
+    :param prompt: raw prompt
+    :return: (prompt:str, skip_image:bool)
+    """
+    SEPARATOR = ","  # separator between tags
+    IS_SENTENCE_THRES = 4  # minimum space-separated parts of the starting prompt to be seen as sentence
+    SHUFFLE_START_OFFSET = 2  # start shuffling at first-n <separator> separated part
+    MAX_SHUFFLE_OFFSET = 3  # maximum distance of shuffle from the original position
+    SYNTHETIC_MARKER = "<|generated|>"  # marker for synthetic images
+    SYNTHETIC_DROPOUT_RATE = 0.6  # probability of dropping synthetic images
+
+    import re
+
+    def _find_subset_tags(tags_list: list) -> set:
+        subset_tags = set()
+        for i, tag1 in enumerate(tags_list):
+            for j, tag2 in enumerate(tags_list):
+                if i != j and tag1.strip() in tag2:
+                    subset_tags.add(tag1)
+                    break
+        return subset_tags
+
+    def _limited_shuffle(tags: list[str], max_offset: int) -> list[str]:
+        shuffled_tags = tags.copy()
+        n = len(tags)
+        swapped_indices = set()  # Keep track of the indices that have been swapped
+
+        for i in range(n):
+            if i in swapped_indices:  # Skip the index if it has been swapped already
+                continue
+
+            # Determine the offset range within the maximum allowed offset
+            left_bound = max(i - max_offset, 0)
+            right_bound = min(i + max_offset, n - 1)
+
+            # Select a random index within the offset range
+            swap_index = random.randint(left_bound, right_bound)
+
+            if swap_index != i and swap_index not in swapped_indices:  # Ensure that it's not swapping with itself and the target hasn't been swapped before
+                # Swap the elements at the current index and the randomly selected index
+                shuffled_tags[i], shuffled_tags[swap_index] = shuffled_tags[swap_index], shuffled_tags[i]
+                swapped_indices.add(i)  # Mark the current index as swapped
+                swapped_indices.add(swap_index)  # Mark the swap index as swapped
+
+        return shuffled_tags
+
+    if not prompt:
+        return prompt, False
+
+    if SYNTHETIC_MARKER and SYNTHETIC_MARKER in prompt: # marker not a empty string
+
+        if random.random() < SYNTHETIC_DROPOUT_RATE:
+            return prompt, True
+
+    fixed_prompt = prompt.replace(SYNTHETIC_MARKER, "").strip()
+
+    # Cleaning prompts for one last time before training
+    fixed_prompt = re.sub(r"<http\S+>", "", fixed_prompt).strip()  # remove url
+
+    STRIP_KEYS = ("BREAK", "&", "$", "#", "**", "((", "))", "\\", "\"")  # common webui tags
+    for key in STRIP_KEYS:
+        fixed_prompt = fixed_prompt.replace(key, "")
+
+    REPLACEMENT_MAP = [("\n", ", "), (" ,", ","), (" .", "."), (" :", ":"), (" ;", ";"), ("  ", " "), ("、", ","),
+                       ("|", ","), ]
+
+    for _from, _to in iter(REPLACEMENT_MAP):
+        fixed_prompt = fixed_prompt.replace(_from, _to)
+
+    fixed_prompt = re.sub(r"\s+", " ", fixed_prompt).strip()  # remove double spaces
+
+    # Splitting prompt by separator
+    parts = fixed_prompt.split(SEPARATOR)
+
+    # Finding the index of the first non-sentence
+    sentence_index = next((i for i, part in enumerate(parts) if len(part.split()) <= IS_SENTENCE_THRES), len(parts))
+
+    # Preserving parts before the sentence index (including the sentence itself) and shuffling the rest
+    preserved, to_shuffle = parts[:sentence_index], parts[sentence_index:]
+
+    subset_tags = _find_subset_tags(to_shuffle)
+    to_shuffle = [tag for tag in to_shuffle if tag not in subset_tags][SHUFFLE_START_OFFSET:]
+
+    # Shuffling the remaining tags
+    shuffled = _limited_shuffle(to_shuffle, max_offset=MAX_SHUFFLE_OFFSET)
+    out = SEPARATOR.join(preserved + shuffled)
+
+    return out, False
