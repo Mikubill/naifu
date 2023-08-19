@@ -13,3 +13,4 @@ cache/
 dataset.json
 *.h5
 *.tmp
+.ipynb_checkpoints
