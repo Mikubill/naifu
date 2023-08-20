@@ -69,20 +69,17 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.latent_cache = {}
         self.update_store()
 
-    def prompt_resolver(self, x: str, text_files: dict):
-        if x not in text_files:
+    def prompt_resolver(self, x: str):
+        img_item = (x, "")
+        fp = os.path.splitext(x)[0]
+
+        try:
+            with open(fp + ".txt") as f:
+                content = f.read()
+                new_prompt = content
+        except FileNotFoundError:
             rank_zero_print(f"Prompt file not found for {x}")
             new_prompt = ""
-        else:        
-            fp = os.path.splitext(x)[0]
-            
-            try:
-                with open(fp + ".txt") as f:
-                    content = f.read()
-                    new_prompt = content
-            except FileNotFoundError:
-                rank_zero_print(f"Prompt file not found for {x}")
-                new_prompt = ""
 
         return str(x), new_prompt
 
@@ -115,14 +112,10 @@ class ImageStore(torch.utils.data.IterableDataset):
                     bar.update(1)
                 continue
             
-            text_files = {} # cache text file paths
             for x in Path(entry).rglob("*"):
-                if x.suffix == ".txt":
-                    text_files[x] = x
-                    continue
                 if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
                     continue
-                img, prompt = self.prompt_resolver(x, text_files)
+                img, prompt = self.prompt_resolver(x)
                 _, skip = self.process_tags(prompt)
                 if skip:
                     continue
