@@ -18,7 +18,7 @@ from lib.lora import LoConBaseModel
 from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
-from contextlib import contextmanager
+from contextlib import nullcontext
 from lightning.pytorch.loggers import WandbLogger
 from data.store import AspectRatioDataset
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -88,21 +88,6 @@ def get_latest_checkpoint(checkpoint_dir: str):
         return None
     return os.path.join(checkpoint_dir, items[-1])
 
-@contextmanager
-def ema_scope(sd, enabled=False, context=None):
-    if enabled:
-        sd.model_ema.store(sd.model.parameters())
-        sd.model_ema.copy_to(sd.model)
-        if context is not None:
-            print(f"{context}: Switched to EMA weights")
-    try:
-        yield None
-    finally:
-        if enabled:
-            sd.model_ema.restore(sd.model.parameters())
-            if context is not None:
-                print(f"{context}: Restored training weights")
-
 def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
     cfg = model.config.trainer
     grad_accum_steps = cfg.accumulate_grad_batches
@@ -134,6 +119,11 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
     if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
         should_stop = True
         
+    ema_ctx = nullcontext
+    if cfg.use_ema:
+        ema_ctx = model.model_ema.average_parameters
+        model.model_ema.to(fabric.device)
+        
     prog_bar = None
     if fabric.is_global_zero:
         prog_bar = tqdm(dataloader, total=len(dataloader) // grad_accum_steps - 1, desc=f"Epoch {current_epoch}")
@@ -157,7 +147,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                 break
             
             if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
-                with ema_scope(model, enabled=cfg.use_ema, context=None):
+                with ema_ctx():
                     sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
                 
             if is_accumulating:
@@ -181,7 +171,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                     fabric.log(f"lr-{optimizer.__class__.__name__}-{i}", lr, step=global_step)
 
             if cfg.use_ema and fabric.is_global_zero: 
-                model.model_ema(model.model)
+                model.model_ema.update()
 
             if fabric.is_global_zero:
                 prog_bar.update(1)
@@ -190,14 +180,14 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
             should_stop = True
-            
-        if enabled_sampling and sampling_epochs > 0 and current_epoch % sampling_epochs == 0:
-            with ema_scope(model, enabled=cfg.use_ema, context=None):
-                sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
-            
+        
         state.update(global_step=global_step, current_epoch=current_epoch)
-        if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
-            fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
+        with ema_ctx():
+            if enabled_sampling and sampling_epochs > 0 and current_epoch % sampling_epochs == 0:
+                sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)    
+            
+            if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
+                fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
             
 def sampler(logger, config, model, current_epoch, global_step):
     if not any(config.prompts):
