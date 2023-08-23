@@ -18,6 +18,7 @@ trainer:
 
   checkpoint_dir: checkopint
   checkpoint_freq: 1
+  checkpoint_steps: -1
   save_weights_only: true
   max_epochs: 60
   max_steps: -1
@@ -35,7 +36,7 @@ cache:
   target: ["images"] #[images, prompts]
 
 dataset:
-  img_path: "/tmp/VBP2-p1p2/_classified"
+  img_path: "/notebooks/rurudo_lion"
   tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
