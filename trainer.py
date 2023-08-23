@@ -152,7 +152,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
 
             if fabric.is_global_zero and cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0:
                 with ema_ctx():
-                    fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step:02d}.ckpt"), state)
+                    fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step}.ckpt"), state)
                 
             if is_accumulating:
                 # skip here if we are accumulating
