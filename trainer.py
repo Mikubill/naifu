@@ -163,7 +163,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
                 
             # use float as epoch
             if scheduler is not None:
-                scheduler.step(current_epoch + batch_idx / len(dataloader))
+                if "transformers" in model.config.scheduler.name:
+                    scheduler.step(global_step)
+                else:
+                    scheduler.step(current_epoch + batch_idx / len(dataloader))
                     
             if cfg.wandb_id != "":
                 fabric.log("train_loss", loss, step=global_step)
@@ -189,6 +192,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
             if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
                 fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
             
+@rank_zero_only
 def sampler(logger, config, model, current_epoch, global_step):
     if not any(config.prompts):
         return
@@ -209,6 +213,8 @@ def sampler(logger, config, model, current_epoch, global_step):
         
     if config.use_wandb and logger:
         logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
+    
+    torch.cuda.empty_cache()
 
 def get_class(name: str):
     import importlib
