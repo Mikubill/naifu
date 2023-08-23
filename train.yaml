@@ -60,7 +60,7 @@ optimizer:
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 0.5
+    num_warmup_steps: 100
     last_epoch: -1
 
 sampling:
