@@ -14,3 +14,4 @@ dataset.json
 *.h5
 *.tmp
 .ipynb_checkpoints
+text_encoder_allclose.ipynb
