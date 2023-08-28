@@ -33,9 +33,9 @@ cache:
   cache_bsz: 8
   cache_dir: cache
   # Precompute embeddings for faster training (on every epoch)
-  precompute_embeds: true
+  precompute_embeds: false
   use_legacy_key: false
-  target: ["images"]
+  target: ["images"] #[images, prompts]
 
 dataset:
   img_path: "/notebooks/rurudo_lion_imgonly"
