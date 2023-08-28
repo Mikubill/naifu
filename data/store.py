@@ -426,14 +426,16 @@ class AspectRatioDataset(ImageStore):
                             progress_bar.update(1)
         progress_bar.close()
         
-    def precompute_embeds(self, token_encode_func, bar: tqdm):
+    def precompute_embeds(self, token_encode_func, bar=None):
         self.embed_cache = {}
         
         store = self.buckets
         
-        bar.reset()
-        bar.total = len(self.entries)
-        bar.set_description(f"Precomputing Embeds")
+        if bar is not None:
+            bar.reset()
+            bar.total = len(self.entries)
+            bar.set_description(f"Precomputing Embeds")
+            
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
             imgs = store.buckets[entry][:]
@@ -465,7 +467,8 @@ class AspectRatioDataset(ImageStore):
                         vec = vectors[idx, ...]
                         self.embed_cache[f"{imghash}.vec"] = vec.detach().half().cpu()
 
-                    bar.update(1)
+                    if bar is not None:
+                        bar.update(1)
 
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
