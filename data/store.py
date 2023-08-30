@@ -1,6 +1,7 @@
 import hashlib
 import os
 import random
+import tempfile
 import torch
 import h5py
 import os, binascii
@@ -407,30 +408,36 @@ class AspectRatioDataset(ImageStore):
                     conds = token_encode_func(prompt)
                     conds, vectors = conds["crossattn"], conds.get("vector", None)
                     for idx, img in enumerate(imgs[idx:idx+stride]):
-                        imghash = self.hash(img)
-                        # last check, if exists overwrite
-                        if f"{imghash}.crossattn" in cache:
-                            del cache[f"{imghash}.crossattn"]
-                            
-                        if f"{imghash}.vec" in cache:
-                            del cache[f"{imghash}.vec"]
-                        
-                        cond = conds[idx, ...]
-                        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
-                        
-                        if vectors is not None:
-                            vec = vectors[idx, ...]
-                            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
-
+                        self.save_cache_prompts(cache, idx, conds, vectors, img)
                         if not self.cache_images:
                             progress_bar.update(1)
+
         progress_bar.close()
         
+    def save_cache_prompts(self, cache, idx, conds, vectors, img):
+        imghash = self.hash(img)
+        # last check, if exists overwrite
+        if f"{imghash}.crossattn" in cache:
+            del cache[f"{imghash}.crossattn"]
+                            
+        if f"{imghash}.vec" in cache:
+            del cache[f"{imghash}.vec"]
+                        
+        cond = conds[idx, ...]
+        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
+                        
+        if vectors is not None:
+            vec = vectors[idx, ...]
+            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
+        
     def precompute_embeds(self, token_encode_func, bar=None):
-        self.embed_cache = {}
+        if isinstance(self.embed_cache, h5py.File):
+            self.embed_cache.close()
+            
+        temp_file = tempfile.NamedTemporaryFile(delete=True)
+        self.embed_cache = h5py.File(temp_file.name, "w")
         
         store = self.buckets
-        
         if bar is not None:
             bar.reset()
             bar.total = len(self.entries)
@@ -460,12 +467,7 @@ class AspectRatioDataset(ImageStore):
                 conds, vectors = conds["crossattn"], conds.get("vector", None)
                 
                 for idx, img in enumerate(imgs[idx:idx+stride]):
-                    imghash = self.hash(img)
-                    cond = conds[idx, ...]
-                    self.embed_cache[f"{imghash}.crossattn"] = cond.detach().half().cpu()
-                    if vectors is not None:
-                        vec = vectors[idx, ...]
-                        self.embed_cache[f"{imghash}.vec"] = vec.detach().half().cpu()
+                    self.save_cache_prompts(self.embed_cache, idx, conds, vectors, img)
 
                     if bar is not None:
                         bar.update(1)
@@ -498,10 +500,10 @@ class AspectRatioDataset(ImageStore):
                 if len(result) == 2:
                     return result
                 
-        if len(self.embed_cache) > 0:
-            prompt = {"crossattn": self.embed_cache[f"{cachekey}.crossattn"]}   
+        if isinstance(self.embed_cache, h5py.File):
+            prompt = {"crossattn": torch.asarray(self.embed_cache[f"{cachekey}.crossattn"][:])}   
             if f"{cachekey}.vec" in self.embed_cache:
-                prompt.update({"vector": self.embed_cache[f"{cachekey}.vec"]}) 
+                prompt.update({"vector": torch.asarray(self.embed_cache[f"{cachekey}.vec"][:])})
             result.update({"conds": prompt})
             if len(result) == 2:
                 return result
