@@ -399,11 +399,13 @@ class AspectRatioDataset(ImageStore):
                     for img in imgs[idx:idx+stride]:
                         prompt_data = self.prompt_cache[img]
                         prompt_batch.append(prompt_data)
+                        
+                    w, h = size
                     prompt = {
                         "prompts": prompt_batch,
-                        "original_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(),
+                        "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
                         "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
-                        "target_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(), 
+                        "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
                     }
                     conds = token_encode_func(prompt)
                     conds, vectors = conds["crossattn"], conds.get("vector", None)
@@ -457,11 +459,12 @@ class AspectRatioDataset(ImageStore):
                         prompt_data = ''
                     prompt_batch.append(prompt_data)
                     
+                w, h = size
                 prompt = {
                     "prompts": prompt_batch,
-                    "original_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(),
+                    "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
                     "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
-                    "target_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(), 
+                    "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
                 }
                 conds = token_encode_func(prompt)
                 conds, vectors = conds["crossattn"], conds.get("vector", None)

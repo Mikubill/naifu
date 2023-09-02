@@ -56,7 +56,7 @@ def sampler(model, save_dir, prompts, negative_prompts, ):
         image.save(save_dir / f"nd_sample_{j}.png")
         
 def main(args):
-    model = StableDiffusionModel(args.path, OmegaConf.create({"trainer": {"use_xformers": False, "use_ema": False}}))    
+    model = StableDiffusionModel(args.path, OmegaConf.create({"trainer": {"use_xformers": False, "use_ema": False}, "dataset": {}}))    
     model.model.eval().cuda()
     model.requires_grad_(False)
     

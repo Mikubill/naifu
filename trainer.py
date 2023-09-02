@@ -110,6 +110,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     if not cfg.get("save_weights_only", False):
         state.update({"optimizer": optimizer})
         
+    if enabled_sampling:
+        size = (sampling_cfg.height, sampling_cfg.width)
+        assert size[0] % 64 == 0 and size[1] % 64 == 0, "Sample image size must be a multiple of 64"
+        
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
         latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
         remainder = fabric.load(latest_checkpoint_path, state)
@@ -126,6 +130,8 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
         
     prog_bar = None
     if fabric.is_global_zero:
+        if fabric.logger:
+            fabric.logger.experiment.config.update(OmegaConf.to_container(model.config, resolve=True))
         prog_bar = tqdm(dataloader, total=len(dataloader) // grad_accum_steps - 1, desc=f"Epoch {current_epoch}")
 
     while not should_stop:
@@ -218,8 +224,9 @@ def sampler(logger, config, model, current_epoch, global_step):
     prompts = list(config.prompts) if OmegaConf.is_list(config.prompts) else config.prompts
     prompt_to_gen = copy.deepcopy(prompts)
     images = []
+    size = (config.height, config.width)
     for prompt, negative_prompt in zip(prompt_to_gen, negative_prompts):
-        images.extend(model.sample(prompt, negative_prompt, generator))
+        images.extend(model.sample(prompt, negative_prompt, generator, size=size))
 
     for j, image in enumerate(images):
         image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")

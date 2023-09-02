@@ -14,3 +14,4 @@ dataset.json
 *.h5
 *.tmp
 text_encoder_allclose.ipynb
+train-actual.yaml
