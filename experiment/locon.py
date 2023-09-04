@@ -187,5 +187,8 @@ class LoConDiffusionModel(StableDiffusionModel):
             optimizer=optimizer,
             **self.config.lr_scheduler.params
         )
+        if "transformers" in self.config.lr_scheduler.name:
+            scheduler = {'scheduler': scheduler, 'interval': 'step', 'frequency': 1}
+            
         return [[optimizer], [scheduler]]
     

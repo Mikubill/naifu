@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from pathlib import Path
 from data.store import AspectRatioDataset, ImageStore
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, DDPMScheduler
 from torch_ema import ExponentialMovingAverage
 from lib.utils import get_local_rank, get_world_size
 from lib.utils import convert_to_sd, convert_to_df, rank_zero_print
@@ -130,6 +130,9 @@ class StableDiffusionModel(pl.LightningModule):
                 self.pipeline.vae, self.pipeline.text_encoder, self.pipeline.text_encoder_2, self.pipeline.tokenizer, self.pipeline.tokenizer_2
             self.is_sdxl = True
 
+        self.noise_scheduler = DDPMScheduler(
+            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
+        )
         self.unet.to(self.device)
         self.unet.train()
 

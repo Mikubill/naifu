@@ -2,20 +2,19 @@ name: test-run
 
 lora:
   use_locon: true
-  rank: 16
-  conv_rank: 16
-  lora_alpha: 8
-  conv_alpha: 8
+  rank: 32
+  conv_rank: 32
+  lora_alpha: 16
+  conv_alpha: 16
   multipier: 1.0
   train_unet: true
   train_text_encoder: true
-  unet_lr: 1e-4
-  encoder_lr: 5e-5
-  override_prompt: ""
+  unet_lr: 3e-4
+  encoder_lr: 1e-4
   dropout: 0.0
 
 trainer:
-  model_path: "/root/workspace/storage/models/orangemix"
+  model_path: "/notebooks/storage/webui/models/Stable-diffusion/Counterfeit-V2.0.ckpt"
   batch_size: 2
   resolution: 512
   center_crop: false
