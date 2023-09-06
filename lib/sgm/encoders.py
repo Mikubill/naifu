@@ -307,7 +307,6 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         for param in self.parameters():
             param.requires_grad = False
 
-    @autocast
     def forward(self, text):
         # not support pooled output at the moment
         assert not self.return_pooled and not self.layer == "pooled"
@@ -413,7 +412,6 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         z = torch.cat(states_list, dim=1)    
         return z
 
-    @autocast
     def forward(self, text):
         tokens = open_clip.tokenize(text, context_length=self.max_length)
         input_ids = torch.stack([process_input_ids(batch, self.clip_tokenizer, self.max_length) for batch in tokens]).to(self.device)

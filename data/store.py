@@ -1,6 +1,7 @@
 import hashlib
 import os
 import random
+import tempfile
 import torch
 import h5py
 import os, binascii
@@ -238,6 +239,7 @@ class AspectRatioDataset(ImageStore):
         self.cache_target = kwargs.get("target", []) if self.cache_enabled else []
         self.use_legacy_key = kwargs.get("use_legacy_key", False)
         self.hashes = {}
+        self.embed_cache = {}
         
         for path, prompt, _ in self.entries:
             self.prompt_cache[path] = prompt
@@ -389,6 +391,7 @@ class AspectRatioDataset(ImageStore):
                         
                         cache.create_dataset(f"{imghash}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
                         cache.create_dataset(f"{imghash}.size", data=size)
+                        progress_bar.update(1)
                         
                 prompts_allclose = all([f"{self.hash(img)}.crossattn" in cache for img in imgs[idx:idx+stride]]) 
                 if self.cache_prompts and not prompts_allclose:
@@ -396,32 +399,81 @@ class AspectRatioDataset(ImageStore):
                     for img in imgs[idx:idx+stride]:
                         prompt_data = self.prompt_cache[img]
                         prompt_batch.append(prompt_data)
+                        
+                    w, h = size
                     prompt = {
                         "prompts": prompt_batch,
-                        "original_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(),
+                        "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
                         "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
-                        "target_size_as_tuple": torch.stack([torch.asarray(size) for _ in prompt_batch]).cuda(), 
+                        "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
                     }
                     conds = token_encode_func(prompt)
                     conds, vectors = conds["crossattn"], conds.get("vector", None)
                     for idx, img in enumerate(imgs[idx:idx+stride]):
-                        imghash = self.hash(img)
-                        # last check, if exists overwrite
-                        if f"{imghash}.crossattn" in cache:
-                            del cache[f"{imghash}.crossattn"]
-                            
-                        if f"{imghash}.vec" in cache:
-                            del cache[f"{imghash}.vec"]
-                        
-                        cond = conds[idx, ...]
-                        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
-                        
-                        if vectors is not None:
-                            vec = vectors[idx, ...]
-                            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
+                        self.save_cache_prompts(cache, idx, conds, vectors, img)
+                        if not self.cache_images:
+                            progress_bar.update(1)
 
-                progress_bar.update(len(imgs[idx:idx+stride]))
         progress_bar.close()
+        
+    def save_cache_prompts(self, cache, idx, conds, vectors, img):
+        imghash = self.hash(img)
+        # last check, if exists overwrite
+        if f"{imghash}.crossattn" in cache:
+            del cache[f"{imghash}.crossattn"]
+                            
+        if f"{imghash}.vec" in cache:
+            del cache[f"{imghash}.vec"]
+                        
+        cond = conds[idx, ...]
+        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
+                        
+        if vectors is not None:
+            vec = vectors[idx, ...]
+            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
+        
+    def precompute_embeds(self, token_encode_func, bar=None):
+        if isinstance(self.embed_cache, h5py.File):
+            self.embed_cache.close()
+            
+        temp_file = tempfile.NamedTemporaryFile(delete=True)
+        self.embed_cache = h5py.File(temp_file.name, "w")
+        
+        store = self.buckets
+        if bar is not None:
+            bar.reset()
+            bar.total = len(self.entries)
+            bar.set_description(f"Precomputing Embeds")
+            
+        for entry in store.buckets.keys():
+            size = store.resolutions[entry]
+            imgs = store.buckets[entry][:]
+            stride = self.cache_bsz
+            start, end = 0, len(imgs)
+
+            for idx in range(start, end, stride):   
+                prompt_batch = []
+                for img in imgs[idx:idx+stride]:
+                    prompt_data = self.prompt_cache[img]
+                    if random.random() < self.ucg:
+                        prompt_data = ''
+                    prompt_batch.append(prompt_data)
+                    
+                w, h = size
+                prompt = {
+                    "prompts": prompt_batch,
+                    "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
+                    "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
+                    "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
+                }
+                conds = token_encode_func(prompt)
+                conds, vectors = conds["crossattn"], conds.get("vector", None)
+                
+                for idx, img in enumerate(imgs[idx:idx+stride]):
+                    self.save_cache_prompts(self.embed_cache, idx, conds, vectors, img)
+
+                    if bar is not None:
+                        bar.update(1)
 
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
@@ -450,8 +502,16 @@ class AspectRatioDataset(ImageStore):
                     result.update({"conds": prompt})
                 if len(result) == 2:
                     return result
-
-        if not cache_prompts:
+                
+        if isinstance(self.embed_cache, h5py.File):
+            prompt = {"crossattn": torch.asarray(self.embed_cache[f"{cachekey}.crossattn"][:])}   
+            if f"{cachekey}.vec" in self.embed_cache:
+                prompt.update({"vector": torch.asarray(self.embed_cache[f"{cachekey}.vec"][:])})
+            result.update({"conds": prompt})
+            if len(result) == 2:
+                return result
+            
+        if not cache_prompts and len(self.embed_cache) == 0:
             prompt, _ = self.process_tags(self.prompt_cache[item_id])
             if random.random() < self.ucg:
                 prompt = ''

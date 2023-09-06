@@ -8,7 +8,7 @@ from PIL import Image
 from lib.utils import load_torch_file
 from omegaconf import OmegaConf 
 from pathlib import Path
-from diffusers import DDIMScheduler
+from diffusers import DDPMScheduler
 from lib.sgm import GeneralConditioner
 from torch_ema import ExponentialMovingAverage
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
@@ -137,14 +137,9 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             self.conditioner = conditioner
             
-        self.noise_scheduler = DDIMScheduler(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            clip_sample=False,
-            set_alpha_to_one=False,
+        self.noise_scheduler = DDPMScheduler(
+            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
         )
-        
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
             rank_zero_print(f"Missing Keys: {missing}")

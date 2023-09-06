@@ -88,7 +88,7 @@ def get_latest_checkpoint(checkpoint_dir: str):
         return None
     return os.path.join(checkpoint_dir, items[-1])
 
-def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
+def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     cfg = model.config.trainer
     grad_accum_steps = cfg.accumulate_grad_batches
     grad_clip_val = cfg.gradient_clip_val
@@ -110,6 +110,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
     if not cfg.get("save_weights_only", False):
         state.update({"optimizer": optimizer})
         
+    if enabled_sampling:
+        size = (sampling_cfg.height, sampling_cfg.width)
+        assert size[0] % 64 == 0 and size[1] % 64 == 0, "Sample image size must be a multiple of 64"
+        
     if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
         latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
         remainder = fabric.load(latest_checkpoint_path, state)
@@ -126,14 +130,25 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataloader):
         
     prog_bar = None
     if fabric.is_global_zero:
+        if fabric.logger:
+            fabric.logger.experiment.config.update(OmegaConf.to_container(model.config, resolve=True))
         prog_bar = tqdm(dataloader, total=len(dataloader) // grad_accum_steps - 1, desc=f"Epoch {current_epoch}")
 
     while not should_stop:
+        if model.config.cache.get("precompute_embeds", False):
+            conditioner = model.get_conditioner()
+            fabric.to_device(conditioner)
+            dataset.precompute_embeds(conditioner, prog_bar)
+            # free conditioner from memory
+            conditioner.cpu()
+            
         if fabric.is_global_zero:
             prog_bar.refresh()
             prog_bar.reset()
+            prog_bar.total = len(dataloader) // grad_accum_steps - 1
             prog_bar.set_description(f"Epoch {current_epoch}")
-        
+            
+        assert len(dataloader) > 0, "Dataloader is empty, please check your dataset"
         for batch_idx, batch in enumerate(dataloader):
             global_step += 1  
             is_accumulating = global_step % grad_accum_steps != 0
@@ -209,8 +224,9 @@ def sampler(logger, config, model, current_epoch, global_step):
     prompts = list(config.prompts) if OmegaConf.is_list(config.prompts) else config.prompts
     prompt_to_gen = copy.deepcopy(prompts)
     images = []
+    size = (config.height, config.width)
     for prompt, negative_prompt in zip(prompt_to_gen, negative_prompts):
-        images.extend(model.sample(prompt, negative_prompt, generator))
+        images.extend(model.sample(prompt, negative_prompt, generator, size=size))
 
     for j, image in enumerate(images):
         image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
@@ -248,6 +264,7 @@ def create_vds_for_group(source_group, target_group, bar):
 
 @rank_zero_only
 def update_cache_index(cache_dir):
+    os.remove("cache_index.tmp") if os.path.exists("cache_index.tmp") else None
     try:
         cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
         with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
@@ -281,6 +298,8 @@ def main(args):
         plugins = HalfPrecisionPlugin(target_precision)
         model_precision = torch.float16 if target_precision == "16-true" else torch.bfloat16
         del config.lightning.precision
+    elif target_precision in ["32-true"]:
+        model_precision = torch.float32
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[logger], plugins=plugins, **config.lightning)
@@ -331,11 +350,11 @@ def main(args):
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
-    
-    if model_precision != None:
+
+    if model_precision:
         cast_precision(model, model_precision)
         model.first_stage_model.to(torch.float32)
-    
+        
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
         fabric.barrier()
@@ -347,7 +366,7 @@ def main(args):
 
     fabric.barrier()
     torch.cuda.empty_cache()        
-    train(fabric, model, optimizer, scheduler, dataloader)
+    train(fabric, model, optimizer, scheduler, dataset, dataloader)
 
 if __name__ == "__main__":
     args = parse_args()

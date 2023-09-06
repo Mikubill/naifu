@@ -26,17 +26,19 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: bf16-mixed
+  precision: 16-mixed
 
 cache:
   enabled: true
   cache_bsz: 8
   cache_dir: cache
+  # Precompute embeddings for faster training (on every epoch)
+  precompute_embeds: false
   use_legacy_key: false
   target: ["images"] #[images, prompts]
 
 dataset:
-  img_path: "/notebooks/rurudo_lion"
+  img_path: "/notebooks/rurudo_lion_imgonly"
   tag_processor: data.processors.shuffle_prompts
   center_crop: false
   ucg: 0.1
@@ -49,7 +51,7 @@ optimizer:
   # name: transformers.Adafactor
   # params: 
   #   relative_step: True
-  name: bitsandbytes.optim.PagedAdamW8bit
+  name: bitsandbytes.optim.PagedLion8bit
   # layer_lr: 
   #   - '^input_blocks\.[0-8]\..*$': 5e-7
   #   - '^middle_block\.[0-2]\..*$': 5e-7
@@ -65,7 +67,7 @@ scheduler:
     last_epoch: -1
 
 sampling:
-  enabled: true
+  enabled: false
   use_wandb: true
   every_n_steps: -1
   every_n_epochs: 1
