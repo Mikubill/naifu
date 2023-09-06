@@ -292,12 +292,14 @@ def main(args):
         config.trainer.model_path = args.model_path 
         
     plugins = None
-    model_precision = config.trainer.get("model_precision", torch.float32)
+    model_precision = config.trainer.get("model_precision", None)
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
         plugins = HalfPrecisionPlugin(target_precision)
         model_precision = torch.float16 if target_precision == "16-true" else torch.bfloat16
         del config.lightning.precision
+    elif target_precision in ["32-true"]:
+        model_precision = torch.float32
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[logger], plugins=plugins, **config.lightning)
@@ -348,9 +350,11 @@ def main(args):
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
-    
-    cast_precision(model, model_precision)
-    model.first_stage_model.to(torch.float32)
+
+    if model_precision:
+        cast_precision(model, model_precision)
+        model.first_stage_model.to(torch.float32)
+        
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
         fabric.barrier()
