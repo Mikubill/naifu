@@ -292,7 +292,7 @@ def main(args):
         config.trainer.model_path = args.model_path 
         
     plugins = None
-    model_precision = config.trainer.get("model_precision", None)
+    model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
         plugins = HalfPrecisionPlugin(target_precision)
@@ -349,10 +349,8 @@ def main(args):
     dataloader = fabric.setup_dataloaders(dataloader)
     fabric.to_device(model)
     
-    if model_precision != None:
-        cast_precision(model, model_precision)
-        model.first_stage_model.to(torch.float32)
-    
+    cast_precision(model, model_precision)
+    model.first_stage_model.to(torch.float32)
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
         fabric.barrier()
