@@ -29,7 +29,7 @@ def setup_torch(config):
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
         device = torch.cuda.get_device_properties(0)
         compute_capability = float(f"{device.major}.{device.minor}")
-        precision = 'high' if config.lightning.precision == 32 else 'medium'
+        precision = 'high' if config.lightning.precision in ["32", "32-true"] else 'medium'
         if compute_capability >= 8.0:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
@@ -292,14 +292,12 @@ def main(args):
         config.trainer.model_path = args.model_path 
         
     plugins = None
-    model_precision = config.trainer.get("model_precision", None)
+    model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
         plugins = HalfPrecisionPlugin(target_precision)
         model_precision = torch.float16 if target_precision == "16-true" else torch.bfloat16
         del config.lightning.precision
-    elif target_precision in ["32-true"]:
-        model_precision = torch.float32
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[logger], plugins=plugins, **config.lightning)
