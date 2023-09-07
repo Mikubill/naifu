@@ -1,8 +1,5 @@
 import time
-import torch
 import numpy as np
-from PIL import Image
-from tqdm.auto import tqdm
 
 
 class AspectRatioBucket:
@@ -18,7 +15,6 @@ class AspectRatioBucket:
         id_size_map,
         max_size=(768, 512),
         divisible=64,
-        step_size=8,
         min_dim=256,
         base_res=(512, 512),
         bsz=1,
@@ -180,11 +176,12 @@ class AspectRatioBucket:
                 overhang = len(self.epoch[bucket_id]) % self.bsz
                 
                 if overhang != 0:
-                    self.left_over.extend(self.epoch[bucket_id][:overhang])
-                    self.epoch[bucket_id] = self.epoch[bucket_id][overhang:]
-                if len(self.epoch[bucket_id]) == 0:
-                    del self.epoch[bucket_id]
-
+                    # random repeat to fulfill batch size
+                    # 学習時はステップ数がランダムなので、同一画像が同一batch内にあってもそれほど悪影響はないであろう、と考えられる
+                    length_to_repeat = self.bsz - overhang
+                    items = np.random.choice(self.epoch[bucket_id], length_to_repeat)
+                    self.epoch[bucket_id].extend(items)
+                    
         if self.debug:
             timer = time.perf_counter() - timer
             count = 0
