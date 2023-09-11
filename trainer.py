@@ -93,7 +93,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     grad_accum_steps = cfg.accumulate_grad_batches
     grad_clip_val = cfg.gradient_clip_val
     
-    global_step = 0
+    local_step = global_step = 0
     current_epoch = 0
     should_stop = False
     
@@ -150,13 +150,18 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             
         assert len(dataloader) > 0, "Dataloader is empty, please check your dataset"
         for batch_idx, batch in enumerate(dataloader):
-            global_step += 1  
-            is_accumulating = global_step % grad_accum_steps != 0
+            local_step += 1  
+            is_accumulating = local_step % grad_accum_steps != 0
             
             with fabric.no_backward_sync(model.model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
                 
+            if is_accumulating:
+                # skip here if we are accumulating
+                continue
+
+            global_step += 1
             if cfg.max_steps > 0 and global_step >= cfg.max_steps:
                 should_stop = True
                 break
@@ -168,11 +173,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             if fabric.is_global_zero and cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0:
                 with ema_ctx():
                     fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step}.ckpt"), state)
-                
-            if is_accumulating:
-                # skip here if we are accumulating
-                continue
-
+                    
             if grad_clip_val > 0:
                 fabric.clip_gradients(model, optimizer, max_norm=grad_clip_val)
                     
