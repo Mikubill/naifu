@@ -156,7 +156,6 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.cast_dtype = torch.float32
         self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
-        self.get_conditioner().to(torch.float16)
         
         if config.trainer.use_ema: 
             self.model_ema = ExponentialMovingAverage(self.model.parameters(), decay=0.9999)
@@ -245,6 +244,7 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             self.get_conditioner().cpu()
             cond = batch["conds"]
+            cond = {k: v.to(self.model.dtype) for k, v in cond.items()}
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=self.model.dtype)
