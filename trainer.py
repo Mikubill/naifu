@@ -232,6 +232,9 @@ def sampler(logger, config, model, current_epoch, global_step):
     for j, image in enumerate(images):
         image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
         
+    if config.get("callback", None):
+        get_class(config.callback)(images=images, caption=prompts, step=global_step, logger=logger)
+        
     if config.use_wandb and logger:
         logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
     
@@ -370,4 +373,3 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
-
