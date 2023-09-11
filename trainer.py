@@ -37,7 +37,7 @@ def setup_torch(config):
 
 def setup_model(config, farbic):
     model_path = config.trainer.model_path
-    model = StableDiffusionModel(model_path, config, fabric.device) 
+    model = StableDiffusionModel(model_path, config, farbic.device) 
     
     arb_config = {
         "bsz": config.trainer.batch_size,
