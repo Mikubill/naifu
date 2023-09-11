@@ -59,10 +59,11 @@ def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, no
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
-    def __init__(self, model_path, config):
+    def __init__(self, model_path, config, device):
         super().__init__()
         self.config = config
         self.model_path = model_path
+        self.device = device
         self.init_model()
         
     def init_model(self):
@@ -140,6 +141,8 @@ class StableDiffusionModel(pl.LightningModule):
         self.noise_scheduler = DDPMScheduler(
             beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
         )
+            
+        self.to(device)
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
             rank_zero_print(f"Missing Keys: {missing}")
