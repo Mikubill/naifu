@@ -13,6 +13,7 @@ from lib.sgm import GeneralConditioner
 from torch_ema import ExponentialMovingAverage
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
 from lib.utils import rank_zero_print
+from diffusers import EulerDiscreteScheduler
 from lightning.pytorch.utilities import rank_zero_only
 
         
@@ -182,6 +183,10 @@ class StableDiffusionModel(pl.LightningModule):
     def sample(self, prompt, negative_prompt, generator=None, size=(1024,1024), steps=20, guidance_scale=7.5):
         self.model.eval()
         self.conditioner.cuda()
+        scheduler = EulerDiscreteScheduler(
+            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000
+        )
+        
         # first construct batch
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
@@ -199,15 +204,15 @@ class StableDiffusionModel(pl.LightningModule):
         
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
         latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
-        latents = latents * self.noise_scheduler.init_noise_sigma
+        latents = latents * scheduler.init_noise_sigma
         
-        self.noise_scheduler.set_timesteps(steps)
-        timesteps = self.noise_scheduler.timesteps
+        scheduler.set_timesteps(steps)
+        timesteps = scheduler.timesteps
         num_latent_input = 2
         for i, t in enumerate(timesteps):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
-            latent_model_input = self.noise_scheduler.scale_model_input(latent_model_input, t)
+            latent_model_input = scheduler.scale_model_input(latent_model_input, t)
             latent_model_input = latent_model_input.cuda().to(torch.float32)
 
             noise_pred = self.model(latent_model_input, torch.asarray([t]).cuda(), cond)
@@ -215,7 +220,7 @@ class StableDiffusionModel(pl.LightningModule):
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
-            latents = self.noise_scheduler.step(noise_pred, t, latents.cuda()).prev_sample
+            latents = scheduler.step(noise_pred, t, latents.cuda()).prev_sample
 
         self.first_stage_model.cuda()
         image = torch.clamp((self.decode_first_stage(latents) + 1.0) / 2.0, min=0.0, max=1.0).cpu().float()
@@ -245,7 +250,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.get_conditioner().cpu()
             cond = batch["conds"]
             cond = {k: v.to(self.model.dtype) for k, v in cond.items()}
-
+        
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=self.model.dtype)
         if self.config.trainer.get("offset_noise"):
