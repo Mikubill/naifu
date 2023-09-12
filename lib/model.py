@@ -69,7 +69,6 @@ class StableDiffusionModel(pl.LightningModule):
         
     def init_model(self):
         config = self.config
-        rank_zero_print(f"Loading model from {self.model_path}")
         sd = load_torch_file(self.model_path)
         
         key_name_v2_1 = "model.diffusion_model.input_blocks.2.1.transformer_blocks.0.attn2.to_k.weight"
@@ -144,6 +143,7 @@ class StableDiffusionModel(pl.LightningModule):
         )
             
         self.to(self.target_device)
+        rank_zero_print(f"Loading model from {self.model_path}")
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
             rank_zero_print(f"Missing Keys: {missing}")
@@ -249,10 +249,11 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             self.get_conditioner().cpu()
             cond = batch["conds"]
-            cond = {k: v.to(self.model.dtype) for k, v in cond.items()}
         
+        model_dtype = next(self.model.parameters()).dtype
+        cond = {k: v.to(model_dtype) for k, v in cond.items()}
         # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents, dtype=self.model.dtype)
+        noise = torch.randn_like(latents, dtype=model_dtype)
         if self.config.trainer.get("offset_noise"):
             noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) \
                 * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)

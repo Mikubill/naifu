@@ -105,11 +105,8 @@ sampling:
 #
 # 
 # lora:
-#   enabled: false
+#   enabled: true
 #   rank: 16
-#   conv_rank: 16
 #   lora_alpha: 8
-#   conv_alpha: 8
 #   multipier: 1.0
 #   unet_lr: 1e-4
-#   dropout: 0.0

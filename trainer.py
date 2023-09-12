@@ -103,9 +103,6 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     sampling_epochs = sampling_cfg.every_n_epochs
     
     state = {"state_dict": model}
-    
-    if cfg.get("lora") and cfg.lora.enabled:
-        state = {"state_dict": model.lora}
         
     if not cfg.get("save_weights_only", False):
         state.update({"optimizer": optimizer})
@@ -127,6 +124,11 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     if cfg.use_ema:
         ema_ctx = model.model_ema.average_parameters
         model.model_ema.to(fabric.device)
+        
+    lora_ctx = nullcontext
+    if cfg.get("lora") and cfg.lora.enabled:
+        lora_ctx = model.lora.apply_weights
+        model.lora.to(fabric.device)
         
     prog_bar = None
     if fabric.is_global_zero:
@@ -153,7 +155,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             local_step += 1  
             is_accumulating = local_step % grad_accum_steps != 0
             
-            with fabric.no_backward_sync(model.model, enabled=is_accumulating):
+            with fabric.no_backward_sync(model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
                 
@@ -167,11 +169,11 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
                 break
             
             if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
-                with ema_ctx():
+                with ema_ctx(), lora_ctx():
                     sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)
 
             if fabric.is_global_zero and cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0:
-                with ema_ctx():
+                with ema_ctx(), lora_ctx():
                     fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step}.ckpt"), state)
                     
             if grad_clip_val > 0:
@@ -205,7 +207,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             should_stop = True
         
         state.update(global_step=global_step, current_epoch=current_epoch)
-        with ema_ctx():
+        with ema_ctx(), lora_ctx():
             if enabled_sampling and sampling_epochs > 0 and current_epoch % sampling_epochs == 0:
                 sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)    
             
@@ -295,16 +297,21 @@ def main(args):
     if args.model_path != None:
         config.trainer.model_path = args.model_path 
         
-    plugins = None
+    plugins = []
+    strategy = config.lightning.get("strategy", "auto")
+    if config.get("lora") and config.lora.enabled:
+        from lightning.fabric.strategies import DDPStrategy
+        strategy = DDPStrategy(static_graph=True)
+    
     model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision
     if target_precision in ["16-true", "bf16-true"]:
-        plugins = HalfPrecisionPlugin(target_precision)
+        plugins.append(HalfPrecisionPlugin(target_precision))
         model_precision = torch.float16 if target_precision == "16-true" else torch.bfloat16
         del config.lightning.precision
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
-    fabric = pl.Fabric(loggers=[logger], plugins=plugins, **config.lightning)
+    fabric = pl.Fabric(loggers=[logger], plugins=plugins, strategy=strategy, **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
@@ -331,6 +338,16 @@ def main(args):
     else:
         params_to_optim = [{'params': model.model.parameters()}]   
 
+    if config.get("lora") and config.lora.enabled:
+        lora = LoConBaseModel(model.model, config.lora)
+        for param in model.parameters():
+            param.requires_grad = False
+        
+        lora.requires_grad_(True)
+        lora.inject()
+        fabric.to_device(lora)
+        model.lora = lora
+        params_to_optim = lora.parameters()
 
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     if fabric.is_global_zero and os.name != 'nt':
@@ -339,19 +356,10 @@ def main(args):
     scheduler = None
     if config.get("scheduler"):
         scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
-        
-    if config.get("lora") and config.lora.enabled:
-        lora = LoConBaseModel(model.model, config.lora)
-        for param in model.parameters():
-            param.requires_grad = False
-        
-        lora.inject()
-        lora.requires_grad_(True)
-        model.lora = lora
-        
-    model.model, optimizer = fabric.setup(model.model, optimizer)
-    dataloader = fabric.setup_dataloaders(dataloader)
+    
     fabric.to_device(model)
+    model, optimizer = fabric.setup(model, optimizer, move_to_device=False)
+    dataloader = fabric.setup_dataloaders(dataloader)
 
     if model_precision:
         cast_precision(model, model_precision)

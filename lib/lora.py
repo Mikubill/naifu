@@ -1,12 +1,10 @@
-import bisect
 import math
-import random
-from typing import Any, Dict, List, Mapping, Optional, Union
 
-import diffusers
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
+import contextlib
+from lib.utils import rank_zero_print
 
 class LoConBaseModel(torch.nn.Module):
     
@@ -33,7 +31,7 @@ class LoConBaseModel(torch.nn.Module):
         self.unet_loras = self.create_modules('lora_unet', unet, unet_modules, alpha, dropout)
             
         # print(f"create LoCon for Text Encoder: {len(self.text_encoder_loras)} modules.")
-        print(f"create LoCon for U-Net: {len(self.unet_loras)} modules.")
+        rank_zero_print(f"Constructing LoCon for U-Net: {len(self.unet_loras)} modules.")
         
         names = set()
         for lora in self.text_encoder_loras + self.unet_loras:
@@ -85,8 +83,34 @@ class LoConBaseModel(torch.nn.Module):
             
         for lora in self.text_encoder_loras + self.unet_loras:
             lora.inject()
-            self.add_module(lora.lora_name, lora)
-            
+            self.add_module(lora.lora_name, lora) 
+    
+    def merge(self, loras=[], store=True):
+        self.org_weight = []
+        for lora in loras:
+            org_module = lora.base_layer[0]
+            sd = org_module.state_dict()
+
+            org_weight = sd["weight"]
+            lora_weight = lora.get_weight().to(org_weight.device, dtype=org_weight.dtype)
+            org_module.load_state_dict({"weight": org_weight + lora_weight})
+            if store:
+                self.org_weight.append(org_weight)
+                
+    def restore(self, loras=[]):
+        assert len(self.org_weight) == len(loras)
+        for lora in loras:
+            org_module = lora.base_layer[0]
+            org_weight = self.org_weight.pop(0)
+            org_module.load_state_dict({"weight": org_weight})
+                
+    @contextlib.contextmanager
+    def apply_weights(self,):
+        self.merge(self.unet_loras)
+        try:
+            yield
+        finally:
+            self.restore(self.unet_loras)
 
 class LoConModule(torch.nn.Module):
     def __init__(self, lora_name, base_layer, multiplier=1.0, lora_dim=4, alpha=1, dropout=0):
@@ -110,7 +134,7 @@ class LoConModule(torch.nn.Module):
             self.lora_up = torch.nn.Linear(lora_dim, out_dim, bias=False)
         
         self.multiplier = multiplier
-        self.base_layer = base_layer
+        self.base_layer = [base_layer]
         
         alpha = lora_dim if alpha is None or alpha == 0 else alpha
         self.scale = alpha / self.lora_dim
@@ -121,10 +145,42 @@ class LoConModule(torch.nn.Module):
     
     def inject(self):
         # inject and init weights
-        self.org_forward = self.base_layer.forward
-        self.base_layer.forward = self.forward
-        del self.base_layer
+        self.org_forward = self.base_layer[0].forward
+        self.base_layer[0].forward = self.forward
 
     @torch.enable_grad() 
     def forward(self, x):
-        return self.org_forward(x) + self.dropout(self.lora_up(self.lora_down(x))) * self.multiplier * self.scale
+        lx = self.lora_down(x)
+
+        # normal dropout
+        if self.dropout is not None and self.training:
+            lx = self.dropout(lx)
+            
+        lx = self.lora_up(lx)
+        return self.org_forward(x) + lx * self.multiplier * self.scale
+    
+    def get_weight(self, multiplier=None):
+        if multiplier is None:
+            multiplier = self.multiplier
+
+        # get up/down weight from module
+        up_weight = self.lora_up.weight.to(torch.float)
+        down_weight = self.lora_down.weight.to(torch.float)
+
+        # pre-calculated weight
+        if len(down_weight.size()) == 2:
+            # linear
+            weight = self.multiplier * (up_weight @ down_weight) * self.scale
+        elif down_weight.size()[2:4] == (1, 1):
+            # conv2d 1x1
+            weight = (
+                self.multiplier
+                * (up_weight.squeeze(3).squeeze(2) @ down_weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
+                * self.scale
+            )
+        else:
+            # conv2d 3x3
+            conved = torch.nn.functional.conv2d(down_weight.permute(1, 0, 2, 3), up_weight).permute(1, 0, 2, 3)
+            weight = self.multiplier * conved * self.scale
+
+        return weight
