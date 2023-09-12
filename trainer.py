@@ -345,9 +345,8 @@ def main(args):
         
         lora.requires_grad_(True)
         lora.inject()
-        fabric.to_device(lora)
         model.lora = lora
-        params_to_optim = lora.parameters()
+        params_to_optim = [{'params': lora.parameters(), 'lr': config.lora.unet_lr}]
 
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     if fabric.is_global_zero and os.name != 'nt':

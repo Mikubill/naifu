@@ -88,14 +88,14 @@ class LoConBaseModel(torch.nn.Module):
     def merge(self, loras=[], store=True):
         self.org_weight = []
         for lora in loras:
+            lora.detech()
             org_module = lora.base_layer[0]
             sd = org_module.state_dict()
 
             org_weight = sd["weight"]
             lora_weight = lora.get_weight().to(org_weight.device, dtype=org_weight.dtype)
             org_module.load_state_dict({"weight": org_weight + lora_weight})
-            if store:
-                self.org_weight.append(org_weight)
+            if store: self.org_weight.append(org_weight)
                 
     def restore(self, loras=[]):
         assert len(self.org_weight) == len(loras)
@@ -103,6 +103,7 @@ class LoConBaseModel(torch.nn.Module):
             org_module = lora.base_layer[0]
             org_weight = self.org_weight.pop(0)
             org_module.load_state_dict({"weight": org_weight})
+            lora.inject()
                 
     @contextlib.contextmanager
     def apply_weights(self,):
@@ -147,6 +148,10 @@ class LoConModule(torch.nn.Module):
         # inject and init weights
         self.org_forward = self.base_layer[0].forward
         self.base_layer[0].forward = self.forward
+        
+    def detach(self):
+        # inject and init weights
+        self.base_layer[0].forward = self.org_forward
 
     @torch.enable_grad() 
     def forward(self, x):
