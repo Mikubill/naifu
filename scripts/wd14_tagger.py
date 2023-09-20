@@ -6,11 +6,12 @@ import re
 
 from typing import Tuple, List, Dict
 from PIL import Image
-from tqdm.auto import tqdm
+from tqdm.asyncio import tqdm
 
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 from onnxruntime import InferenceSession
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Code from https://github.com/toriato/stable-diffusion-webui-wd14-tagger
 # Partily from https://github.com/AdjointOperator/End2End-Tagger/
@@ -42,7 +43,7 @@ def smart_resize(img, size):
     return img
 
 
-class WDInterrogator():
+class Interrogator():
     def __init__(
         self,
         name: str,
@@ -55,11 +56,18 @@ class WDInterrogator():
         self.model_path = model_path
         self.tags_path = tags_path
         self.kwargs = kwargs
+        self.manual_sigmoid = False
         
     def load(self):
         model_path, tags_path = self.download()
         self.model = InferenceSession(str(model_path), providers=["CUDAExecutionProvider"])
-        self.tags = pd.read_csv(tags_path)
+        if Path(tags_path).suffix == '.csv':
+            self.tags = pd.read_csv(tags_path) 
+        elif Path(tags_path).suffix == '.json':
+            self.tags = pd.read_json(tags_path)
+        else:
+            raise ValueError(f"Unknown tags file format: {Path(tags_path).suffix}")    
+            
         self.useless_tags = set(
             ['virtual_youtuber'] +
             [tag for tag in self.tags if 'alternate_' in tag] +
@@ -150,6 +158,9 @@ class WDInterrogator():
         input_name = self.model.get_inputs()[0].name
         label_name = self.model.get_outputs()[0].name
         confidents = self.model.run([label_name], {input_name: image})[0]
+        
+        if self.manual_sigmoid:
+            confidents = 1.0 / (1.0 + np.exp(-confidents))
 
         tags = self.tags[:][["name"]]
         tags["confidents"] = confidents[0]
@@ -163,81 +174,94 @@ class WDInterrogator():
 
 
 interrogators = {
-    "wd14-convnextv2-v2": WDInterrogator(
+    "wd14-convnextv2-v2": Interrogator(
         "wd14-convnextv2-v2",
         repo_id="SmilingWolf/wd-v1-4-convnextv2-tagger-v2",
         revision="v2.0",
     ),
-    "wd14-vit-v2": WDInterrogator(
+    "wd14-vit-v2": Interrogator(
         "wd14-vit-v2", 
         repo_id="SmilingWolf/wd-v1-4-vit-tagger-v2", 
         revision="v2.0"
     ),
-    "wd14-convnext-v2": WDInterrogator(
+    "wd14-convnext-v2": Interrogator(
         "wd14-convnext-v2",
         repo_id="SmilingWolf/wd-v1-4-convnext-tagger-v2",
         revision="v2.0",
     ),
-    "wd14-swinv2-v2": WDInterrogator(
+    "wd14-swinv2-v2": Interrogator(
         "wd14-swinv2-v2",
         repo_id="SmilingWolf/wd-v1-4-swinv2-tagger-v2",
         revision="v2.0",
     ),
-    "wd14-convnextv2-v2-git": WDInterrogator(
+    "wd14-convnextv2-v2-git": Interrogator(
         "wd14-convnextv2-v2",
         repo_id="SmilingWolf/wd-v1-4-convnextv2-tagger-v2",
     ),
-    "wd14-vit-v2-git": WDInterrogator(
+    "wd14-vit-v2-git": Interrogator(
         "wd14-vit-v2-git", 
         repo_id="SmilingWolf/wd-v1-4-vit-tagger-v2"
     ),
-    "wd14-convnext-v2-git": WDInterrogator(
+    "wd14-convnext-v2-git": Interrogator(
         "wd14-convnext-v2-git", 
         repo_id="SmilingWolf/wd-v1-4-convnext-tagger-v2"
     ),
-    "wd14-swinv2-v2-git": WDInterrogator(
+    "wd14-swinv2-v2-git": Interrogator(
         "wd14-swinv2-v2-git", 
         repo_id="SmilingWolf/wd-v1-4-swinv2-tagger-v2"
     ),
-    "wd14-vit": WDInterrogator(
+    "wd14-vit": Interrogator(
         "wd14-vit", 
         repo_id="SmilingWolf/wd-v1-4-vit-tagger"
     ),
-    "wd14-convnext": WDInterrogator(
+    "wd14-convnext": Interrogator(
         "wd14-convnext", 
         repo_id="SmilingWolf/wd-v1-4-convnext-tagger"
     ),
-    "wd-v1-4-moat-tagger-v2": WDInterrogator(
+    "wd-v1-4-moat-tagger-v2": Interrogator(
         "wd-v1-4-moat-tagger-v2",
         repo_id="SmilingWolf/wd-v1-4-moat-tagger-v2"
-    ),
+    )
 }
 
+def process_image(path, args, interrogator):
+    imgpath = os.path.join(args.path, path)
+    name, ext = os.path.splitext(os.path.basename(imgpath))
+    if ext not in [".jpg", ".png", ".jpeg", ".webp"]:
+        return
+
+    ratings, tags = interrogator.interrogate(Image.open(imgpath))
+    tags = interrogator.postprocess_tags(tags, threshold=args.threshold)
+
+    with open(os.path.join(args.path, f"{name}.txt"), "w") as f:
+        if args.prefix and tags:
+            text_to_write = args.prefix + ", " + ", ".join(tags.keys())
+        elif args.prefix:
+            text_to_write = args.prefix
+        else:
+            text_to_write = ", ".join(tags.keys())
+        f.write(text_to_write)
+    
+
+
 if __name__ == "__main__":
-    # give a path to folder with images, use tqdm for progress bar
     args = argparse.ArgumentParser()
     args.add_argument("--path", type=str, default="/notebooks")
     args.add_argument("--interrogator", type=str, default="wd14-swinv2-v2")
     args.add_argument("--threshold", type=float, default=0.5)
     args.add_argument("--prefix", type=str, default="")
+    args.add_argument("--workers", type=int, default=4)
     args = args.parse_args()
     
-    # iter args.path
-    for path in tqdm(os.listdir(args.path)):
-        imgpath = os.path.join(args.path, path)
-        name, ext = os.path.splitext(os.path.basename(imgpath))
-        if ext not in [".jpg", ".png", ".jpeg", ".webp"]:
-            continue
+    # Create a thread pool
+    interrogator = interrogators[args.interrogator]
+    interrogator.load()
+    image_files = os.listdir(args.path)
+    
+    with ThreadPoolExecutor(max_workers=args.workers) as executor, tqdm(total=len(image_files)) as pbar:
+        # Use list comprehension to start a task for each image
+        futures = [executor.submit(process_image, path, args, interrogator) for path in image_files]
         
-        interrogator = interrogators[args.interrogator]
-        ratings, tags = interrogator.interrogate(Image.open(imgpath))
-        tags = interrogator.postprocess_tags(tags, threshold=args.threshold)
-
-        with open(os.path.join(args.path, f"{name}.txt"), "w") as f:
-            if args.prefix and tags:
-                text_to_write = args.prefix + ", " + ", ".join(tags.keys())
-            elif args.prefix:
-                text_to_write = args.prefix
-            else:
-                text_to_write = ", ".join(tags.keys())
-            f.write(text_to_write)
+        for future in as_completed(futures):
+            pbar.update()
+    

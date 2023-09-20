@@ -200,7 +200,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
 
             if fabric.is_global_zero:
                 prog_bar.update(1)
-                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")    
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
@@ -218,6 +218,9 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
 def sampler(logger, config, model, current_epoch, global_step):
     if not any(config.prompts):
         return
+    
+    rng_state = torch.get_rng_state()
+    cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
         
     save_dir = Path(config.save_dir) 
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -241,6 +244,9 @@ def sampler(logger, config, model, current_epoch, global_step):
         logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
     
     torch.cuda.empty_cache()
+    torch.set_rng_state(rng_state)
+    if cuda_rng_state is not None:
+        torch.cuda.set_rng_state(cuda_rng_state)
 
 def get_class(name: str):
     import importlib
@@ -301,7 +307,7 @@ def main(args):
     strategy = config.lightning.get("strategy", "auto")
     if config.get("lora") and config.lora.enabled:
         from lightning.fabric.strategies import DDPStrategy
-        strategy = DDPStrategy(static_graph=True)
+        strategy = DDPStrategy(static_graph=True) if torch.cuda.device_count() > 1 else "auto"
     
     model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision

@@ -234,7 +234,8 @@ class StableDiffusionModel(pl.LightningModule):
 
     def forward(self, batch):  
         if "latents" not in batch.keys():
-            latents = self.encode_first_stage(batch["images"])
+            self.first_stage_model.to(self.target_device)
+            latents = self.encode_first_stage(batch["images"].to(self.first_stage_model.dtype))
             if torch.any(torch.isnan(latents)):
                 rank_zero_print("NaN found in latents, replacing with zeros")
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
@@ -245,6 +246,7 @@ class StableDiffusionModel(pl.LightningModule):
             latents = batch["latents"] 
         
         if "conds" not in batch.keys():
+            self.get_conditioner().to(self.target_device)
             cond = self.get_conditioner()(batch)
         else:
             self.get_conditioner().cpu()
