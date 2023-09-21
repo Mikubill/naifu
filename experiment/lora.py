@@ -93,7 +93,7 @@ class LoRAModule(torch.nn.Module):
         self.base_layer.forward = self.forward
         del self.base_layer
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         return self.org_forward(x) + self.dropout(self.lora_up(self.lora_down(x))) * self.multiplier * self.scale
 
 
