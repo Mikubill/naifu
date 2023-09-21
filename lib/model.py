@@ -188,6 +188,7 @@ class StableDiffusionModel(pl.LightningModule):
         )
         
         # first construct batch
+        model_dtype = next(self.model.parameters()).dtype
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
             "original_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
@@ -198,8 +199,8 @@ class StableDiffusionModel(pl.LightningModule):
         prompts_batch["prompts"] = negative_prompt
         uncond = self.conditioner(prompts_batch)
         cond = {
-            "crossattn": torch.cat([uncond["crossattn"], cond["crossattn"]], dim=0).cuda().float(),
-            "vector": torch.cat([uncond["vector"], cond["vector"]], dim=0).cuda().float(),
+            "crossattn": torch.cat([uncond["crossattn"], cond["crossattn"]], dim=0).cuda().to(model_dtype),
+            "vector": torch.cat([uncond["vector"], cond["vector"]], dim=0).cuda().to(model_dtype),
         }
         
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
@@ -213,7 +214,7 @@ class StableDiffusionModel(pl.LightningModule):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
             latent_model_input = scheduler.scale_model_input(latent_model_input, t)
-            latent_model_input = latent_model_input.cuda().to(torch.float32)
+            latent_model_input = latent_model_input.cuda().to(model_dtype)
 
             noise_pred = self.model(latent_model_input, torch.asarray([t]).cuda(), cond)
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(num_latent_input)  # uncond by negative prompt
