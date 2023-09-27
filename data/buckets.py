@@ -20,7 +20,7 @@ class AspectRatioBucket:
         bsz=1,
         world_size=1,
         global_rank=0,
-        max_ar_error=4,
+        max_ar_error=1,
         seed=42,
         dim_limit=1024,
         debug=True,

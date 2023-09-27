@@ -52,7 +52,7 @@ def setup_model(config, farbic):
             "base_res": (base, base),
             "max_size": (base, base),
             "divisible": 64,
-            "max_ar_error": 4,
+            "max_ar_error": 1,
             "min_dim": int(base // 2),
             "dim_limit": int(base * 2),
             "debug": False

@@ -139,7 +139,11 @@ class StableDiffusionModel(pl.LightningModule):
             self.conditioner = conditioner
             
         self.noise_scheduler = DDPMScheduler(
-            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
+            beta_start=0.00085, 
+            beta_end=0.012, 
+            beta_schedule="scaled_linear", 
+            num_train_timesteps=1000,
+            clip_sample=False
         )
             
         self.to(self.target_device)
