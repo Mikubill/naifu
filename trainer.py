@@ -265,10 +265,11 @@ def cast_precision(tensor, precision):
     return tensor
 
 def create_vds_for_group(source_group, target_group, bar):
-    for key, item in source_group.items():
+    for key in source_group.keys():
         if key in target_group:
             if key.endswith(".latents"): bar.update(1)
             continue
+        item = source_group.get(key)
         layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
         layout[:] = h5py.VirtualSource(item)
         target_group.create_virtual_dataset(key, layout)
@@ -366,18 +367,19 @@ def main(args):
     model, optimizer = fabric.setup(model, optimizer, move_to_device=False)
     dataloader = fabric.setup_dataloaders(dataloader)
 
-    if model_precision:
-        cast_precision(model, model_precision)
-        model.first_stage_model.to(torch.float32)
-        
     if config.cache.enabled:
         update_cache_index(config.cache.cache_dir)
         fabric.barrier()
         
+        model.first_stage_model.to(torch.float32)
         allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
         fabric.barrier()
         if not allclose:
             update_cache_index(config.cache.cache_dir)
+            
+    if model_precision:
+        cast_precision(model, model_precision)
+        model.first_stage_model.to(torch.float32)
 
     fabric.barrier()
     torch.cuda.empty_cache()        
