@@ -361,9 +361,9 @@ def main(args):
         del config.lightning.accelerator
         
         config.cache.cache_dir = os.environ.get('SM_CHANNEL_CACHE', config.cache.cache_dir)
-        config.trainer.model_path = os.path.join(os.environ.get('SM_CHANNEL_MODEL', config.trainer.model_path))
-        config.trainer.checkpoint_dir = os.path.join(os.environ.get('SM_CHECKPOINT_DIR', config.trainer.checkpoint_dir))
-        config.sampling.save_dir = os.path.join(os.environ.get('SM_CHECKPOINT_DIR', config.trainer.checkpoint_dir))
+        config.trainer.model_path = os.path.join(os.environ.get('SM_CHANNEL_MODEL'), config.trainer.model_path)
+        config.trainer.checkpoint_dir = os.path.join(os.environ.get('SM_OUTPUT_DIR'), config.trainer.checkpoint_dir)
+        config.sampling.save_dir = os.path.join(os.environ.get('SM_OUTPUT_DIR'), config.sampling.save_dir)
     
     model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision

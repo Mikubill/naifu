@@ -18,4 +18,5 @@ open-clip-torch
 einops
 scipy
 torch_ema
+# prodigyopt
 # xformers
