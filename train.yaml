@@ -10,11 +10,8 @@ trainer:
   use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
-
   offset_noise: true
   offset_noise_val: 0.0375
-  min_snr: false
-  min_snr_val: 5
 
   checkpoint_dir: checkopint
   checkpoint_freq: 1
@@ -110,3 +107,7 @@ sampling:
 #   lora_alpha: 8
 #   multipier: 1.0
 #   unet_lr: 1e-4
+#
+# extra:
+#   timestep_start: 0
+#   timestep_end: 1000

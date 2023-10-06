@@ -24,6 +24,8 @@ from data.store import AspectRatioDataset
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
 
+text_progress = False
+
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
@@ -182,6 +184,12 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             optimizer.step()
             optimizer.zero_grad(set_to_none=True) 
             last_lr = [group.get("lr", 0) for group in optimizer.param_groups]
+            is_adaptive = False
+            
+            if model.config.optimizer.name.startswith("DAdapt") or model.config.optimizer.name.startswith("prodigyopt"): 
+                # tracking d*lr value
+                is_adaptive = True
+                last_d_lr = [(group["d"] * group["lr"]) for group in optimizer.param_groups]
                 
             # use float as epoch
             if scheduler is not None:
@@ -194,13 +202,21 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
                 fabric.log("train_loss", loss, step=global_step)
                 for i, lr in enumerate(last_lr):
                     fabric.log(f"lr-{optimizer.__class__.__name__}-{i}", lr, step=global_step)
+                
+                if is_adaptive:
+                    for i, lr in enumerate(last_d_lr):
+                        fabric.log(f"d*lr-{optimizer.__class__.__name__}-{i}", lr, step=global_step)
 
             if cfg.use_ema and fabric.is_global_zero: 
                 model.model_ema.update()
 
-            if fabric.is_global_zero:
-                prog_bar.update(1)
-                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")    
+            if fabric.is_global_zero:  
+                if text_progress: 
+                    print(f"Train Loss: {loss};")
+                    print()
+                else:
+                    prog_bar.update(1)
+                    prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")  
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
@@ -296,6 +312,29 @@ def get_lr_for_name(name, lr_conf):
             return lr
     return None
 
+def setup_smddp():
+    import smdistributed.dataparallel.torch.torch_smddp
+    from lightning.pytorch.plugins.environments import LightningEnvironment
+    from lightning.fabric.strategies import DDPStrategy
+
+    env = LightningEnvironment()
+    env.world_size = lambda: int(os.environ["WORLD_SIZE"])
+    env.global_rank = lambda: int(os.environ["RANK"])
+    strategy = DDPStrategy(
+        cluster_environment=env, 
+        process_group_backend="smddp", 
+        accelerator="gpu"
+    )
+    
+    world_size = int(os.environ["WORLD_SIZE"])
+    num_gpus = int(os.environ["SM_NUM_GPUS"])
+    num_nodes = int(world_size/num_gpus)
+    init_params = {
+        "devices": num_gpus, 
+        "num_nodes": num_nodes,
+    }
+    return strategy, init_params
+
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
@@ -309,6 +348,22 @@ def main(args):
     if config.get("lora") and config.lora.enabled:
         from lightning.fabric.strategies import DDPStrategy
         strategy = DDPStrategy(static_graph=True) if torch.cuda.device_count() > 1 else "auto"
+        
+    if config.get("s3") and config.s3.enabled:
+        import fsspec
+        fsspec.config.conf['s3'] = dict(config.s3.params)
+            
+    if os.environ.get('SM_TRAINING', False):
+        global text_progress 
+        text_progress = True
+        strategy, init_params = setup_smddp()
+        config.lightning.update(init_params)
+        del config.lightning.accelerator
+        
+        config.cache.cache_dir = os.environ.get('SM_CHANNEL_CACHE', config.cache.cache_dir)
+        config.trainer.model_path = os.path.join(os.environ.get('SM_CHANNEL_MODEL', config.trainer.model_path))
+        config.trainer.checkpoint_dir = os.path.join(os.environ.get('SM_CHECKPOINT_DIR', config.trainer.checkpoint_dir))
+        config.sampling.save_dir = os.path.join(os.environ.get('SM_CHECKPOINT_DIR', config.trainer.checkpoint_dir))
     
     model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision

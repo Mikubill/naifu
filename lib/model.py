@@ -5,14 +5,16 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from PIL import Image
-from lib.utils import load_torch_file
 from omegaconf import OmegaConf 
 from pathlib import Path
-from diffusers import DDPMScheduler
-from lib.sgm import GeneralConditioner
 from torch_ema import ExponentialMovingAverage
+
+from lib.sgm import GeneralConditioner
+from lib.sgm.denoiser import DiscreteSampling, DiscreteDenoiser
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
-from lib.utils import rank_zero_print
+from lib.utils import load_torch_file, rank_zero_print
+from lib.sgm.encoder_util import append_dims
+
 from diffusers import EulerDiscreteScheduler
 from lightning.pytorch.utilities import rank_zero_only
 
@@ -21,41 +23,6 @@ def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
     does not change anymore."""
     return self
-
-
-def min_snr_weighted_loss(eps_pred:torch.Tensor, eps:torch.Tensor, timesteps, noise_scheduler, snr_gamma):
-    """
-    Computes SNR as per https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
-    """
-    alphas_cumprod = noise_scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = alphas_cumprod**0.5
-    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
-
-    # Expand the tensors.
-    # Adapted from https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L1026
-    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
-    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
-    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
-
-    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
-    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
-    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
-
-    # Compute SNR.
-    snr = (alpha / sigma) ** 2
-
-    mse_loss_weights = (
-        torch.stack([snr, snr_gamma * torch.ones_like(timesteps)], dim=1).min(dim=1)[0] / snr
-    )
-    # We first calculate the original loss. Then we mean over the non-batch dimensions and
-    # rebalance the sample-wise losses with their respective loss weights.
-    # Finally, we take the mean of the rebalanced loss.
-    loss = F.mse_loss(eps_pred.float(), eps.float(), reduction="none")
-    loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
-    loss = loss.mean()
-    return loss
 
 
 # define the LightningModule
@@ -138,14 +105,6 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             self.conditioner = conditioner
             
-        self.noise_scheduler = DDPMScheduler(
-            beta_start=0.00085, 
-            beta_end=0.012, 
-            beta_schedule="scaled_linear", 
-            num_train_timesteps=1000,
-            clip_sample=False
-        )
-            
         self.to(self.target_device)
         rank_zero_print(f"Loading model from {self.model_path}")
         missing, unexpected = self.load_state_dict(sd, strict=False)
@@ -161,6 +120,12 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.cast_dtype = torch.float32
         self.get_conditioner = lambda: self.conditioner if hasattr(self, "conditioner") else self.cond_stage_model
+        
+        self.sigma_sampler = DiscreteSampling()
+        self.denoiser = DiscreteDenoiser()
+        self.offset_noise_level = self.config.trainer.get("offset_noise_val")
+        self.type = loss_type = "l2"
+        self.extra_config = self.config.get("extra", None)
         
         if config.trainer.use_ema: 
             self.model_ema = ExponentialMovingAverage(self.model.parameters(), decay=0.9999)
@@ -259,43 +224,45 @@ class StableDiffusionModel(pl.LightningModule):
         
         model_dtype = next(self.model.parameters()).dtype
         cond = {k: v.to(model_dtype) for k, v in cond.items()}
-        # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents, dtype=model_dtype)
-        if self.config.trainer.get("offset_noise"):
-            noise = torch.randn_like(latents) + float(self.config.trainer.get("offset_noise_val")) \
-                * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
-        
-        # https://arxiv.org/abs/2301.11706
-        if self.config.trainer.get("input_perturbation"):
-            noise = noise + float(self.config.trainer.get("input_perturbation_val")) * torch.randn_like(noise)
 
-        bsz = latents.shape[0]
-            
-        # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), dtype=torch.int64, device=latents.device)
-
-        # Add noise to the latents according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-            
-        # Predict the noise residual
-        noise_pred = self.model(noisy_latents, timesteps, cond)
-        
-        # Get the target for loss depending on the prediction type
-        if self.noise_scheduler.config.prediction_type == "epsilon":
-            target = noise
-        elif self.noise_scheduler.config.prediction_type == "v_prediction":
-            target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
-        else:
-            raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
-
-        if not self.config.trainer.get("min_snr"):
-            loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")  
-        else:
-            gamma = self.config.trainer.get("min_snr_val")
-            loss = min_snr_weighted_loss(noise_pred.float(), target.float(), timesteps, self.noise_scheduler, gamma)
-
+        loss = self.loss_fn(self.model, cond, latents)
+        loss = loss.mean()
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
                 
         return loss
+    
+    def loss_fn(self, network, cond, input):
+        if self.extra_config is not None:
+            step_start = self.extra_config.get("timestep_start", 0)
+            step_end = self.extra_config.get("timestep_end", 1000)
+            
+            n_samples = input.shape[0]
+            rand = torch.randint(step_start, step_end, (n_samples,)),
+            sigmas = self.sigma_sampler(n=n_samples, rand=rand).to(input.device)
+        else:
+            sigmas = self.sigma_sampler(input.shape[0]).to(input.device)
+            
+        noise = torch.randn_like(input)
+        if self.offset_noise_level > 0.0:
+            noise = noise + self.offset_noise_level * append_dims(
+                torch.randn(input.shape[0], device=input.device), input.ndim
+            )
+        
+        noised_input = input + noise * append_dims(sigmas, input.ndim)
+        model_output = self.denoiser(network, noised_input, sigmas, cond)
+        w = append_dims(self.denoiser.w(sigmas), input.ndim)
+        return self.get_loss(model_output, input, w)
+
+    def get_loss(self, model_output, target, w):
+        if self.type == "l2":
+            return torch.mean(
+                (w * (model_output - target) ** 2).reshape(target.shape[0], -1), 1
+            )
+        elif self.type == "l1":
+            return torch.mean(
+                (w * (model_output - target).abs()).reshape(target.shape[0], -1), 1
+            )
+        elif self.type == "lpips":
+            loss = self.lpips(model_output, target).reshape(-1)
+            return loss

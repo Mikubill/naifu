@@ -340,14 +340,28 @@ class AspectRatioDataset(ImageStore):
             cache_dir.mkdir(parents=True, exist_ok=True)
 
         with h5py.File("cache_index.tmp", "r") as cache:
-            to_cache_images = self.cache_images and any(f"{self.hash(img)}.latents" not in cache \
-                for entry in store.buckets.keys() for img in store.buckets[entry][:])
-            to_cache_prompts = self.cache_prompts and any(f"{self.hash(img)}.crossattn" not in cache \
-                for entry in store.buckets.keys() for img in store.buckets[entry][:])
+            cache_keys = set(cache.keys())
+            all_images = [img for entry in store.buckets.keys() for img in store.buckets[entry][:]]
+
+            # Check for missing cache entries
+            missing_latents = any(f"{self.hash(img)}.latents" not in cache_keys for img in all_images)
+            missing_crossattn = any(f"{self.hash(img)}.crossattn" not in cache_keys for img in all_images)
+
+            to_cache_images = self.cache_images and missing_latents
+            to_cache_prompts = self.cache_prompts and missing_crossattn
             if not to_cache_images and not to_cache_prompts:
                 rank_zero_print(f"Restored cache from {cache_dir.absolute()}")
                 return True
-        
+            
+        if to_cache_images and any(Path(entry).suffix == ".json" for entry in self.dataset):
+            all_latents = set(v[:-8] for v in cache_keys if v.endswith(".latents"))
+            missing_keys = set(self.hash(img) for img in all_images) - all_latents
+            
+            rank_zero_print(f"Note: Ignoring {len(missing_keys)} entries in cache.")
+            self.entries = [entry for entry in self.entries if entry[0] not in missing_keys]
+            self.init_buckets()
+            return True
+
         cache_file = cache_dir / f"cache_r{self.rank}.h5"      
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
