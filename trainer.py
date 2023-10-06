@@ -213,7 +213,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             if fabric.is_global_zero:  
                 if text_progress: 
                     print(f"Train Loss: {loss};")
-                    print()
+                    print(f"LR: {last_lr}, Global Step: {global_step}")
                 else:
                     prog_bar.update(1)
                     prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")  
