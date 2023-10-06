@@ -313,7 +313,6 @@ def get_lr_for_name(name, lr_conf):
     return None
 
 def setup_smddp():
-    import smdistributed.dataparallel.torch.torch_smddp
     from lightning.pytorch.plugins.environments import LightningEnvironment
     from lightning.fabric.strategies import DDPStrategy
 
@@ -321,9 +320,9 @@ def setup_smddp():
     env.world_size = lambda: int(os.environ["WORLD_SIZE"])
     env.global_rank = lambda: int(os.environ["RANK"])
     strategy = DDPStrategy(
-        cluster_environment=env, 
-        process_group_backend="smddp", 
-        accelerator="gpu"
+        cluster_environment=env,  
+        accelerator="gpu",
+        static_graph=True,
     )
     
     world_size = int(os.environ["WORLD_SIZE"])
