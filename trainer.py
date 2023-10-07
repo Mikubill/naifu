@@ -291,8 +291,10 @@ def create_vds_for_group(source_group, target_group, bar):
         target_group.create_virtual_dataset(key, layout)
         if key.endswith(".latents"): bar.update(1)
 
-@rank_zero_only
-def update_cache_index(cache_dir):
+def update_cache_index(cache_dir, is_local_rank_zero=False):
+    if not is_local_rank_zero:
+        return
+    
     os.remove("cache_index.tmp") if os.path.exists("cache_index.tmp") else None
     try:
         cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
@@ -422,14 +424,14 @@ def main(args):
     dataloader = fabric.setup_dataloaders(dataloader)
 
     if config.cache.enabled:
-        update_cache_index(config.cache.cache_dir)
+        update_cache_index(config.cache.cache_dir, fabric.local_rank in [0, -1])
         fabric.barrier()
         
         model.first_stage_model.to(torch.float32)
         allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
         fabric.barrier()
         if not allclose:
-            update_cache_index(config.cache.cache_dir)
+            update_cache_index(config.cache.cache_dir, fabric.local_rank in [0, -1])
             
     if model_precision:
         cast_precision(model, model_precision)
