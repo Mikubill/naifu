@@ -214,9 +214,9 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
                 if text_progress: 
                     print(f"Train Loss: {loss};")
                     print(f"LR: {last_lr}, Global Step: {global_step}")
-                else:
-                    prog_bar.update(1)
-                    prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")  
+                
+                prog_bar.update(1)
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")  
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:

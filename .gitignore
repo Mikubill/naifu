@@ -15,6 +15,6 @@ dataset.json
 *.tmp
 text_encoder_allclose.ipynb
 sagemaker_launch.py
-train-actual.yaml
 sagemaker_launch.ipynb
-train-actual-2.yaml
+*.json
+train-*.yaml
