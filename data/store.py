@@ -223,7 +223,7 @@ class ImageStore(torch.utils.data.IterableDataset):
                 "target_size_as_tuple": (self.size, self.size),
             }
             return inst
-    
+
     
 class AspectRatioDataset(ImageStore):
     def __init__(self, arb_config, debug_arb=False, **kwargs):
@@ -240,6 +240,7 @@ class AspectRatioDataset(ImageStore):
         self.use_legacy_key = kwargs.get("use_legacy_key", False)
         self.hashes = {}
         self.embed_cache = {}
+        self.cache_index = None
         
         for path, prompt, _ in self.entries:
             self.prompt_cache[path] = prompt
@@ -330,10 +331,33 @@ class AspectRatioDataset(ImageStore):
         if self.use_legacy_key:
             return fp
         return self.hashes[fp]
+    
+    def update_cache_index(self, cache_dir):
+        if self.rank not in [0, -1]:
+            return
+
+        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
+        bar = tqdm(desc="Updating index", mininterval=0.25)
+        cache_index = {}
+        for input_file in cache_parts:
+            with h5py.File(input_file, 'r') as fi:
+                for key in fi.keys():
+                    cache_index[key] = str(input_file)
+                    bar.update(1)
         
-    def setup_cache(self, vae_encode_func, token_encode_func):
+        # save as h5 file
+        with h5py.File("cache_index.tmp", "w") as fo:
+            for key, value in cache_index.items():
+                fo.create_dataset(key, data=value)
+        
+        self.cache_index = cache_index
+        
+    def setup_cache(self, fabric, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
         store = self.buckets
+        self.update_cache_index(cache_dir)
+        fabric.barrier()
+        
         self.cache_images = "images" in self.cache_target
         self.cache_prompts = "prompts" in self.cache_target
         if not cache_dir.exists():
@@ -366,7 +390,8 @@ class AspectRatioDataset(ImageStore):
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
             
-        return False
+        fabric.barrier()
+        self.update_cache_index(cache_dir)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
         progress_bar = tqdm(total=len(self.entries) // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
@@ -488,34 +513,46 @@ class AspectRatioDataset(ImageStore):
 
                     if bar is not None:
                         bar.update(1)
+                        
+    def fetch_cache(self, key):
+        if self.cache_index is None:
+            with h5py.File("cache_index.tmp", "r") as f:
+                self.cache_index = {key: f[key][()] for key in f.keys()}
+        try:
+            fs_loc = self.cache_index[key]
+            with h5py.File(fs_loc, "r") as f:
+                return f[key][:]
+        except KeyError:
+            return None
 
     def build_dict(self, item) -> dict:
         item_id, size, = item["instance"], item["size"],
         cache_images = "images" in self.cache_target
         cache_prompts = "prompts" in self.cache_target
 
-        
         result = {}
         if item_id == "":
             return {}
         
         if self.cache_enabled:
             cachekey = self.hash(item_id)
-            with h5py.File("cache_index.tmp", "r") as cache:
-                if cache_images:
-                    latent = torch.asarray(cache[f"{cachekey}.latents"][:])
-                    latent_size = cache[f"{cachekey}.size"][:]
-                    estimate_size = latent_size[1] // 8, latent_size[0] // 8,
-                    if latent.shape != (4, *estimate_size):
-                        rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
-                    result.update({"latents": latent})
-                if cache_prompts:
-                    prompt = {"crossattn": torch.asarray(cache[f"{cachekey}.crossattn"][:])}   
-                    if f"{cachekey}.vec" in cache:
-                        prompt.update({"vector": torch.asarray(cache[f"{cachekey}.vec"][:])}) 
-                    result.update({"conds": prompt})
-                if len(result) == 2:
-                    return result
+            if cache_images:
+                latent = torch.asarray(self.fetch_cache(f"{cachekey}.latents"))
+                latent_size = self.fetch_cache(f"{cachekey}.size")
+                estimate_size = latent_size[1] // 8, latent_size[0] // 8,
+                if latent.shape != (4, *estimate_size):
+                    rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
+                result.update({"latents": latent})
+                
+            if cache_prompts:
+                prompt = {"crossattn": torch.asarray(self.fetch_cache(f"{cachekey}.crossattn"))} 
+                vec = self.fetch_cache(f"{cachekey}.vec")  
+                if vec is not None:
+                    prompt.update({"vector": torch.asarray(vec)}) 
+                result.update({"conds": prompt})
+                
+            if len(result) == 2:
+                return result
                 
         if isinstance(self.embed_cache, h5py.File):
             prompt = {"crossattn": torch.asarray(self.embed_cache[f"{cachekey}.crossattn"][:])}   

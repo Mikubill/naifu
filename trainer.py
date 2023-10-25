@@ -280,33 +280,6 @@ def cast_precision(tensor, precision):
         tensor.to(precision)
     return tensor
 
-def create_vds_for_group(source_group, target_group, bar):
-    for key in source_group.keys():
-        if key in target_group:
-            if key.endswith(".latents"): bar.update(1)
-            continue
-        item = source_group.get(key)
-        layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
-        layout[:] = h5py.VirtualSource(item)
-        target_group.create_virtual_dataset(key, layout)
-        if key.endswith(".latents"): bar.update(1)
-
-def update_cache_index(cache_dir, is_local_rank_zero=False):
-    if not is_local_rank_zero:
-        return
-    
-    os.remove("cache_index.tmp") if os.path.exists("cache_index.tmp") else None
-    try:
-        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
-        with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
-            bar = tqdm(desc="Updating index")
-            for input_file in cache_parts:
-                with h5py.File(input_file, 'r') as fi:
-                    create_vds_for_group(fi, fo, bar)
-    except Exception as e:
-        print(f"Warn: unable to write cache_index.tmp - remove if exists: {e}")
-        exit()
-                
 def get_lr_for_name(name, lr_conf):
     for item in lr_conf:
         regex_pattern, lr = list(item.items())[0]
@@ -424,14 +397,8 @@ def main(args):
     dataloader = fabric.setup_dataloaders(dataloader)
 
     if config.cache.enabled:
-        update_cache_index(config.cache.cache_dir, fabric.local_rank in [0, -1])
-        fabric.barrier()
-        
         model.first_stage_model.to(torch.float32)
-        allclose = dataset.setup_cache(model.encode_first_stage, model.get_conditioner())
-        fabric.barrier()
-        if not allclose:
-            update_cache_index(config.cache.cache_dir, fabric.local_rank in [0, -1])
+        dataset.setup_cache(fabric, model.encode_first_stage, model.get_conditioner())
             
     if model_precision:
         cast_precision(model, model_precision)

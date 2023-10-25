@@ -224,6 +224,7 @@ class StableDiffusionModel(pl.LightningModule):
         
         model_dtype = next(self.model.parameters()).dtype
         cond = {k: v.to(model_dtype) for k, v in cond.items()}
+        latents = latents.to(model_dtype)
 
         loss = self.loss_fn(self.model, cond, latents)
         loss = loss.mean()

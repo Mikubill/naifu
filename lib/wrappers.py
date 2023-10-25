@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 import math
 from packaging import version
@@ -10,16 +11,9 @@ class AutoencoderKLWrapper(AutoencoderKL):
         super().__init__(*args, **kwargs)
 
 class UnetWrapper(torch.nn.Module):
-    def __init__(self, config, compile_model: bool = False):
+    def __init__(self, config):
         super().__init__()
-        compile = (
-            torch.compile
-            if (version.parse(torch.__version__) >= version.parse("2.0.0"))
-            and compile_model
-            else lambda x: x
-        )
-        diffusion_model = UNetModel(**config)
-        self.diffusion_model = compile(diffusion_model)
+        self.diffusion_model = UNetModel(**config)
         
     def forward(self, x: torch.Tensor, t: torch.Tensor, c: dict, **kwargs) -> torch.Tensor:
         x = torch.cat((x, c.get("concat", torch.Tensor([]).type_as(x))), dim=1)
