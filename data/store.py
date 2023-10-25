@@ -345,10 +345,9 @@ class AspectRatioDataset(ImageStore):
                     cache_index[key] = str(input_file)
                     bar.update(1)
         
-        # save as h5 file
-        with h5py.File("cache_index.tmp", "w") as fo:
-            for key, value in cache_index.items():
-                fo.create_dataset(key, data=value)
+        # save as json
+        with open("cache_index.tmp", "w") as f:
+            json.dump(cache_index, f)
         
         self.cache_index = cache_index
         
@@ -363,7 +362,8 @@ class AspectRatioDataset(ImageStore):
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        with h5py.File("cache_index.tmp", "r") as cache:
+        with open("cache_index.tmp", "r") as cache:
+            cache = json.load(cache)
             cache_keys = set(cache.keys())
             all_images = [img for entry in store.buckets.keys() for img in store.buckets[entry][:]]
 
@@ -516,8 +516,8 @@ class AspectRatioDataset(ImageStore):
                         
     def fetch_cache(self, key):
         if self.cache_index is None:
-            with h5py.File("cache_index.tmp", "r") as f:
-                self.cache_index = {key: f[key][()] for key in f.keys()}
+            with open("cache_index.tmp", "r") as cache:
+                self.cache_index = json.load(cache)
         try:
             fs_loc = self.cache_index[key]
             with h5py.File(fs_loc, "r") as f:
