@@ -332,8 +332,8 @@ class AspectRatioDataset(ImageStore):
             return fp
         return self.hashes[fp]
     
-    def update_cache_index(self, cache_dir):
-        if self.rank not in [0, -1]:
+    def update_cache_index(self, cache_dir, rank):
+        if rank not in [0, -1]:
             return
 
         cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
@@ -354,7 +354,7 @@ class AspectRatioDataset(ImageStore):
     def setup_cache(self, fabric, vae_encode_func, token_encode_func):
         cache_dir = Path(self.cache_dir)
         store = self.buckets
-        self.update_cache_index(cache_dir)
+        self.update_cache_index(cache_dir, fabric.local_rank)
         fabric.barrier()
         
         self.cache_images = "images" in self.cache_target
@@ -391,7 +391,7 @@ class AspectRatioDataset(ImageStore):
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
             
         fabric.barrier()
-        self.update_cache_index(cache_dir)
+        self.update_cache_index(cache_dir, fabric.local_rank)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
         progress_bar = tqdm(total=len(self.entries) // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
