@@ -36,11 +36,11 @@ def get_args():
     )
     parser.add_argument(
         "--linear_dim", help="network dim for linear layer in fixed mode",
-        default=64, type=int
+        default=128, type=int
     )
     parser.add_argument(
         "--conv_dim", help="network dim for conv layer in fixed mode",
-        default=64, type=int
+        default=128, type=int
     )
     parser.add_argument(
         "--linear_threshold", help="singular value threshold for linear layer in threshold mode",

@@ -240,12 +240,12 @@ class StableDiffusionModel(pl.LightningModule):
             
             n_samples = input.shape[0]
             rand = torch.randint(step_start, step_end, (n_samples,)),
-            sigmas = self.sigma_sampler(n=n_samples, rand=rand).to(input.device)
+            sigmas = self.sigma_sampler(n_samples, rand=rand).to(input.device)
         else:
             sigmas = self.sigma_sampler(input.shape[0]).to(input.device)
             
-        noise = torch.randn_like(input)
-        if self.offset_noise_level > 0.0:
+        noise = torch.randn_like(input, device=input.device)
+        if self.offset_noise_level > 0.0 and self.config.trainer.offset_noise:
             noise = noise + self.offset_noise_level * append_dims(
                 torch.randn(input.shape[0], device=input.device), input.ndim
             )
