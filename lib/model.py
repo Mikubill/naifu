@@ -1,6 +1,5 @@
 
-import math, h5py, os
-from tqdm import tqdm
+import math
 
 import lightning.pytorch as pl
 import torch
@@ -22,29 +21,6 @@ def get_class(name: str):
     module_name, class_name = name.rsplit(".", 1)
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
-
-def create_vds_for_group(source_group, target_group, bar):
-    for key, item in source_group.items():
-        if key in target_group:
-            if key.endswith(".latents"): bar.update(1)
-            continue
-        layout = h5py.VirtualLayout(shape=item.shape, dtype=item.dtype)
-        layout[:] = h5py.VirtualSource(item)
-        target_group.create_virtual_dataset(key, layout)
-        if key.endswith(".latents"): bar.update(1)
-
-@rank_zero_only
-def update_cache_index(cache_dir):
-    try:
-        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
-        with h5py.File("cache_index.tmp", 'a', libver='latest', driver='core') as fo:  # using 'latest' for VDS support
-            bar = tqdm(desc="Updating index")
-            for input_file in cache_parts:
-                with h5py.File(input_file, 'r') as fi:
-                    create_vds_for_group(fi, fo, bar)
-    except Exception as e:
-        print(f"Warn: unable to write cache_index.tmp - remove if exists: {e}")
-        exit()
 
 def get_pipeline(model_path):
     if Path(model_path).is_file():
@@ -435,14 +411,13 @@ class StableDiffusionModel(pl.LightningModule):
 
         if self.use_latent_cache:
             cache_dir = self.config.dataset.get("cache_dir", "cache")
-            update_cache_index(cache_dir)
+            self.dataset.update_cache_index(cache_dir, self.local_rank)
             self.trainer.strategy.barrier()
 
             allclose = self.dataset.cache_latents(self.encode_pixels)
             self.trainer.strategy.barrier()
-
             if not allclose:
-                update_cache_index(cache_dir)
+                self.dataset.update_cache_index(cache_dir, self.local_rank)
                     
             # wait for all processes to finish combining the cache
             self.trainer.strategy.barrier()

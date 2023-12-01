@@ -334,18 +334,37 @@ class AspectRatioDataset(ImageStore):
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        with h5py.File("cache_index.tmp", "r") as cache:
-            to_cache_images = any(f"{self.hash(img)}.latents" not in cache \
+        with open("cache_index.tmp", "r") as cache:
+            cache = json.load(cache)
+            cache_keys = set(cache.keys())
+            to_cache_images = any(f"{self.hash(img)}.latents" not in cache_keys \
                 for entry in store.buckets.keys() for img in store.buckets[entry][:])
             if not to_cache_images:
                 rank_zero_print(f"Restored cache from {cache_dir.absolute()}")
                 return True
-            
+    
         cache_file = cache_dir / f"cache_r{self.rank}.h5"      
         with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
             self.fulfill_cache(cache, vae, store)
             
         return False
+    
+    def update_cache_index(self, cache_dir, rank):
+        if rank not in [0, -1]:
+            return
+
+        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
+        bar = tqdm(desc="Updating index", mininterval=0.25)
+        cache_index = {}
+        for input_file in cache_parts:
+            with h5py.File(input_file, 'r') as fi:
+                for key in fi.keys():
+                    cache_index[key] = str(input_file)
+                    bar.update(1)
+        
+        # save as json
+        with open("cache_index.tmp", "w") as f:
+            json.dump(cache_index, f)
 
     def fulfill_cache(self, cache, vae_encode_func, store):
         progress_bar = tqdm(total=len(self.entries) // self.world_size, \
@@ -395,6 +414,10 @@ class AspectRatioDataset(ImageStore):
 
         if item_id == "":
             return {}
+        
+        if not hasattr(self, "cache_index") and self.cache_enabled:    
+            with open("cache_index.tmp", "r") as f:
+                self.cache_index = json.load(f)
 
         prompt, _ = self.process_tags(self.prompt_cache[item_id])
         if random.random() < self.ucg:
@@ -404,7 +427,8 @@ class AspectRatioDataset(ImageStore):
         if self.cache_enabled:
             import h5py
             cachekey = self.hash(item_id)
-            with h5py.File("cache_index.tmp", "r") as cache:
+            fs_loc = self.cache_index[f"{cachekey}.latents"]
+            with h5py.File(fs_loc, "r") as cache:
                 latent = torch.asarray(cache[f"{cachekey}.latents"][:])
                 original_size = cache[f"{cachekey}.size"][:]
                 estimate_size = original_size[1] // 8, original_size[0] // 8,
