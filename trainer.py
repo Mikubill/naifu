@@ -12,7 +12,6 @@ import lightning as pl
 
 from lib.args import parse_args
 from lib.model import StableDiffusionModel
-from lib.precision import HalfPrecisionPlugin
 from lib.lora import LoConBaseModel
 
 from omegaconf import OmegaConf
@@ -339,10 +338,11 @@ def main(args):
     
     model_precision = config.trainer.get("model_precision", torch.float32)
     target_precision = config.lightning.precision
-    if target_precision in ["16-true", "bf16-true"]:
-        plugins.append(HalfPrecisionPlugin(target_precision))
-        model_precision = torch.float16 if target_precision == "16-true" else torch.bfloat16
-        del config.lightning.precision
+    
+    if target_precision == "16-true":
+        model_precision = torch.float16
+    elif target_precision == "bf16-true":
+        model_precision = torch.bfloat16
 
     logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[logger], plugins=plugins, strategy=strategy, **config.lightning)
