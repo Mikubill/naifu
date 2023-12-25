@@ -251,6 +251,7 @@ class StableDiffusionModel(pl.LightningModule):
             )
         
         noised_input = input + noise * append_dims(sigmas, input.ndim)
+        noised_input = noised_input.to(input.dtype)
         model_output = self.denoiser(network, noised_input, sigmas, cond)
         w = append_dims(self.denoiser.w(sigmas), input.ndim)
         return self.get_loss(model_output, input, w)
