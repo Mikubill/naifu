@@ -340,7 +340,7 @@ class AspectRatioDataset(ImageStore):
         bar = tqdm(desc="Updating index", mininterval=0.25)
         cache_index = {}
         for input_file in cache_parts:
-            with h5py.File(input_file, 'r') as fi:
+            with h5py.File(input_file, 'r', libver='latest') as fi:
                 for key in fi.keys():
                     cache_index[key] = str(input_file)
                     bar.update(1)
@@ -387,7 +387,7 @@ class AspectRatioDataset(ImageStore):
             return True
 
         cache_file = cache_dir / f"cache_r{self.rank}.h5"      
-        with h5py.File(cache_file, "r+") if cache_file.exists() else h5py.File(cache_file, "w") as cache:
+        with h5py.File(cache_file, "r+", libver='latest') if cache_file.exists() else h5py.File(cache_file, "w", libver='latest') as cache:
             self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
             
         fabric.barrier()
@@ -476,7 +476,7 @@ class AspectRatioDataset(ImageStore):
             self.embed_cache.close()
             
         temp_file = tempfile.NamedTemporaryFile(delete=True)
-        self.embed_cache = h5py.File(temp_file.name, "w")
+        self.embed_cache = h5py.File(temp_file.name, "w", libver='latest')
         
         store = self.buckets
         if bar is not None:
@@ -520,7 +520,7 @@ class AspectRatioDataset(ImageStore):
                 self.cache_index = json.load(cache)
         try:
             fs_loc = self.cache_index[key]
-            with h5py.File(fs_loc, "r") as f:
+            with h5py.File(fs_loc, "r", libver='latest') as f:
                 return f[key][:]
         except KeyError:
             return None
