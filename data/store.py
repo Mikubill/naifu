@@ -21,7 +21,6 @@ def get_class(name: str):
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
-
 class ImageStore(torch.utils.data.IterableDataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -37,7 +36,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         rank=0,
         tag_processor=[],
         world_size=1,
-        allow_duplicates=False,
         **kwargs
     ):
         self.size = size
@@ -46,7 +44,6 @@ class ImageStore(torch.utils.data.IterableDataset):
         self.rank = rank
         self.world_size = world_size
         self.dataset = img_path
-        self.allow_duplicates = allow_duplicates
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
@@ -86,15 +83,17 @@ class ImageStore(torch.utils.data.IterableDataset):
 
     def update_store(self):   
         self.entries = []
+        image_suffixes = [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]
         bar = tqdm(total=-1, desc=f"Loading images", disable=self.rank not in [0, -1])
-        folders = []
+        unique_folders = set()
         for entry in self.dataset:
-            if self.allow_duplicates and not isinstance(entry, str):
-                folders.extend([entry[0] for _ in range(entry[1])])
+            if isinstance(entry, str):
+                unique_folders.add((entry, 1))
             else:
-                folders.append(entry)
-        
-        for entry in folders:       
+                unique_folders.add((entry[0], entry[1]))
+                
+        for entry, repeats in unique_folders:   
+            inp = []    
             if Path(entry).suffix == ".json":
                 # load json and extract entries
                 # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": "", "train_width": 1024, "train_height": 1024}}
@@ -102,39 +101,39 @@ class ImageStore(torch.utils.data.IterableDataset):
                     data = json.load(f)
                 
                 for img_hash, img_info in data.items():
-                    if not img_info["train_use"]:
+                    if not img_info["train_use"]: 
                         continue
                     prompt = img_info["train_caption"]
                     _, skip = self.process_tags(prompt)
-                    if skip:
+                    if skip: 
                         continue
                     size = (img_info["train_width"], img_info["train_height"])
-                    self.entries.append((img_hash, prompt, size))
+                    for _ in range(repeats):
+                        entry_hash = f"{binascii.hexlify(os.urandom(5))}@{img_hash}"
+                        inp.append((entry_hash, prompt, size))
                     bar.update(1)
-                continue
-            
-            for x in Path(entry).rglob("*"):
-                if not (x.is_file() and x.suffix in [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]):
-                    continue
-                img, prompt = self.prompt_resolver(x)
-                _, skip = self.process_tags(prompt)
-                if skip:
-                    continue
-                
-                if self.allow_duplicates:
-                    prefix = binascii.hexlify(os.urandom(5))
-                    img = f"{prefix}@{img}"
+            else:
+                for x in Path(entry).rglob("*"):
+                    if not (x.is_file() and x.suffix in image_suffixes): 
+                        continue
+                    img, prompt = self.prompt_resolver(x)
+                    _, skip = self.process_tags(prompt)
+                    if skip: 
+                        continue
+                    image_size = self.read_img(x).size
+                    for _ in range(repeats):
+                        entry_img = f"{binascii.hexlify(os.urandom(5))}@{img}"
+                        inp.append((entry_img, prompt, image_size))
+                    bar.update(1)
                     
-                image_size = self.read_img(x).size
-                self.entries.append((img, prompt, image_size))
-                bar.update(1)
-
+            self.entries.extend(inp)
         self._length = len(self.entries)
         random.shuffle(self.entries)
 
     def read_img(self, filepath):
-        if self.allow_duplicates and "@" in filepath:
-            filepath = filepath[filepath.index("@")+1:]    
+        if isinstance(filepath, str):
+            filepath = filepath[filepath.index("@")+1:]  
+              
         img = Image.open(filepath)
         if not img.mode == "RGB":
             img = img.convert("RGB")
@@ -299,9 +298,7 @@ class AspectRatioDataset(ImageStore):
         sha1_pattern = re.compile(r"^[a-fA-F0-9]{40}$")
         store = {}
         for filepath, caption, size in tqdm(self.entries, desc="Hashing files", disable=self.rank not in [0, -1]):
-            if self.allow_duplicates and "@" in filepath:
-                filepath = filepath.split("@", 1)[-1]
-                
+            filepath = filepath.split("@", 1)[-1]    
             if sha1_pattern.match(filepath):
                 self.hashes[filepath] = filepath
             else:           
@@ -326,8 +323,7 @@ class AspectRatioDataset(ImageStore):
                 json.dump(store, f, indent=4)
             
     def hash(self, fp):
-        if self.allow_duplicates and "@" in filepath:
-            filepath = filepath.split("@", 1)[-1]
+        fp = fp.split("@", 1)[-1]
         if self.use_legacy_key:
             return fp
         return self.hashes[fp]
@@ -377,7 +373,7 @@ class AspectRatioDataset(ImageStore):
                 rank_zero_print(f"Restored cache from {cache_dir.absolute()}")
                 return True
             
-        if to_cache_images and any(Path(entry).suffix == ".json" for entry in self.dataset):
+        if to_cache_images and any(Path(entry).suffix == ".json" for entry in self.dataset if isinstance(entry, str)):
             all_latents = set(v[:-8] for v in cache_keys if v.endswith(".latents"))
             missing_keys = set(self.hash(img) for img in all_images) - all_latents
             
@@ -392,15 +388,29 @@ class AspectRatioDataset(ImageStore):
             
         fabric.barrier()
         self.update_cache_index(cache_dir, fabric.local_rank)
+        
+    def filter_images(self, imgs, exists_keys):
+        exists_keys_set = set(exists_keys) 
+        filtered_imgs = set() 
+
+        for img in imgs:
+            img_key = f"{self.hash(img)}.latents"
+            if img_key not in exists_keys_set:
+                img = img[img.index("@")+1:] if "@" in img else img
+                filtered_imgs.add(img)
+
+        return list(filtered_imgs)
 
     def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
-        progress_bar = tqdm(total=len(self.entries) // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
+        exists_keys = cache.keys()
+        total_keys = len(self.filter_images([e[0] for e in self.entries], exists_keys))
+        progress_bar = tqdm(total=total_keys // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
         for entry in store.buckets.keys():
             size = store.resolutions[entry]
-            imgs = store.buckets[entry][:]
+            imgs = self.filter_images(store.buckets[entry][:], exists_keys)
+            
             stride = self.cache_bsz
             start, end = 0, len(imgs)
-
             if self.world_size > 1:
                 # divide the work among the ranks
                 per_rank = len(imgs) // self.world_size

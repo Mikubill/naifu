@@ -23,8 +23,6 @@ from data.store import AspectRatioDataset
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
 
-text_progress = False
-
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
     if (int(major) > 1 or (int(major) == 1 and int(minor) >= 12)) and torch.cuda.is_available():
@@ -136,7 +134,8 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
         if fabric.logger:
             fabric.logger.experiment.config.update(OmegaConf.to_container(model.config, resolve=True))
         prog_bar = tqdm(dataloader, total=len(dataloader) // grad_accum_steps - 1, desc=f"Epoch {current_epoch}")
-
+        
+    loss_rec = LossRecorder()
     while not should_stop:
         if model.config.cache.get("precompute_embeds", False):
             conditioner = model.get_conditioner()
@@ -159,6 +158,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             with fabric.no_backward_sync(model, enabled=is_accumulating):
                 loss = model(batch)
                 fabric.backward(loss / grad_accum_steps)
+                
+            if fabric.is_global_zero:  
+                loss_rec.add(epoch=current_epoch, step=local_step, loss=loss.item())
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}") 
                 
             if is_accumulating:
                 # skip here if we are accumulating
@@ -210,12 +213,8 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
                 model.model_ema.update()
 
             if fabric.is_global_zero:  
-                if text_progress: 
-                    print(f"Train Loss: {loss};")
-                    print(f"LR: {last_lr}, Global Step: {global_step}")
-                
                 prog_bar.update(1)
-                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}")  
+                prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}") 
             
         current_epoch += 1
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
@@ -308,6 +307,23 @@ def setup_smddp():
     }
     return strategy, init_params
 
+class LossRecorder:
+    def __init__(self):
+        self.loss_list: List[float] = []
+        self.loss_total: float = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def moving_average(self) -> float:
+        return self.loss_total / len(self.loss_list)
+
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
@@ -327,8 +343,6 @@ def main(args):
         fsspec.config.conf['s3'] = dict(config.s3.params)
             
     if os.environ.get('SM_TRAINING', False):
-        global text_progress 
-        text_progress = True
         strategy, init_params = setup_smddp()
         config.lightning.update(init_params)
         del config.lightning.accelerator

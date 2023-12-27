@@ -3,6 +3,9 @@ import json
 
 # return format: (prompt, skip_image)
 
+def placebo(prompt):
+    return prompt, False
+
 def shuffle_prompts(prompt, separator=",", start="Tags:", offset=3):
     try:
         index = prompt.index(start)

@@ -181,6 +181,7 @@ class GeneralConditioner(nn.Module):
             force_zero_embeddings = []
             
         for embedder in self.embedders:
+            # print(embedder.__class__.__name__, embedder.input_key if hasattr(embedder, "input_key") else None)
             embedding_context = nullcontext if embedder.is_trainable else torch.no_grad
             with embedding_context():
                 if hasattr(embedder, "input_key") and (embedder.input_key is not None):
@@ -194,6 +195,7 @@ class GeneralConditioner(nn.Module):
                 emb_out = [emb_out]
                 
             for emb in emb_out:
+                # print(emb.shape, emb.dim(), self.OUTPUT_DIM2KEYS[emb.dim()], self.KEY2CATDIM[self.OUTPUT_DIM2KEYS[emb.dim()]])
                 out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
                 if embedder.ucg_rate > 0.0 and embedder.legacy_ucg_val is None:
                     emb = expand_dims_like(torch.bernoulli((1.0 - embedder.ucg_rate) * torch.ones(emb.shape[0], device=emb.device)),emb,) * emb
