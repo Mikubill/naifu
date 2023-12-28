@@ -1,5 +1,6 @@
 import torch
 from lightning.pytorch.utilities import rank_zero_only
+from lib.logging import logger
 
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
@@ -23,7 +24,7 @@ def count_blocks(state_dict_keys, prefix_string):
 
 @rank_zero_only
 def rank_zero_print(*args, **kwargs):
-    print(*args, **kwargs)
+    logger.info(*args, **kwargs)
 
 
 # Modified from https://github.com/comfyanonymous/ComfyUI/blob/master/comfy/model_detection.py

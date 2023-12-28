@@ -14,14 +14,14 @@ import math
 import torch
 import torch.nn as nn
 import numpy as np
-from einops import repeat
 from contextlib import contextmanager
 from lightning.pytorch.utilities import rank_zero_only
+from lib.logging import logger
 
 
 @rank_zero_only
 def rank_zero_print(*args, **kwargs):
-    print(*args, **kwargs)
+    logger.info(*args, **kwargs)
     
 
 def make_beta_schedule(schedule, n_timestep, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):

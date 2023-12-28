@@ -1,27 +1,67 @@
-import hashlib
-import os
-import random
-import tempfile
-import torch
-import h5py
-import os, binascii
-import re, json
+import cv2
+import h5py as h5
 import numpy as np
+import random
+import torch
 
+from tqdm.auto import tqdm
+from dataclasses import dataclass
 from pathlib import Path
 from PIL import Image
+from torch.utils.data import Dataset
+from typing import Callable, Generator, Optional# type: ignore
+from data.processors import placebo
 from torchvision import transforms
-from tqdm.auto import tqdm
-from data.buckets import AspectRatioBucket
-from lib.utils import rank_zero_print
+from lib.logging import logger
+
+
+image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
+
+IMAGE_TRANSFORMS = transforms.Compose(
+    [
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5]),
+    ]
+)
+
 
 def get_class(name: str):
     import importlib
+
     module_name, class_name = name.rsplit(".", 1)
     module = importlib.import_module(module_name, package=None)
     return getattr(module, class_name)
 
-class ImageStore(torch.utils.data.IterableDataset):
+
+def is_img(path: Path):
+    return path.suffix in image_suffix
+
+
+@dataclass
+class Entry:
+    is_latent: bool
+    pixel: torch.Tensor
+    prompt: str
+    original_size: tuple[int, int] # h, w
+    cropped_size: Optional[tuple[int, int]] # h, w
+    # mask: torch.Tensor | None = None
+
+
+def dirwalk(
+    path: Path, cond: Optional[Callable] = None, mult: int = 1
+) -> Generator[Path, None, None]:
+    for p in path.iterdir():
+        if p.is_dir():
+            yield from dirwalk(p, cond, mult * x)
+        else:
+            if isinstance(cond, Callable):
+                if not cond(p):
+                    continue
+            for _ in range(mult):
+                yield p
+
+
+class StoreBase(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
@@ -29,575 +69,231 @@ class ImageStore(torch.utils.data.IterableDataset):
 
     def __init__(
         self,
-        img_path,
-        size=512,
-        center_crop=False,
+        root_path,
         ucg=0,
         rank=0,
-        tag_processor=[],
-        world_size=1,
-        **kwargs
+        prompt_processor: str | None = None,
+        dtype=torch.float16,
+        use_central_crop=False,
+        **kwargs,
     ):
-        self.size = size
-        self.center_crop = center_crop
         self.ucg = ucg
         self.rank = rank
-        self.world_size = world_size
-        self.dataset = img_path
-        self.image_transforms = transforms.Compose(
-            [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-        
-        if isinstance(self.dataset, str):
-            self.dataset = [self.dataset]
-            
-        if isinstance(tag_processor, str):
-            tag_processor = [tag_processor]
-            
-        self.tag_processor = []
-        for processor in tag_processor:
-            if processor != "":
-                self.tag_processor.append(get_class(processor))
-        
-        self.latent_cache = {}
-        self.update_store()
-
-    def prompt_resolver(self, x: str):
-        img_item = (x, "")
-        fp = os.path.splitext(x)[0]
-
-        try:
-            with open(fp + ".txt") as f:
-                content = f.read()
-                new_prompt = content
-        except FileNotFoundError:
-            rank_zero_print(f"Prompt file not found for {x}")
-            new_prompt = ""
-
-        return str(x), new_prompt
-
-    def update_store(self):   
-        self.entries = []
-        image_suffixes = [".jpg", ".png", ".webp", ".bmp", ".gif", ".jpeg", ".tiff"]
-        bar = tqdm(total=-1, desc=f"Loading images", disable=self.rank not in [0, -1])
-        unique_folders = set()
-        for entry in self.dataset:
-            if isinstance(entry, str):
-                unique_folders.add((entry, 1))
-            else:
-                unique_folders.add((entry[0], entry[1]))
-                
-        for entry, repeats in unique_folders:   
-            inp = []    
-            if Path(entry).suffix == ".json":
-                # load json and extract entries
-                # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": "", "train_width": 1024, "train_height": 1024}}
-                with open(entry, 'r') as f:
-                    data = json.load(f)
-                
-                for img_hash, img_info in data.items():
-                    if not img_info["train_use"]: 
-                        continue
-                    prompt = img_info["train_caption"]
-                    _, skip = self.process_tags(prompt)
-                    if skip: 
-                        continue
-                    size = (img_info["train_width"], img_info["train_height"])
-                    for _ in range(repeats):
-                        entry_hash = f"{binascii.hexlify(os.urandom(5))}@{img_hash}"
-                        inp.append((entry_hash, prompt, size))
-                    bar.update(1)
-            else:
-                for x in Path(entry).rglob("*"):
-                    if not (x.is_file() and x.suffix in image_suffixes): 
-                        continue
-                    img, prompt = self.prompt_resolver(x)
-                    _, skip = self.process_tags(prompt)
-                    if skip: 
-                        continue
-                    image_size = self.read_img(x).size
-                    for _ in range(repeats):
-                        entry_img = f"{binascii.hexlify(os.urandom(5))}@{img}"
-                        inp.append((entry_img, prompt, image_size))
-                    bar.update(1)
-                    
-            self.entries.extend(inp)
-        self._length = len(self.entries)
-        random.shuffle(self.entries)
-
-    def read_img(self, filepath):
-        if isinstance(filepath, str):
-            filepath = filepath[filepath.index("@")+1:]  
-              
-        img = Image.open(filepath)
-        if not img.mode == "RGB":
-            img = img.convert("RGB")
-        return img
-    
-    def process_tags(self, tags):
-        if len(self.tag_processor) == 0:
-            return tags, False
-        
-        reject = False
-        for processor in self.tag_processor:
-            tags, rej_cur = processor(tags)
-            reject = reject or rej_cur
-            
-        return tags, reject
-    
-    # cc: openai
-    def crop_rectangle(self, arrays):
-        min_width = np.min([array.shape[2] for array in arrays])
-        min_height = np.min([array.shape[1] for array in arrays])
-
-        start_width = []
-        start_height = []
-
-        for array in arrays:
-            width_diff = array.shape[2] - min_width
-            height_diff = array.shape[1] - min_height
-            start_width.append(width_diff // 2)
-            start_height.append(height_diff // 2)
-
-        end_width = [start + min_width for start in start_width]
-        end_height = [start + min_height for start in start_height]
-        
-        cropped_arrays = [
-            array[:, start_height[i]:end_height[i], start_width[i]:end_width[i]]
-            for i, array in enumerate(arrays)
-        ]
-        return cropped_arrays
-
-    def collate_fn(self, examples):
-        result = {}
-        if "latents" in examples[0].keys():
-            latents = torch.stack(self.crop_rectangle([example["latents"] for example in examples]))
-            result.update({"latents": latents})
-        else:
-            pixel_values = [example["images"] for example in examples]
-            pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-            result.update({"images": pixel_values})
-        
-        if "conds" in examples[0].keys():
-            conds = {}
-            for example in examples:
-                # conds is a dict, concat all values by keys
-                for key in example["conds"]:
-                    if key not in conds:
-                        conds[key] = []
-                    conds[key].append(example["conds"][key])
-            for key in conds:
-                conds[key] = torch.stack(conds[key])
-            result.update({"conds": conds})
-        else:
-            result.update({
-                "prompts": [example["prompts"] for example in examples],
-                "target_size_as_tuple": torch.stack([example["target_size_as_tuple"] for example in examples]),
-                "original_size_as_tuple": torch.stack([example["original_size_as_tuple"] for example in examples]),
-                "crop_coords_top_left": torch.stack([example["crop_coords_top_left"] for example in examples]),
-            })
-        return result
-
-    def __len__(self):
-        return self._length // self.world_size
-
-    def __iter__(self):
-        for entry in self.entries[self.rank::self.world_size]:
-            instance_path, instance_prompt, _ = entry
-            
-            instance_image = self.read_img(instance_path)
-            img = self.image_transforms(instance_image)
-            prompts = instance_prompt
-            
-            inst = {
-                "images": img, 
-                "prompts": prompts,
-                "original_size_as_tuple": (self.size, self.size),
-                "crop_coords_top_left": (0,0),
-                "target_size_as_tuple": (self.size, self.size),
-            }
-            return inst
-
-    
-class AspectRatioDataset(ImageStore):
-    def __init__(self, arb_config, debug_arb=False, **kwargs):
-        super().__init__(**kwargs)
-        self.debug = debug_arb
-        self.prompt_cache = {}
+        self.root_path = Path(root_path)
+        self.dtype = dtype
+        self.use_central_crop = use_central_crop
         self.kwargs = kwargs
-        self.rank = kwargs.get("rank", 0)
-        self.world_size = kwargs.get("world_size", 1)
-        self.cache_enabled = kwargs.get("enabled", False)
-        self.cache_dir = kwargs.get("cache_dir", "cache")
-        self.cache_bsz = kwargs.get("cache_bsz", 4)
-        self.cache_target = kwargs.get("target", []) if self.cache_enabled else []
-        self.use_legacy_key = kwargs.get("use_legacy_key", False)
-        self.hashes = {}
-        self.embed_cache = {}
-        self.cache_index = None
+
+        self.length = 0
+        self.rand_list: list = []
+        self.to_ratio: None | np.ndarray = None
+        self.raw_res: list[tuple[int, int]] = []
+        self.curr_res: list[tuple[int, int]] = []
         
-        for path, prompt, _ in self.entries:
-            self.prompt_cache[path] = prompt
-            
-        self.arb_config = arb_config
-        if arb_config["debug"]:
-            rank_zero_print(f"BucketManager initialized using config: {self.arb_config}")
+        assert self.root_path.exists()
+        if prompt_processor:
+            self.prompt_processor = get_class(prompt_processor)
         else:
-            rank_zero_print(f"BucketManager initialized with base_res = {self.arb_config['base_res']}, max_size = {self.arb_config['max_size']}")
-        
-        for path, prompt, _ in self.entries:
-            self.prompt_cache[path] = prompt
-        
-        self.hash_all()
-        self.init_buckets()
+            self.prompt_processor = placebo
 
-    def init_buckets(self):
-        id_size_map = {fp: size for fp, prompt, size in self.entries}
-        self.buckets = AspectRatioBucket(id_size_map, **self.arb_config)
-        
-    def denormalize(self, img, mean=0.5, std=0.5):
-        res = transforms.Normalize((-1*mean/std), (1.0/std))(img.squeeze(0))
-        res = torch.clamp(res, 0, 1)
-        return res
-    
-    def transformer(self, img, size, center_crop=False):
-        x, y = img.size
-        short, long = (x, y) if x <= y else (y, x)
+    def get_raw_entry(self, index) -> tuple[bool, np.ndarray, str, (int, int)]:
+        raise NotImplementedError
 
-        w, h = size
-        min_crop, max_crop = (w, h) if w <= h else (h, w)
-        ratio_src, ratio_dst = float(long / short), float(max_crop / min_crop)
+    def fix_aspect_randomness(self, rng: np.random.Generator):
+        raise NotImplementedError
 
-        if ratio_src > ratio_dst:
-            new_w, new_h = (min_crop, int(min_crop * ratio_src)) if x < y else (int(min_crop * ratio_src), min_crop)
-        elif ratio_src < ratio_dst:
-            new_w, new_h = (max_crop, int(max_crop / ratio_src)) if x > y else (int(max_crop / ratio_src), max_crop)
+    def crop(self, entry: Entry, i: int) -> Entry:
+        assert self.to_ratio is not None, "to_ratio is not initialized"
+        ratio = self.to_ratio[i]
+        H, W = entry.pixel.shape[1:]
+        rnd_factor = 8 if entry.is_latent else 64
+        h = H if H < W else int(W * ratio / rnd_factor) * rnd_factor
+        w = W if W < H else int(H / ratio / rnd_factor) * rnd_factor
+        if self.use_central_crop:
+            dh, dw = (H - h) // 2, (W - w) // 2
         else:
-            new_w, new_h = w, h
+            assert H >= h and W >= w, f"{H}<{h} or {W}<{w}"
+            dh, dw = random.randint(0, H - h), random.randint(0, W - w)
+        entry.pixel = entry.pixel[:, dh : dh + h, dw : dw + w]
+        return entry, dh, dw
 
-        image_transforms = transforms.Compose([
-            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.LANCZOS),
-            transforms.CenterCrop((h, w)) if center_crop else transforms.RandomCrop((h, w)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
-        ])
+    @torch.no_grad()
+    def get_batch(self, indices: list[int]) -> Entry:
+        entries = [self._get_entry(i) for i in indices]
+        crop_pos = []
+        pixels = []
+        prompts = []
+        original_sizes = []
+        cropped_sizes = []
 
-        new_img = image_transforms(img)
-
-        return new_img
-    
-    def hash_all(self):
-        if self.use_legacy_key:
-            return
-         
-        sha1_pattern = re.compile(r"^[a-fA-F0-9]{40}$")
-        store = {}
-        for filepath, caption, size in tqdm(self.entries, desc="Hashing files", disable=self.rank not in [0, -1]):
-            filepath = filepath.split("@", 1)[-1]    
-            if sha1_pattern.match(filepath):
-                self.hashes[filepath] = filepath
-            else:           
-                with open(filepath, "rb") as f:
-                    file_hash = hashlib.sha1(f.read()).hexdigest()
-                self.hashes[filepath] = file_hash
-                
-            if self.rank in [0, -1]:
-                w, h = size
-                store[self.hashes[filepath]] = {
-                    "train_use": True, 
-                    "train_caption": caption, 
-                    "file_path": filepath,
-                    "train_width": w,
-                    "train_height": h,
-                }
-
-        if self.rank in [0, -1]:
-            # save hashes file 
-            # json format: {"<image_sha1_hash>": {"train_use": true, "train_caption": ""}}
-            with open("dataset.json", "w") as f:
-                json.dump(store, f, indent=4)
+        for e, i in zip(entries, indices):
+            e, dh, dw = self.crop(e, i)
+            pixels.append(e.pixel)
+            prompts.append(e.prompt)
+            original_sizes.append(torch.asarray(e.original_size))
             
-    def hash(self, fp):
-        fp = fp.split("@", 1)[-1]
-        if self.use_legacy_key:
-            return fp
-        return self.hashes[fp]
-    
-    def update_cache_index(self, cache_dir, rank):
-        if rank not in [0, -1]:
-            return
-
-        cache_parts = list(Path(cache_dir).glob("cache_r*.h5"))
-        bar = tqdm(desc="Updating index", mininterval=0.25)
-        cache_index = {}
-        for input_file in cache_parts:
-            with h5py.File(input_file, 'r', libver='latest') as fi:
-                for key in fi.keys():
-                    cache_index[key] = str(input_file)
-                    bar.update(1)
-        
-        # save as json
-        with open("cache_index.tmp", "w") as f:
-            json.dump(cache_index, f)
-        
-        self.cache_index = cache_index
-        
-    def setup_cache(self, fabric, vae_encode_func, token_encode_func):
-        cache_dir = Path(self.cache_dir)
-        store = self.buckets
-        self.update_cache_index(cache_dir, fabric.local_rank)
-        fabric.barrier()
-        
-        self.cache_images = "images" in self.cache_target
-        self.cache_prompts = "prompts" in self.cache_target
-        if not cache_dir.exists():
-            cache_dir.mkdir(parents=True, exist_ok=True)
-
-        with open("cache_index.tmp", "r") as cache:
-            cache = json.load(cache)
-            cache_keys = set(cache.keys())
-            all_images = [img for entry in store.buckets.keys() for img in store.buckets[entry][:]]
-
-            # Check for missing cache entries
-            missing_latents = any(f"{self.hash(img)}.latents" not in cache_keys for img in all_images)
-            missing_crossattn = any(f"{self.hash(img)}.crossattn" not in cache_keys for img in all_images)
-
-            to_cache_images = self.cache_images and missing_latents
-            to_cache_prompts = self.cache_prompts and missing_crossattn
-            if not to_cache_images and not to_cache_prompts:
-                rank_zero_print(f"Restored cache from {cache_dir.absolute()}")
-                return True
+            cropped_size = e.pixel.shape[-2:]
+            cropped_size = (cropped_size[0] * 8, cropped_size[1] * 8) if e.is_latent else cropped_size
+            cropped_sizes.append(torch.asarray(cropped_size))
             
-        if to_cache_images and any(Path(entry).suffix == ".json" for entry in self.dataset if isinstance(entry, str)):
-            all_latents = set(v[:-8] for v in cache_keys if v.endswith(".latents"))
-            missing_keys = set(self.hash(img) for img in all_images) - all_latents
+            cropped_pos = (dh, dw)
+            cropped_pos = (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            crop_pos.append(torch.asarray(cropped_pos))
             
-            rank_zero_print(f"Note: Ignoring {len(missing_keys)} entries in cache.")
-            self.entries = [entry for entry in self.entries if entry[0] not in missing_keys]
-            self.init_buckets()
-            return True
+        is_latent = entries[0].is_latent
+        shape = entries[0].pixel.shape
 
-        cache_file = cache_dir / f"cache_r{self.rank}.h5"      
-        with h5py.File(cache_file, "r+", libver='latest') if cache_file.exists() else h5py.File(cache_file, "w", libver='latest') as cache:
-            self.fulfill_cache(cache, vae_encode_func, token_encode_func, store)
-            
-        fabric.barrier()
-        self.update_cache_index(cache_dir, fabric.local_rank)
-        
-    def filter_images(self, imgs, exists_keys):
-        exists_keys_set = set(exists_keys) 
-        filtered_imgs = set() 
+        for e in entries[1:]:
+            assert e.is_latent == is_latent
+            assert e.pixel.shape == shape, f"{e.pixel.shape} != {shape} for the same batch"
 
-        for img in imgs:
-            img_key = f"{self.hash(img)}.latents"
-            if img_key not in exists_keys_set:
-                img = img[img.index("@")+1:] if "@" in img else img
-                filtered_imgs.add(img)
+        pixel = torch.stack(pixels, dim=0).contiguous()
+        return {
+            "prompts": prompts,
+            "pixels": pixel,
+            "is_latent": is_latent,
+            "target_size_as_tuple": torch.stack(cropped_sizes),
+            "original_size_as_tuple": torch.stack(original_sizes),
+            "crop_coords_top_left": torch.stack(crop_pos),
+        }
 
-        return list(filtered_imgs)
-
-    def fulfill_cache(self, cache, vae_encode_func, token_encode_func, store):
-        exists_keys = cache.keys()
-        total_keys = len(self.filter_images([e[0] for e in self.entries], exists_keys))
-        progress_bar = tqdm(total=total_keys // self.world_size, desc=f"Caching", disable=self.rank not in [0, -1])
-        for entry in store.buckets.keys():
-            size = store.resolutions[entry]
-            imgs = self.filter_images(store.buckets[entry][:], exists_keys)
-            
-            stride = self.cache_bsz
-            start, end = 0, len(imgs)
-            if self.world_size > 1:
-                # divide the work among the ranks
-                per_rank = len(imgs) // self.world_size
-                start = self.rank * per_rank
-                end = start + per_rank
-                
-                # handle the case where len(imgs) is not a multiple of self.world_size
-                # give the remaining tasks to the last rank
-                if self.rank == self.world_size - 1:
-                    end = len(imgs)
-
-            for idx in range(start, end, stride):   
-                latents_allclose = all([f"{self.hash(img)}.latents" in cache for img in imgs[idx:idx+stride]]) 
-                if self.cache_images and not latents_allclose:
-                    batch = []
-                    for img in imgs[idx:idx+stride]:
-                        img_data = self.read_img(img)
-                        batch.append(self.transformer(img_data, size, center_crop=True))
-                        
-                    latent = vae_encode_func(torch.stack(batch).cuda())
-                    for img, latent in zip(imgs[idx:idx+stride], latent):
-                        imghash = self.hash(img)
-                        # last check, if exists overwrite
-                        if f"{imghash}.latents" in cache:
-                            del cache[f"{imghash}.latents"]
-                            del cache[f"{imghash}.size"]
-                        
-                        cache.create_dataset(f"{imghash}.latents", data=latent.detach().squeeze(0).half().cpu().numpy())
-                        cache.create_dataset(f"{imghash}.size", data=size)
-                        progress_bar.update(1)
-                        
-                prompts_allclose = all([f"{self.hash(img)}.crossattn" in cache for img in imgs[idx:idx+stride]]) 
-                if self.cache_prompts and not prompts_allclose:
-                    prompt_batch = []
-                    for img in imgs[idx:idx+stride]:
-                        prompt_data = self.prompt_cache[img]
-                        prompt_batch.append(prompt_data)
-                        
-                    w, h = size
-                    prompt = {
-                        "prompts": prompt_batch,
-                        "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
-                        "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
-                        "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
-                    }
-                    conds = token_encode_func(prompt)
-                    conds, vectors = conds["crossattn"], conds.get("vector", None)
-                    for idx, img in enumerate(imgs[idx:idx+stride]):
-                        self.save_cache_prompts(cache, idx, conds, vectors, img)
-                        if not self.cache_images:
-                            progress_bar.update(1)
-
-        progress_bar.close()
-        
-    def save_cache_prompts(self, cache, idx, conds, vectors, img):
-        imghash = self.hash(img)
-        # last check, if exists overwrite
-        if f"{imghash}.crossattn" in cache:
-            del cache[f"{imghash}.crossattn"]
-                            
-        if f"{imghash}.vec" in cache:
-            del cache[f"{imghash}.vec"]
-                        
-        cond = conds[idx, ...]
-        cache.create_dataset(f"{imghash}.crossattn", data=cond.detach().half().cpu().numpy())
-                        
-        if vectors is not None:
-            vec = vectors[idx, ...]
-            cache.create_dataset(f"{imghash}.vec", data=vec.detach().half().cpu().numpy())
-        
-    def precompute_embeds(self, token_encode_func, bar=None):
-        if isinstance(self.embed_cache, h5py.File):
-            self.embed_cache.close()
-            
-        temp_file = tempfile.NamedTemporaryFile(delete=True)
-        self.embed_cache = h5py.File(temp_file.name, "w", libver='latest')
-        
-        store = self.buckets
-        if bar is not None:
-            bar.reset()
-            bar.total = len(self.entries)
-            bar.set_description(f"Precomputing Embeds")
-            
-        for entry in store.buckets.keys():
-            size = store.resolutions[entry]
-            imgs = store.buckets[entry][:]
-            stride = self.cache_bsz
-            start, end = 0, len(imgs)
-
-            for idx in range(start, end, stride):   
-                prompt_batch = []
-                for img in imgs[idx:idx+stride]:
-                    prompt_data = self.prompt_cache[img]
-                    if random.random() < self.ucg:
-                        prompt_data = ''
-                    prompt_batch.append(prompt_data)
-                    
-                w, h = size
-                prompt = {
-                    "prompts": prompt_batch,
-                    "original_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(),
-                    "crop_coords_top_left": torch.stack([torch.asarray((0,0)) for _ in prompt_batch]).cuda(),
-                    "target_size_as_tuple": torch.stack([torch.asarray((h, w)) for _ in prompt_batch]).cuda(), 
-                }
-                conds = token_encode_func(prompt)
-                conds, vectors = conds["crossattn"], conds.get("vector", None)
-                
-                for idx, img in enumerate(imgs[idx:idx+stride]):
-                    self.save_cache_prompts(self.embed_cache, idx, conds, vectors, img)
-
-                    if bar is not None:
-                        bar.update(1)
-                        
-    def fetch_cache(self, key):
-        if self.cache_index is None:
-            with open("cache_index.tmp", "r") as cache:
-                self.cache_index = json.load(cache)
-        try:
-            fs_loc = self.cache_index[key]
-            with h5py.File(fs_loc, "r", libver='latest') as f:
-                return f[key][:]
-        except KeyError:
-            return None
-
-    def build_dict(self, item) -> dict:
-        item_id, size, = item["instance"], item["size"],
-        cache_images = "images" in self.cache_target
-        cache_prompts = "prompts" in self.cache_target
-
-        result = {}
-        if item_id == "":
-            return {}
-        
-        if self.cache_enabled:
-            cachekey = self.hash(item_id)
-            if cache_images:
-                latent = torch.asarray(self.fetch_cache(f"{cachekey}.latents"))
-                latent_size = self.fetch_cache(f"{cachekey}.size")
-                estimate_size = latent_size[1] // 8, latent_size[0] // 8,
-                if latent.shape != (4, *estimate_size):
-                    rank_zero_print(f"Latent shape mismatch for {item_id}! Expected {estimate_size}, got {latent.shape}") 
-                result.update({"latents": latent})
-                
-            if cache_prompts:
-                prompt = {"crossattn": torch.asarray(self.fetch_cache(f"{cachekey}.crossattn"))} 
-                vec = self.fetch_cache(f"{cachekey}.vec")  
-                if vec is not None:
-                    prompt.update({"vector": torch.asarray(vec)}) 
-                result.update({"conds": prompt})
-                
-            if len(result) == 2:
-                return result
-                
-        if isinstance(self.embed_cache, h5py.File):
-            prompt = {"crossattn": torch.asarray(self.embed_cache[f"{cachekey}.crossattn"][:])}   
-            if f"{cachekey}.vec" in self.embed_cache:
-                prompt.update({"vector": torch.asarray(self.embed_cache[f"{cachekey}.vec"][:])})
-            result.update({"conds": prompt})
-            if len(result) == 2:
-                return result
-            
-        if not cache_prompts and len(self.embed_cache) == 0:
-            prompt, _ = self.process_tags(self.prompt_cache[item_id])
-            if random.random() < self.ucg:
-                prompt = ''
-                
-            w, h = size
-            result.update({
-                "prompts": prompt,
-                "original_size_as_tuple": torch.asarray((h, w)),
-                "crop_coords_top_left": torch.asarray((0,0)),
-                "target_size_as_tuple": torch.asarray((h, w)),
-            })
-            
-        if not cache_images:
-            image = self.read_img(item_id)
-            image = self.transformer(image, size)
-            result.update({"images": image})
-        return result
-    
     def __len__(self):
-        return len(self.buckets.res_map) // self.world_size
+        return self.length
 
-    def __iter__(self):
-        for batch, size in self.buckets.generator():
-            for item in batch:
-                yield self.build_dict({"size": size, "instance": item})
+    def __getitem__(self, index):
+        raise NotImplementedError
 
-    # def __getitem__(self, index):
-    #     return [self.build_dict(item) for item in index]
+    def _get_entry(self, index) -> Entry:
+        is_latent, pixel, prompt, original_size = self.get_raw_entry(index)
+
+        if self.ucg and np.random.rand() < self.ucg:
+            prompt = ""
+            
+        prompt, _ = self.prompt_processor(prompt)    
+        pixel = pixel.to(dtype=self.dtype)
+        shape = pixel.shape
+        if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:  
+            pixel = pixel.permute(2, 0, 1) # HWC -> CHW
+            
+        return Entry(is_latent, pixel, prompt, original_size, None)
+    
+    def repeat_entries(self, k, res, index=None):
+        repeat_strategy = self.kwargs.get("repeat_strategy", None)
+        if repeat_strategy is not None:
+            assert index is not None
+            for i, ent in enumerate(index):
+                for strategy, mult in repeat_strategy:
+                    if strategy in ent:
+                        k = k + [k[i]] * (mult-1)
+                        res = res + [res[i]] * (mult-1)
+                        break
+        return k, res, index
+
+
+class LatentStore(StoreBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        prompt_mapping = self.kwargs.get("prompt_mapping")
+        self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5"))
+        self.h5_keymap = {}
+        self.h5_filehandles = {}
+        self.paths = []
+        for h5_path in self.h5_paths:
+            self.h5_filehandles[h5_path] = h5.File(h5_path, "r", libver="latest")
+            for k in self.h5_filehandles[h5_path].keys():
+                hashkey = k[:-8] # ".latents"
+                assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
+                it = prompt_mapping[hashkey]
+                if not it["train_use"]: continue
+                prompt, it_path = it["train_caption"], it["file_path"]
+                height, width = it["train_height"], it["train_width"]
+                self.paths.append(it_path)
+                self.raw_res.append((height, width))
+                self.h5_keymap[k] = (h5_path, prompt, (height, width))
+        
+        self.keys = list(self.h5_keymap.keys())
+        self.length = len(self.keys)
+        logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
+        
+        self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
+        self.length = len(self.keys)
+        logger.debug(f"Using {self.length} entries after applied repeat strategy")
+
+    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
+        latent_key = self.keys[index]
+        h5_path, prompt, original_size = self.h5_keymap[latent_key]
+        latent = self.h5_filehandles[h5_path][latent_key][:]
+        scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
+        latent = latent * 0.13025 if not scaled else latent
+        return True, torch.asarray(latent), prompt, original_size
+
+
+class DirectoryImageStore(StoreBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        label_ext = self.kwargs.get("label_ext", ".txt")
+        self.paths = list(dirwalk(self.root_path, is_img))
+        self.length = len(self.paths)
+        logger.debug(f"Found {self.length} images in {self.root_path}")
+
+        self.prompts: list[str] = []
+        for path in tqdm(
+            self.paths,
+            desc="Loading prompts",
+            disable=self.rank != 0,
+            leave=False,
+            ascii=True,
+        ):
+            p = path.with_suffix(label_ext)
+            with open(p, "r") as f:
+                self.prompts.append(f.read())
+        logger.debug(f"Loaded {len(self.prompts)} prompts")
+        for p in tqdm(
+            self.paths,
+            desc="Loading image sizes",
+            disable=self.rank != 0,
+            leave=False,
+            ascii=True,
+        ):
+            w, h = Image.open(p).size
+            self.raw_res.append((h, w))
+            
+        self.base_len = self.kwargs["base_len"]
+        logger.debug(f"Loaded {self.length} image sizes")
+        
+        self.prompts, self.raw_res, self.paths = self.repeat_entries(self.prompts, self.raw_res, index=self.paths)
+        self.length = len(self.prompts)
+        logger.debug(f"Using {self.length} entries after applied repeat strategy")
+
+    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
+        p = self.paths[index]
+        prompt = self.prompts[index]
+        _img = Image.open(p)
+        if _img.mode == "RGB":
+            img = np.array(_img)
+        elif _img.mode == "RGBA":
+            img = np.array(_img)
+            rgb, alpha = img[:, :, :3], img[:, :, 3:]
+            fp_alpha = alpha / 255
+            rgb[:] = rgb * fp_alpha + (255 - alpha)
+            img = rgb
+        else:
+            img = np.array(_img.convert("RGB"))
+            
+        h, w = img.shape[:2]
+        scale_ratio = self.base_len / min(h, w)
+        if scale_ratio < 1:
+            img = cv2.resize(
+                img,
+                (round(w * scale_ratio), round(h * scale_ratio)),
+                interpolation=cv2.INTER_AREA,
+            )
+        elif scale_ratio > 1:
+            img = cv2.resize(
+                img,
+                (round(w * scale_ratio), round(h * scale_ratio)),
+                interpolation=cv2.INTER_CUBIC,
+            )
+        
+        img = IMAGE_TRANSFORMS(img)
+        return False, img, prompt, (h, w)

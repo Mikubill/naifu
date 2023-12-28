@@ -8,6 +8,7 @@ import re
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
 import torch
+import math
 import lightning as pl
 
 from lib.args import parse_args
@@ -19,9 +20,11 @@ from pathlib import Path
 from tqdm import tqdm
 from contextlib import nullcontext
 from lightning.pytorch.loggers import WandbLogger
-from data.store import AspectRatioDataset
+from data.dataset import AspectRatioDataset, worker_init_fn
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
+from lightning.fabric.wrappers import _unwrap_objects
+from safetensors.torch import save_model
 
 def setup_torch(config):
     major, minor = torch.__version__.split('.')[:2]
@@ -38,45 +41,22 @@ def setup_model(config, farbic):
     model_path = config.trainer.model_path
     model = StableDiffusionModel(model_path, config, farbic.device) 
     
-    arb_config = {
-        "bsz": config.trainer.batch_size,
-        "seed": config.trainer.seed,
-        "world_size": farbic.world_size,
-        "global_rank": farbic.global_rank,
-    }
-    if config.get("arb", None) is None:
-        # calculate arb from resolution
-        base = config.trainer.resolution
-        arb_config.update({
-            "base_res": (base, base),
-            "max_size": (base, base),
-            "divisible": 64,
-            "max_ar_error": 1,
-            "min_dim": int(base // 2),
-            "dim_limit": int(base * 2),
-            "debug": False
-        })
-    else:
-        arb_config.update(**config.arb) 
-
-    # init Dataset
     dataset = AspectRatioDataset(
-        arb_config=arb_config,
-        size=config.trainer.resolution,
-        seed=config.trainer.seed,
+        batch_size=config.trainer.batch_size,
         rank=farbic.global_rank,
-        world_size=farbic.world_size,
-        **config.dataset,
-        **config.cache
+        dtype=torch.float32,
+        **config.dataset
     )
-    # init Dataloader
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        num_workers=1,
-        collate_fn=dataset.collate_fn,
-        batch_size=config.trainer.batch_size,
-        persistent_workers=True
-    )
+        sampler=None,
+        num_workers=config.dataset.get("num_workers", 4),
+        batch_size=None,
+        persistent_workers=False,
+        worker_init_fn=worker_init_fn,
+        shuffle=False,
+        pin_memory=True,
+    )    
     return model, dataset, dataloader
 
 def get_latest_checkpoint(checkpoint_dir: str):
@@ -102,6 +82,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
     sampling_epochs = sampling_cfg.every_n_epochs
     
     state = {"state_dict": model}
+    os.makedirs(cfg.checkpoint_dir, exist_ok=True)
         
     if not cfg.get("save_weights_only", False):
         state.update({"optimizer": optimizer})
@@ -137,17 +118,10 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
         
     loss_rec = LossRecorder()
     while not should_stop:
-        if model.config.cache.get("precompute_embeds", False):
-            conditioner = model.get_conditioner()
-            fabric.to_device(conditioner)
-            dataset.precompute_embeds(conditioner, prog_bar)
-            # free conditioner from memory
-            conditioner.cpu()
-            
         if fabric.is_global_zero:
             prog_bar.refresh()
             prog_bar.reset()
-            prog_bar.total = len(dataloader) // grad_accum_steps - 1
+            prog_bar.total = len(dataloader) // grad_accum_steps
             prog_bar.set_description(f"Epoch {current_epoch}")
             
         assert len(dataloader) > 0, "Dataloader is empty, please check your dataset"
@@ -162,7 +136,7 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
             if fabric.is_global_zero:  
                 loss_rec.add(epoch=current_epoch, step=local_step, loss=loss.item())
                 prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}") 
-                
+    
             if is_accumulating:
                 # skip here if we are accumulating
                 continue
@@ -178,7 +152,12 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
 
             if fabric.is_global_zero and cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0:
                 with ema_ctx(), lora_ctx():
-                    fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step}.ckpt"), state)
+                    if cfg.get("save_format", "safetensors"):
+                        string_cfg = OmegaConf.to_yaml(model.config)
+                        model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.safetensors")
+                        save_model(_unwrap_objects(model), model_path, metadata={"trainer_cfg": string_cfg})
+                    else:
+                        fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-step-{global_step}.ckpt"), state)
                     
             if grad_clip_val > 0:
                 fabric.clip_gradients(model, optimizer, max_norm=grad_clip_val)
@@ -226,7 +205,13 @@ def train(fabric: pl.Fabric, model, optimizer, scheduler, dataset, dataloader):
                 sampler(fabric.logger, sampling_cfg, model, current_epoch, global_step)    
             
             if fabric.is_global_zero and cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0:
-                fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
+                if cfg.get("save_format", "safetensors"):
+                    string_cfg = OmegaConf.to_yaml(model.config)
+                    model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.safetensors")
+                    save_model(_unwrap_objects(model), model_path, metadata={"trainer_cfg": string_cfg})
+                else:
+                    fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
+                
             
 @rank_zero_only
 def sampler(logger, config, model, current_epoch, global_step):
@@ -309,8 +294,8 @@ def setup_smddp():
 
 class LossRecorder:
     def __init__(self):
-        self.loss_list: List[float] = []
-        self.loss_total: float = 0.0
+        self.loss_list = []
+        self.loss_total = 0.0
 
     def add(self, *, epoch: int, step: int, loss: float) -> None:
         if epoch == 0:
@@ -337,6 +322,14 @@ def main(args):
     if config.get("lora") and config.lora.enabled:
         from lightning.fabric.strategies import DDPStrategy
         strategy = DDPStrategy(static_graph=True) if torch.cuda.device_count() > 1 else "auto"
+        
+    if config.trainer.get("deepspeed", False):
+        assert torch.cuda.device_count() > 1, "DeepSpeed requires multiple GPUs"
+        from lightning.fabric.strategies import DeepSpeedStrategy
+        strategy = DeepSpeedStrategy(
+            config = {"gradient_clipping": 1.0},
+            contiguous_memory_optimization=True,
+        )
         
     if config.get("s3") and config.s3.enabled:
         import fsspec
@@ -407,10 +400,6 @@ def main(args):
     fabric.to_device(model)
     model, optimizer = fabric.setup(model, optimizer, move_to_device=False)
     dataloader = fabric.setup_dataloaders(dataloader)
-
-    if config.cache.enabled:
-        model.first_stage_model.to(torch.float32)
-        dataset.setup_cache(fabric, model.encode_first_stage, model.get_conditioner())
             
     if model_precision:
         cast_precision(model, model_precision)

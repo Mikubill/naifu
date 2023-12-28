@@ -10,52 +10,51 @@ trainer:
   use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
-  offset_noise: true
-  offset_noise_val: 0.0375
 
+  save_format: safetensors
   checkpoint_dir: checkopint
   checkpoint_freq: 1
   checkpoint_steps: -1
   save_weights_only: true
   max_epochs: 60
   max_steps: -1
+
+advanced:
+  offset_noise: true
+  offset_noise_val: 0.0375
+  min_snr_val: 5
+  timestep_start: 0
+  timestep_end: 1000
+  input_perturbation: false
+  input_perturbation_val: 0.0
+  scale_v_pred_loss_like_noise_pred: false
+  v_pred_like_loss: 0
+  debiased_estimation_loss: false
+  zero_terminal_snr: false
   
 lightning:
   accelerator: gpu
   devices: -1
   precision: 16-mixed
 
-cache:
-  enabled: true
-  cache_bsz: 8
-  cache_dir: cache
-  # Precompute embeddings for faster training (on every epoch)
-  precompute_embeds: false
-  use_legacy_key: false
-  target: ["images"] #[images, prompts]
-
 dataset:
   img_path: "/notebooks/rurudo_lion_imgonly"
-  tag_processor: data.processors.shuffle_prompts
+  tag_processor: data.processors.placebo
   center_crop: false
   ucg: 0.1
-  max_token_length: 150 # [75, 150, 225]
-  debug_arb: false
-  allow_duplicates: false
+  max_token_length: 225 # [75, 150, 225]
+  # repeat_strategy:
+  #   - [/rurudo_lion_imgonly/, 2]
 
 optimizer:
-  # Note: To use adafactor, you need to disable scheduler
-  # name: transformers.Adafactor
-  # params: 
-  #   relative_step: True
   name: bitsandbytes.optim.PagedLion8bit
+  params:
+    lr: 2e-6
+    weight_decay: 1e-2
   # layer_lr: 
   #   - '^input_blocks\.[0-8]\..*$': 5e-7
   #   - '^middle_block\.[0-2]\..*$': 5e-7
   #   - '^output_blocks\.[0-8]\..*$': 5e-7
-  params:
-    lr: 2e-6
-    weight_decay: 1e-2
 
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
@@ -86,28 +85,10 @@ sampling:
     - "masterpiece, best quality, 1girl, solo,loli,wedding dress|see-through highleg leotard, veil, elbow gloves, white thighhighs, crown, earrings, bow on waist, sideboob, lace,"
     - "1girl, solo, shirt, thighhighs, skirt, hands on hips, white shirt, crystal, flandre scarlet, blonde hair, grey skirt, red bow, red eyes, black thighhighs, wings, white background,"
     - "1girl,sitting,fantasy,masterpiece,best quality,(long blonde hair),(blue eyes),(floating hair),(black ribbed sweater:1.1),(red plaid skirt:1.1),(cat ears)"
-
-# arb config will be calculated automatically if not specified
-# to override, uncomment and specify values
-#
-# arb:
-#   enabled: false
-#   debug: false
-#   base_res: [512, 512]
-#   max_size: [768, 512]
-#   divisible: 64
-#   max_ar_error: 1
-#   min_dim: 256
-#   dim_limit: 1024
-#
-# 
+ 
 # lora:
 #   enabled: true
 #   rank: 16
 #   lora_alpha: 8
 #   multipier: 1.0
 #   unet_lr: 1e-4
-#
-# extra:
-#   timestep_start: 0
-#   timestep_end: 1000
