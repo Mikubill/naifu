@@ -277,18 +277,16 @@ class StableDiffusionModel(pl.LightningModule):
             if torch.any(torch.isnan(latents)):
                 rank_zero_print("NaN found in latents, replacing with zeros")
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
-
-            del batch["images"]
         else:
             self.first_stage_model.cpu()
             latents = batch["pixels"]
 
-        if "conds" not in batch.keys():
+        if not batch["is_cached_embeds"]:
             self.conditioner.to(self.target_device)
             cond = self.conditioner(batch)
         else:
             self.conditioner.cpu()
-            cond = batch["conds"]
+            cond = batch["prompts"]
 
         model_dtype = next(self.model.parameters()).dtype
         cond = {k: v.to(model_dtype) for k, v in cond.items()}

@@ -25,6 +25,11 @@ def count_blocks(state_dict_keys, prefix_string):
 @rank_zero_only
 def rank_zero_print(*args, **kwargs):
     logger.info(*args, **kwargs)
+    
+
+@rank_zero_only
+def rank_zero_debug(*args, **kwargs):
+    logger.debug(*args, **kwargs)
 
 
 # Modified from https://github.com/comfyanonymous/ComfyUI/blob/master/comfy/model_detection.py

@@ -34,7 +34,6 @@ class AspectRatioDataset(Dataset):
         min_size: int = 512,
         max_size: int = 2048,
         divisible: int = 64,
-        base_len: int = 1024,
         seed: int = 42,
         **kwargs,
     ):
@@ -62,12 +61,10 @@ class AspectRatioDataset(Dataset):
             prompt_processor=prompt_processor,
             use_central_crop=use_central_crop,
             dtype=dtype,
-            base_len=base_len,
             **kwargs,
         )
 
         self.target_area = target_area
-        self.base_len = base_len
         self.max_size, self.min_size, self.divisible = max_size, min_size, divisible
         self._length = int(np.ceil(self.store.length / self.batch_size))
         self.generate_buckets()
@@ -89,54 +86,20 @@ class AspectRatioDataset(Dataset):
         resos.add(((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2)
         self.buckets_sizes = np.array(sorted(resos))
         self.bucket_ratios = self.buckets_sizes[:, 0] / self.buckets_sizes[:, 1]
+        self.store.ratio_to_bucket = {ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)}
 
     def assign_buckets(self):
-        # self.store.fix_aspect_randomness(self.rng)
         img_res = np.array(self.store.raw_res)
         img_ratios = img_res[:, 0] / img_res[:, 1]
-        img_idxs = np.argsort(img_ratios)
-        landscape_idxs = img_idxs[img_ratios[img_idxs] <= 1]
-        portrait_idxs = img_idxs[img_ratios[img_idxs] > 1]
         self.bucket_content = [[] for _ in range(len(self.buckets_sizes))]
+        self.store.to_ratio = {}
 
-        # Initial assignment, images are rounded towards the base bucket
-        bucket_idx = 0
-
-        self.store.to_ratio = np.empty(self.store.length)
-        idx_size = landscape_idxs.size
-        reminder = idx_size % self.batch_size
-
-        it = []
-        if idx_size >= self.batch_size:
-            it = np.split(landscape_idxs[:-reminder], idx_size // self.batch_size)
-
-        if reminder:
-            it.append(landscape_idxs[-reminder:])
-
-        for idx_chunk in it:
-            idx = idx_chunk[-1]
-            while self.bucket_ratios[bucket_idx] < img_ratios[idx]:
-                bucket_idx += 1
-            self.bucket_content[bucket_idx].extend(idx_chunk)
-            self.store.to_ratio[idx_chunk] = self.bucket_ratios[bucket_idx]
-
-        idx_size = portrait_idxs.size
-        reminder = idx_size % self.batch_size
-
-        it = []
-        if idx_size >= self.batch_size:
-            it = np.split(portrait_idxs[reminder:], idx_size // self.batch_size)[::-1]
-
-        if reminder:
-            it.append(portrait_idxs[:reminder])
-
-        bucket_idx = len(self.buckets_sizes) - 1
-        for idx_chunk in it:
-            idx = idx_chunk[0]
-            while self.bucket_ratios[bucket_idx] > img_ratios[idx]:
-                bucket_idx -= 1
-            self.bucket_content[bucket_idx].extend(idx_chunk)
-            self.store.to_ratio[idx_chunk] = self.bucket_ratios[bucket_idx]
+        # Assign images to buckets
+        for idx, img_ratio in enumerate(img_ratios):
+            diff = np.abs(self.bucket_ratios - img_ratio)
+            bucket_idx = np.argmin(diff)
+            self.bucket_content[bucket_idx].append(idx)
+            self.store.to_ratio[idx] = self.bucket_ratios[bucket_idx]
 
     def assign_batches(self):
         self.batch_idxs = []

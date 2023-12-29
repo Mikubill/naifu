@@ -1,3 +1,4 @@
+import hashlib
 import cv2
 import h5py as h5
 import numpy as np
@@ -11,6 +12,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from typing import Callable, Generator, Optional# type: ignore
 from data.processors import placebo
+from data.embeddings import get_size_embeddings
 from torchvision import transforms
 from lib.logging import logger
 
@@ -35,6 +37,10 @@ def get_class(name: str):
 
 def is_img(path: Path):
     return path.suffix in image_suffix
+
+
+def sha1sum(txt):
+    return hashlib.sha1(txt.encode()).hexdigest()
 
 
 @dataclass
@@ -94,6 +100,12 @@ class StoreBase(Dataset):
             self.prompt_processor = get_class(prompt_processor)
         else:
             self.prompt_processor = placebo
+            
+        self.embeds_cache = kwargs.get("precompure_embeds", None)
+        self.embeds_cache_keys = None
+        if self.embeds_cache is not None:
+            self.embeds_cache = h5.File(self.embeds_cache, "r", libver="latest")
+            self.embeds_cache_keys = {k[:-5] for k in self.embeds_cache.keys() if k.endswith(".emb1")}
 
     def get_raw_entry(self, index) -> tuple[bool, np.ndarray, str, (int, int)]:
         raise NotImplementedError
@@ -103,16 +115,28 @@ class StoreBase(Dataset):
 
     def crop(self, entry: Entry, i: int) -> Entry:
         assert self.to_ratio is not None, "to_ratio is not initialized"
-        ratio = self.to_ratio[i]
-        H, W = entry.pixel.shape[1:]
-        rnd_factor = 8 if entry.is_latent else 64
-        h = H if H < W else int(W * ratio / rnd_factor) * rnd_factor
-        w = W if W < H else int(H / ratio / rnd_factor) * rnd_factor
+        H, W = entry.pixel.shape[-2:]
+        base_ratio = H / W
+        target_ratio = self.to_ratio[i]
+        h, w = self.ratio_to_bucket[target_ratio]
+        if not entry.is_latent:
+            if base_ratio > target_ratio:
+                resize_h = int(w * base_ratio)
+                resize_w = int(w)
+            else:
+                resize_h = int(h)
+                resize_w = int(h / base_ratio)
+            entry.pixel = transforms.Resize((resize_h, resize_w), antialias=True)(entry.pixel)
+        else:
+            h, w = h // 8 , w // 8 
+        
+        H, W = entry.pixel.shape[-2:]
         if self.use_central_crop:
             dh, dw = (H - h) // 2, (W - w) // 2
         else:
             assert H >= h and W >= w, f"{H}<{h} or {W}<{w}"
             dh, dw = random.randint(0, H - h), random.randint(0, W - w)
+            
         entry.pixel = entry.pixel[:, dh : dh + h, dw : dw + w]
         return entry, dh, dw
 
@@ -124,20 +148,33 @@ class StoreBase(Dataset):
         prompts = []
         original_sizes = []
         cropped_sizes = []
+        hidden1, hidden2, pool2 = [], [], []
 
         for e, i in zip(entries, indices):
             e, dh, dw = self.crop(e, i)
             pixels.append(e.pixel)
-            prompts.append(e.prompt)
-            original_sizes.append(torch.asarray(e.original_size))
-            
+            original_size = torch.asarray(e.original_size)
+            original_sizes.append(original_size)
+
             cropped_size = e.pixel.shape[-2:]
             cropped_size = (cropped_size[0] * 8, cropped_size[1] * 8) if e.is_latent else cropped_size
-            cropped_sizes.append(torch.asarray(cropped_size))
+            cropped_size = torch.asarray(cropped_size)
+            cropped_sizes.append(cropped_size)
             
             cropped_pos = (dh, dw)
             cropped_pos = (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            cropped_pos = torch.asarray(cropped_pos)
             crop_pos.append(torch.asarray(cropped_pos))
+            
+            hashkey = sha1sum(e.prompt)
+            if self.embeds_cache is not None:
+                assert hashkey in self.embeds_cache_keys
+                hashkey = sha1sum(e.prompt)
+                hidden1.append(torch.asarray(self.embeds_cache[f"{hashkey}.emb1"][:]))
+                hidden2.append(torch.asarray(self.embeds_cache[f"{hashkey}.emb2"][:]))
+                pool2.append(torch.asarray(self.embeds_cache[f"{hashkey}.pool2"][:]))
+            else:
+                prompts.append(e.prompt)
             
         is_latent = entries[0].is_latent
         shape = entries[0].pixel.shape
@@ -147,13 +184,27 @@ class StoreBase(Dataset):
             assert e.pixel.shape == shape, f"{e.pixel.shape} != {shape} for the same batch"
 
         pixel = torch.stack(pixels, dim=0).contiguous()
+        cropped_sizes = torch.stack(cropped_sizes)
+        original_sizes = torch.stack(original_sizes)
+        crop_pos = torch.stack(crop_pos)
+        
+        if self.embeds_cache is not None:
+            hidden1, hidden2, pool2 = torch.stack(hidden1), torch.stack(hidden2), torch.stack(pool2)
+            if hidden1.shape[1] == 1:
+                hidden1, hidden2, pool2 = hidden1.squeeze(1), hidden2.squeeze(1), pool2.squeeze(1)
+            size_embs = get_size_embeddings(original_sizes, crop_pos, cropped_sizes, hidden1.device)
+            vector_embedding = torch.cat([pool2, size_embs], dim=1)
+            text_embedding = torch.cat([hidden1, hidden2], dim=2)
+            prompts = {"crossattn": text_embedding, "vector": vector_embedding}
+            
         return {
             "prompts": prompts,
             "pixels": pixel,
             "is_latent": is_latent,
-            "target_size_as_tuple": torch.stack(cropped_sizes),
-            "original_size_as_tuple": torch.stack(original_sizes),
-            "crop_coords_top_left": torch.stack(crop_pos),
+            "is_cached_embeds": self.embeds_cache_keys is not None,
+            "target_size_as_tuple": cropped_sizes,
+            "original_size_as_tuple": original_sizes,
+            "crop_coords_top_left": crop_pos,
         }
 
     def __len__(self):
@@ -180,20 +231,22 @@ class StoreBase(Dataset):
         repeat_strategy = self.kwargs.get("repeat_strategy", None)
         if repeat_strategy is not None:
             assert index is not None
+            index_new = index.copy()
             for i, ent in enumerate(index):
                 for strategy, mult in repeat_strategy:
-                    if strategy in ent:
+                    if strategy in str(ent):
                         k = k + [k[i]] * (mult-1)
                         res = res + [res[i]] * (mult-1)
+                        index_new = index_new + [index_new[i]] * (mult-1)
                         break
-        return k, res, index
+        return k, res, index_new
 
 
 class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         prompt_mapping = self.kwargs.get("prompt_mapping")
-        self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5"))
+        self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem))
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
@@ -215,7 +268,7 @@ class LatentStore(StoreBase):
         logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
         
         self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
-        self.length = len(self.keys)
+        self.length = len(self.paths)
         logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
@@ -261,7 +314,7 @@ class DirectoryImageStore(StoreBase):
         logger.debug(f"Loaded {self.length} image sizes")
         
         self.prompts, self.raw_res, self.paths = self.repeat_entries(self.prompts, self.raw_res, index=self.paths)
-        self.length = len(self.prompts)
+        self.length = len(self.paths)
         logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
@@ -279,20 +332,6 @@ class DirectoryImageStore(StoreBase):
         else:
             img = np.array(_img.convert("RGB"))
             
-        h, w = img.shape[:2]
-        scale_ratio = self.base_len / min(h, w)
-        if scale_ratio < 1:
-            img = cv2.resize(
-                img,
-                (round(w * scale_ratio), round(h * scale_ratio)),
-                interpolation=cv2.INTER_AREA,
-            )
-        elif scale_ratio > 1:
-            img = cv2.resize(
-                img,
-                (round(w * scale_ratio), round(h * scale_ratio)),
-                interpolation=cv2.INTER_CUBIC,
-            )
-        
         img = IMAGE_TRANSFORMS(img)
+        h, w = img.shape[-2:]
         return False, img, prompt, (h, w)

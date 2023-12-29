@@ -13,6 +13,7 @@ import lightning as pl
 from lib.args import parse_args
 from lib.model import StableDiffusionModel
 from lib.lora import LoConBaseModel
+from lib.utils import rank_zero_print
 
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -23,6 +24,7 @@ from data.dataset import AspectRatioDataset, worker_init_fn
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
 from lightning.fabric.wrappers import _unwrap_objects
+from lightning.fabric.plugins.precision.amp import MixedPrecision
 from safetensors.torch import save_model
 from contextlib import ExitStack, contextmanager
 
@@ -45,6 +47,7 @@ def setup_model(config, fabric):
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
+        base_len=config.trainer.resolution,
         **config.dataset
     )
     dataloader = torch.utils.data.DataLoader(
@@ -146,7 +149,9 @@ class Trainer():
                 model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.safetensors")
                 save_model(_unwrap_objects(self.model), model_path, metadata={"trainer_cfg": string_cfg})
             else:
-                fabric.save(os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt"), state)
+                model_path = os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt")
+                fabric.save(model_path, state)
+            rank_zero_print(f"Saved model to {model_path}")
                     
     def perform_sampling(self, global_step, current_epoch):
         config = self.model.config
@@ -218,7 +223,8 @@ class Trainer():
 
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
             should_stop = True
-            
+        
+        rank_zero_print(f"Starting training from epoch {current_epoch}")
         self.prepare_ctx()
         self.prepare_logger()
         prog_bar = tqdm(
@@ -282,6 +288,24 @@ class Trainer():
             self.save_model(global_step, current_epoch, state, is_last=True)
             
 
+class LossRecorder:
+    def __init__(self):
+        self.loss_list = []
+        self.loss_total = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def moving_average(self) -> float:
+        return self.loss_total / len(self.loss_list)
+    
+
 def get_class(name: str):
     import importlib
 
@@ -326,23 +350,45 @@ def setup_smddp():
         "num_nodes": num_nodes,
     }
     return strategy, init_params
+    
+def setup_optimizer(config, model):
+    lr_conf = config.optimizer.get("layer_lr", None)
+    if lr_conf:
+        lr_groups = {}  # Dictionary to store parameters grouped by their LR
+        params_without_lr = []
+        
+        for name, param in model.model.diffusion_model.named_parameters():
+            layer_lr = get_lr_for_name(name, lr_conf)
+            if layer_lr:
+                if layer_lr not in lr_groups:
+                    lr_groups[layer_lr] = []
+                lr_groups[layer_lr].append(param)
+            else:
+                params_without_lr.append(param)
 
-class LossRecorder:
-    def __init__(self):
-        self.loss_list = []
-        self.loss_total = 0.0
+        params_to_optim = []
+        for lr, params in lr_groups.items():
+            params_to_optim.append({'params': params, 'lr': lr})
+        if params_without_lr:
+            params_to_optim.append({'params': params_without_lr})
+    else:
+        params_to_optim = [{'params': model.model.parameters()}]   
 
-    def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0:
-            self.loss_list.append(loss)
-        else:
-            self.loss_total -= self.loss_list[step]
-            self.loss_list[step] = loss
-        self.loss_total += loss
+    if config.get("lora") and config.lora.enabled:
+        lora = LoConBaseModel(model.model, config.lora)
+        for param in model.parameters():
+            param.requires_grad = False
+        
+        lora.requires_grad_(True)
+        lora.inject()
+        model.lora = lora
+        params_to_optim = [{'params': lora.parameters(), 'lr': config.lora.unet_lr}]
 
-    @property
-    def moving_average(self) -> float:
-        return self.loss_total / len(self.loss_list)
+    optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
+    scheduler = None
+    if config.get("scheduler"):
+        scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
+    return optimizer, scheduler
 
 def main(args):
     config = OmegaConf.load(args.config)
@@ -383,54 +429,30 @@ def main(args):
     
     if target_precision == "16-true":
         model_precision = torch.float16
+        config.lightning.precision = None
+        
+        # create and patch scaler
+        scaler = torch.cuda.amp.GradScaler()
+        org_unscale_grads = scaler._unscale_grads_
+        def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
+            return org_unscale_grads(optimizer, inv_scale, found_inf, True)
+        scaler._unscale_grads_ = _unscale_grads_replacer
+
+        plugins.append(MixedPrecision("16-mixed", "cuda", scaler))
     elif target_precision == "bf16-true":
         model_precision = torch.bfloat16
+        config.lightning.precision = None
+        plugins.append(MixedPrecision("bf16-mixed", "cuda"))
 
-    logger = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
-    fabric = pl.Fabric(loggers=[logger], plugins=plugins, strategy=strategy, **config.lightning)
+    loggers = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
+    fabric = pl.Fabric(loggers=[loggers], plugins=plugins, strategy=strategy, **config.lightning)
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
     model, dataset, dataloader = setup_model(config, fabric)
-    lr_conf = config.optimizer.get("layer_lr", None)
-    if lr_conf:
-        lr_groups = {}  # Dictionary to store parameters grouped by their LR
-        params_without_lr = []
-        
-        for name, param in model.model.diffusion_model.named_parameters():
-            layer_lr = get_lr_for_name(name, lr_conf)
-            if layer_lr:
-                if layer_lr not in lr_groups:
-                    lr_groups[layer_lr] = []
-                lr_groups[layer_lr].append(param)
-            else:
-                params_without_lr.append(param)
-
-        params_to_optim = []
-        for lr, params in lr_groups.items():
-            params_to_optim.append({'params': params, 'lr': lr})
-        if params_without_lr:
-            params_to_optim.append({'params': params_without_lr})
-    else:
-        params_to_optim = [{'params': model.model.parameters()}]   
-
-    if config.get("lora") and config.lora.enabled:
-        lora = LoConBaseModel(model.model, config.lora)
-        for param in model.parameters():
-            param.requires_grad = False
-        
-        lora.requires_grad_(True)
-        lora.inject()
-        model.lora = lora
-        params_to_optim = [{'params': lora.parameters(), 'lr': config.lora.unet_lr}]
-
-    optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
+    optimizer, scheduler = setup_optimizer(config, model)
     if fabric.is_global_zero and os.name != 'nt':
-        print(f"\n{ModelSummary(model, max_depth=1)}")
-
-    scheduler = None
-    if config.get("scheduler"):
-        scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
+        print(f"\n{ModelSummary(model, max_depth=1)}\n")
     
     fabric.to_device(model)
     model, optimizer = fabric.setup(model, optimizer, move_to_device=False)

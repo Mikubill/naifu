@@ -40,11 +40,17 @@ lightning:
 dataset:
   img_path: "/notebooks/rurudo_lion_imgonly"
   tag_processor: data.processors.placebo
+  precompure_embeds: false # or .../prompt_cache.h5
   center_crop: false
   ucg: 0.1
   max_token_length: 225 # [75, 150, 225]
   # repeat_strategy:
   #   - [/rurudo_lion_imgonly/, 2]
+  #
+  # target_area: 1048576 # 1024 * 1024
+  # min_size: 512
+  # max_size: 2048
+  # divisible: 64
 
 optimizer:
   name: bitsandbytes.optim.PagedLion8bit
