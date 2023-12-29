@@ -48,17 +48,16 @@ class Entry:
 
 
 def dirwalk(
-    path: Path, cond: Optional[Callable] = None, mult: int = 1
+    path: Path, cond: Optional[Callable] = None
 ) -> Generator[Path, None, None]:
     for p in path.iterdir():
         if p.is_dir():
-            yield from dirwalk(p, cond, mult * x)
+            yield from dirwalk(p, cond)
         else:
             if isinstance(cond, Callable):
                 if not cond(p):
                     continue
-            for _ in range(mult):
-                yield p
+            yield p
 
 
 class StoreBase(Dataset):

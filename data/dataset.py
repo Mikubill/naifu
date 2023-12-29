@@ -155,10 +155,8 @@ class AspectRatioDataset(Dataset):
 
     def put_most_oom_like_batch_first(self):
         idx = next(
-            idx
-            for b in itertools.chain(self.bucket_content, reversed(self.bucket_content))
-            for idx in b
-            if b
+            idx for b in itertools.chain(self.bucket_content, reversed(self.bucket_content))
+            for idx in b if b
         )
         i = next(i for i, batch_idxs in enumerate(self.batch_idxs) if idx in batch_idxs)
         self.batch_idxs[0], self.batch_idxs[i] = self.batch_idxs[i], self.batch_idxs[0]

@@ -20,7 +20,6 @@ def disabled_train(self, mode=True):
     does not change anymore."""
     return self
 
-
 def prepare_scheduler_for_custom_training(noise_scheduler, device):
     if hasattr(noise_scheduler, "all_snr"):
         return
@@ -33,7 +32,6 @@ def prepare_scheduler_for_custom_training(noise_scheduler, device):
     all_snr = (alpha / sigma) ** 2
 
     noise_scheduler.all_snr = all_snr.to(device)
-
 
 def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
     # fix beta: zero terminal SNR
@@ -72,7 +70,6 @@ def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
     noise_scheduler.alphas = alphas
     noise_scheduler.alphas_cumprod = alphas_cumprod
 
-
 def apply_snr_weight(loss, timesteps, noise_scheduler, gamma, v_prediction=False):
     snr = torch.stack([noise_scheduler.all_snr[t] for t in timesteps])
     min_snr_gamma = torch.minimum(snr, torch.full_like(snr, gamma))
@@ -83,12 +80,10 @@ def apply_snr_weight(loss, timesteps, noise_scheduler, gamma, v_prediction=False
     loss = loss * snr_weight
     return loss
 
-
 def scale_v_prediction_loss_like_noise_prediction(loss, timesteps, noise_scheduler):
     scale = get_snr_scale(timesteps, noise_scheduler)
     loss = loss * scale
     return loss
-
 
 def get_snr_scale(timesteps, noise_scheduler):
     snr_t = torch.stack([noise_scheduler.all_snr[t] for t in timesteps])  # batch_size
@@ -100,13 +95,11 @@ def get_snr_scale(timesteps, noise_scheduler):
     # print(f"timesteps: {timesteps}, snr_t: {snr_t}, scale: {scale}")
     return scale
 
-
 def add_v_prediction_like_loss(loss, timesteps, noise_scheduler, v_pred_like_loss):
     scale = get_snr_scale(timesteps, noise_scheduler)
     # print(f"add v-prediction like loss: {v_pred_like_loss}, scale: {scale}, loss: {loss}, time: {timesteps}")
     loss = loss + loss / scale * v_pred_like_loss
     return loss
-
 
 def apply_debiased_estimation(loss, timesteps, noise_scheduler):
     snr_t = torch.stack([noise_scheduler.all_snr[t] for t in timesteps])  # batch_size
@@ -174,11 +167,6 @@ class StableDiffusionModel(pl.LightningModule):
         if len(unexpected) > 0:
             rank_zero_print(f"Unexpected Keys: {unexpected}")
 
-        try:
-            torch.compile(self.model, mode="max-autotune", fullgraph=True, dynamic=True)
-        except Exception as e:
-            rank_zero_print(f"Failed to compile model: {e}")
-
         self.cast_dtype = torch.float32
         self.offset_noise_level = self.config.trainer.get("offset_noise_val")
         self.extra_config = self.config.get("extra", None)
@@ -190,7 +178,9 @@ class StableDiffusionModel(pl.LightningModule):
             clip_sample=False,
         )
         prepare_scheduler_for_custom_training(self.noise_scheduler, self.device)
-        if config.trainer.get("zero_terminal_snr", None):
+        
+        advanced = self.config.get("advanced", {})
+        if advanced.get("zero_terminal_snr", None):
             fix_noise_scheduler_betas_for_zero_terminal_snr(self.noise_scheduler)
 
         if config.trainer.use_ema:
