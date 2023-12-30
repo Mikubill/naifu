@@ -1,6 +1,7 @@
 import functools
 import hashlib
 import math
+import cv2
 import h5py as h5
 import numpy as np
 import random
@@ -142,10 +143,10 @@ class StoreBase(Dataset):
         base_ratio = H / W
         target_ratio = self.to_ratio[i]
         h, w = self.ratio_to_bucket[target_ratio]
-        H, W = entry.pixel.shape[-2:]
         if not entry.is_latent:
             resize_h, resize_w = self.fit_dimensions(base_ratio, H, W)
-            entry.pixel = transforms.Resize((resize_h, resize_w), antialias=None)(entry.pixel)
+            interp = cv2.INTER_AREA if resize_h < H else cv2.INTER_CUBIC
+            entry.pixel = cv2.resize(entry.pixel, (resize_w, resize_h, ), interpolation=interp)
         else:
             h, w = h // 8 , w // 8 
         

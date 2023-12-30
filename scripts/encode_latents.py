@@ -2,7 +2,7 @@ import argparse
 import functools
 import hashlib
 import math
-import random
+import cv2
 import h5py as h5
 import json
 import numpy as np
@@ -15,7 +15,6 @@ from tqdm import tqdm
 from torchvision import transforms
 from dataclasses import dataclass
 from diffusers import AutoencoderKL
-from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 from typing import Callable, Generator, Optional
@@ -157,19 +156,20 @@ class LatentEncodingDataset(Dataset):
 
     @torch.no_grad()
     def fit_bucket(self, idx, img: np.ndarray) -> np.ndarray:
-        h, w = img.shape[-2:]
+        h, w = img.shape[:2]
         base_ratio = h / w
         target_ratio = self.to_ratio[idx]
         target_h, target_w = self.ratio_to_bucket[target_ratio]
         resize_h, resize_w = self.fit_dimensions(base_ratio, target_h, target_w)
-        img = transforms.Resize((resize_h, resize_w), antialias=None)(img)
+        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
+        img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
         return img
 
     def __getitem__(self, index) -> tuple[list[torch.Tensor], str, str, (int, int)]:
         try:
             img, prompt = load_entry(self.paths[index])
             original_size = img.shape[:2]
-            img = self.fit_bucket(index, self.tr(img)).to(self.dtype)
+            img = self.tr(self.fit_bucket(index, img)).to(self.dtype)
             sha1 = get_sha1(self.paths[index])
         except Exception as e:
             print(f"\033[31mError processing {self.paths[index]}: {e}\033[0m")
