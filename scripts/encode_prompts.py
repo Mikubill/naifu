@@ -181,6 +181,6 @@ if __name__ == "__main__":
                     print(f"\033[33mWarning: {digest} is already cached. Skipping... \033[0m")
                     continue
                 hidden_states1, hidden_states2, pool2 = get_hidden_states_sdxl(prompt, max_length, tokenizer1, tokenizer2, text_encoder1, text_encoder2)
-                f.create_dataset(f"{digest}.emb1", data=hidden_states1.half().cpu().numpy(), compression=args.compress,)
-                f.create_dataset(f"{digest}.emb2", data=hidden_states2.half().cpu().numpy(), compression=args.compress,)
-                f.create_dataset(f"{digest}.pool2", data=pool2.half().cpu().numpy(), compression=args.compress,)
+                f.create_dataset(f"{digest}.emb1", data=hidden_states1.cpu().numpy(), compression=args.compress,)
+                f.create_dataset(f"{digest}.emb2", data=hidden_states2.cpu().numpy(), compression=args.compress,)
+                f.create_dataset(f"{digest}.pool2", data=pool2.cpu().numpy(), compression=args.compress,)

@@ -204,7 +204,7 @@ if __name__ == "__main__":
     num_workers = args.num_workers
 
     vae_path = "stabilityai/sdxl-vae"
-    vae = AutoencoderKL.from_pretrained(vae_path, repo_type="datasets").to(dtype=dtype)
+    vae = AutoencoderKL.from_pretrained(vae_path).to(dtype=dtype)
     if args.slice_vae: vae.enable_slicing()
     if args.tile_vae: vae.enable_tiling()
     
@@ -252,7 +252,7 @@ if __name__ == "__main__":
                 latent = latent.sample()[0]
                 d = f.create_dataset(
                     f"{sha1}.latents",
-                    data=latent.half().cpu().numpy(),
+                    data=latent.cpu().numpy(),
                     compression=args.compress,
                 )
                 d.attrs["scale"] = False
