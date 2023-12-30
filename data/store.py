@@ -274,10 +274,10 @@ class LatentStore(StoreBase):
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         latent_key = self.keys[index]
         h5_path, prompt, original_size = self.h5_keymap[latent_key]
-        latent = self.h5_filehandles[h5_path][latent_key][:]
+        latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
         scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
         latent = latent * 0.13025 if not scaled else latent
-        return True, torch.asarray(latent), prompt, original_size
+        return True, latent, prompt, original_size
 
 
 class DirectoryImageStore(StoreBase):

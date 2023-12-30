@@ -183,7 +183,7 @@ def get_args():
         "--compress",
         "-c",
         type=str,
-        default=None,
+        default='gzip',
         help="compression algorithm for output hdf5 file",
     )
     args = parser.parse_args()
@@ -205,6 +205,8 @@ if __name__ == "__main__":
 
     vae_path = "stabilityai/sdxl-vae"
     vae = AutoencoderKL.from_pretrained(vae_path).to(dtype=dtype)
+    vae.requires_grad_(False)
+    vae.eval()
     if args.slice_vae: vae.enable_slicing()
     if args.tile_vae: vae.enable_tiling()
     
@@ -220,7 +222,6 @@ if __name__ == "__main__":
     if multi_node:
         cache_filename = f"cache_{rank+1}.h5" 
         h5_cache_file = opt / cache_filename
-        vae = DistributedDataParallel(vae, device_ids=[rank])
         sampler = DistributedSampler(dataset, rank=rank)
         dataloader = DataLoader(dataset, batch_size=None, sampler=sampler, num_workers=num_workers)
     
@@ -232,6 +233,7 @@ if __name__ == "__main__":
             for img, basepath, prompt, sha1, original_size in tqdm(dataloader, position=rank):
                 if sha1 is None:
                     print(f"\033[33mWarning: {basepath} is invalid. Skipping... \033[0m")
+                    continue
                     
                 h, w = original_size
                 dataset_mapping[sha1] = {
@@ -245,14 +247,13 @@ if __name__ == "__main__":
                     print(f"\033[33mWarning: {sha1} is already cached. Skipping... \033[0m")
                     continue
                 
-                encode_func = vae.module.encode if isinstance(vae, DistributedDataParallel) else vae.encode
                 img = img.unsqueeze(0).to(torch.device(f"cuda:{rank}"))
-                latent = encode_func(img, return_dict=False)[0]
+                latent = vae.encode(img, return_dict=False)[0]
                 latent.deterministic = True
                 latent = latent.sample()[0]
                 d = f.create_dataset(
                     f"{sha1}.latents",
-                    data=latent.cpu().numpy(),
+                    data=latent.half().cpu().numpy(),
                     compression=args.compress,
                 )
                 d.attrs["scale"] = False

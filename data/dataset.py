@@ -114,6 +114,7 @@ class AspectRatioDataset(Dataset):
             else:
                 self.batch_idxs.extend(bucket[:-reminder].reshape(-1, self.batch_size))
                 self.batch_idxs.append(bucket[-reminder:])
+            
         np.random.shuffle(self.batch_idxs)
 
     def put_most_oom_like_batch_first(self):
