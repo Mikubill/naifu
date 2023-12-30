@@ -1,18 +1,20 @@
 import argparse
-import cv2
 import hashlib
 import h5py as h5
 import json
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
+from torchvision import transforms
 from dataclasses import dataclass
 from diffusers import AutoencoderKL
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from torch.utils.data.distributed import DistributedSampler
 from typing import Callable, Generator, Optional
 
 
@@ -74,17 +76,22 @@ class LatentEncodingDataset(Dataset):
         print(f"Found {len(self.paths)} images")
         self.dtype = dtype
         self.raw_res = []
+        
+        cloned_paths = self.paths.copy()
         for p in tqdm(
-            self.paths,
-            desc="Loading image sizes",
-            leave=False,
-            ascii=True,
+            self.paths, desc="Loading image sizes", leave=False, ascii=True,
         ):
-            w, h = Image.open(p).size
-            self.raw_res.append((h, w))
+            try:
+                w, h = Image.open(p).size
+                self.raw_res.append((h, w))
+            except Exception as e:
+                print(f"\033[33mSkipped: error processing {p}: {e}\033[0m")
+                cloned_paths.remove(p)
+        
+        self.paths = cloned_paths    
         self.length = len(self.raw_res)
         print(f"Loaded {self.length} image sizes")
-        
+
         self.target_area = 1024 * 1024
         self.max_size, self.min_size, self.divisible = 2048, 512, 64
         self.generate_buckets()
@@ -95,15 +102,22 @@ class LatentEncodingDataset(Dataset):
             self.target_area % 4096 == 0
         ), "target area (h * w) must be divisible by 64"
         width = np.arange(self.min_size, self.max_size + 1, self.divisible)
-        height = np.minimum(self.max_size, ((self.target_area // width) // self.divisible) * self.divisible,)
+        height = np.minimum(
+            self.max_size,
+            ((self.target_area // width) // self.divisible) * self.divisible,
+        )
         valid_mask = height >= self.min_size
 
         resos = set(zip(width[valid_mask], height[valid_mask]))
         resos.update(zip(height[valid_mask], width[valid_mask]))
-        resos.add(((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2)
+        resos.add(
+            ((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2
+        )
         self.buckets_sizes = np.array(sorted(resos))
         self.bucket_ratios = self.buckets_sizes[:, 0] / self.buckets_sizes[:, 1]
-        self.ratio_to_bucket = {ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)}
+        self.ratio_to_bucket = {
+            ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)
+        }
 
     def assign_buckets(self):
         img_res = np.array(self.raw_res)
@@ -117,7 +131,7 @@ class LatentEncodingDataset(Dataset):
             bucket_idx = np.argmin(diff)
             self.bucket_content[bucket_idx].append(idx)
             self.to_ratio[idx] = self.bucket_ratios[bucket_idx]
-        
+
     @torch.no_grad()
     def fit_bucket(self, idx, img: np.ndarray) -> np.ndarray:
         h, w = img.shape[-2:]
@@ -134,10 +148,14 @@ class LatentEncodingDataset(Dataset):
         return img
 
     def __getitem__(self, index) -> tuple[list[torch.Tensor], str, str, (int, int)]:
-        img, prompt = load_entry(self.paths[index])
-        original_size = img.shape[:2]
-        img = self.fit_bucket(index, self.tr(img)).to(self.dtype)
-        sha1 = get_sha1(self.paths[index])
+        try:
+            img, prompt = load_entry(self.paths[index])
+            original_size = img.shape[:2]
+            img = self.fit_bucket(index, self.tr(img)).to(self.dtype)
+            sha1 = get_sha1(self.paths[index])
+        except Exception as e:
+            print(f"\033[31mError processing {self.paths[index]}\033[0m")
+            return None, None, None, None, None
         return img, self.paths[index], prompt, sha1, original_size
 
     def __len__(self):
@@ -174,39 +192,47 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
+    multi_node = torch.cuda.device_count() > 1
+    rank = 0
+    if multi_node:
+        dist.init_process_group(backend="nccl", init_method="env://")
+        rank = dist.get_rank()
+
     root = args.input
     opt = Path(args.output)
-    dtype = getattr(torch, args.dtype)
+    dtype = torch.float32 if args.dtype == "float32" else torch.float16
     num_workers = args.num_workers
-    device = args.device
+
     vae_path = "stabilityai/sdxl-vae"
-
+    vae = AutoencoderKL.from_pretrained(vae_path, repo_type="datasets").to(dtype=dtype)
+    if args.slice_vae: vae.enable_slicing()
+    if args.tile_vae: vae.enable_tiling()
+    
     dataset = LatentEncodingDataset(root, dtype=dtype)
-    dataloader = DataLoader(
-        dataset, batch_size=None, shuffle=True, num_workers=num_workers
-    )
-    vae = AutoencoderKL.from_pretrained(vae_path, repo_type="datasets").to(
-        device=device, dtype=dtype
-    )
-    if args.slice_vae:
-        vae.enable_slicing()
-    if args.tile_vae:
-        vae.enable_tiling()
-    vae = vae.to(device)
-
-    print(f"Starting encoding...")
-    if not opt.exists():
-        opt.mkdir()
-
+    dataloader = DataLoader(dataset, batch_size=None, num_workers=num_workers)
+    opt.mkdir(exist_ok=True, parents=True)
     assert opt.is_dir(), f"{opt} is not a directory"
-    h5_cache_file = opt / "cache.h5"
-    file_mode = "w" if not h5_cache_file.exists() else "r+"
+
+    cache_filename = "cache.h5" 
     dataset_mapping = {}
+    vae.to(torch.device(f"cuda:{rank}"))
+    
+    if multi_node:
+        cache_filename = f"cache_{rank+1}.h5" 
+        h5_cache_file = opt / cache_filename
+        vae = DistributedDataParallel(vae, device_ids=[rank])
+        sampler = DistributedSampler(dataset, rank=rank)
+        dataloader = DataLoader(dataset, batch_size=None, sampler=sampler, num_workers=num_workers)
+    
+    h5_cache_file = opt / cache_filename
+    print(f"Saving cache to {h5_cache_file}")
+    file_mode = "w" if not h5_cache_file.exists() else "r+"
     with h5.File(h5_cache_file, file_mode, libver="latest") as f:
         with torch.no_grad():
-            for i, (img, basepath, prompt, sha1, original_size) in enumerate(
-                tqdm(dataloader)
-            ):
+            for img, basepath, prompt, sha1, original_size in tqdm(dataloader, position=rank):
+                if sha1 is None:
+                    print(f"\033[33mWarning: {basepath} is invalid. Skipping... \033[0m")
+                    
                 h, w = original_size
                 dataset_mapping[sha1] = {
                     "train_use": True,
@@ -216,12 +242,12 @@ if __name__ == "__main__":
                     "train_height": h,
                 }
                 if f"{sha1}.latents" in f:
-                    print(
-                        f"\033[33mWarning: {sha1} is already cached. Skipping... \033[0m"
-                    )
+                    print(f"\033[33mWarning: {sha1} is already cached. Skipping... \033[0m")
                     continue
-                    
-                latent = vae.encode(img.unsqueeze(0).cuda(), return_dict=False)[0]
+                
+                encode_func = vae.module.encode if isinstance(vae, DistributedDataParallel) else vae.encode
+                img = img.unsqueeze(0).to(torch.device(f"cuda:{rank}"))
+                latent = encode_func(img, return_dict=False)[0]
                 latent.deterministic = True
                 latent = latent.sample()[0]
                 d = f.create_dataset(
@@ -231,5 +257,24 @@ if __name__ == "__main__":
                 )
                 d.attrs["scale"] = False
 
-    with open(opt / "dataset.json", "w") as f:
+    json_filename = f"dataset_{rank+1}.json" if multi_node else "dataset.json"
+    with open(opt / json_filename, "w") as f:
         json.dump(dataset_mapping, f, indent=4)
+
+    if multi_node:
+        if rank == 0:
+            # merge all json and h5 file
+            with open(opt / "dataset.json", "w") as f:
+                for i in range(dist.get_world_size()):
+                    with open(opt / f"dataset_{i+1}.json", "r") as f1:
+                        f.write(f1.read())
+                    Path(opt / f"dataset_{i+1}.json").unlink()
+
+            with h5.File(opt / "cache.h5", "w", libver="latest") as f:
+                for i in range(dist.get_world_size()):
+                    with h5.File(opt / f"cache_{i+1}.h5", "r", libver="latest") as f1:
+                        for k in f1.keys():
+                            f.copy(f1[k], k)
+                    Path(opt / f"cache_{i+1}.h5").unlink()
+        dist.barrier()
+        dist.destroy_process_group()

@@ -288,6 +288,19 @@ class DirectoryImageStore(StoreBase):
         self.length = len(self.paths)
         logger.debug(f"Found {self.length} images in {self.root_path}")
 
+        cloned_paths = self.paths.copy()
+        for p in tqdm(
+            self.paths, desc="Loading image sizes", leave=False, ascii=True,
+        ):
+            try:
+                w, h = Image.open(p).size
+                self.raw_res.append((h, w))
+            except Exception as e:
+                logger.warn(f"Error processing {p}: {e}")
+                cloned_paths.remove(p)
+                
+        self.paths = cloned_paths
+        self.length = len(self.paths)
         self.prompts: list[str] = []
         for path in tqdm(
             self.paths,
@@ -300,15 +313,6 @@ class DirectoryImageStore(StoreBase):
             with open(p, "r") as f:
                 self.prompts.append(f.read())
         logger.debug(f"Loaded {len(self.prompts)} prompts")
-        for p in tqdm(
-            self.paths,
-            desc="Loading image sizes",
-            disable=self.rank != 0,
-            leave=False,
-            ascii=True,
-        ):
-            w, h = Image.open(p).size
-            self.raw_res.append((h, w))
             
         self.base_len = self.kwargs["base_len"]
         logger.debug(f"Loaded {self.length} image sizes")

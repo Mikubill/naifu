@@ -322,13 +322,6 @@ def cast_precision(tensor, precision):
         tensor.to(precision)
     return tensor
 
-def get_lr_for_name(name, lr_conf):
-    for item in lr_conf:
-        regex_pattern, lr = list(item.items())[0]
-        if re.match(regex_pattern, name):
-            return lr
-    return None
-
 def setup_smddp():
     from lightning.pytorch.plugins.environments import LightningEnvironment
     from lightning.fabric.strategies import DDPStrategy
@@ -354,23 +347,19 @@ def setup_smddp():
 def setup_optimizer(config, model):
     lr_conf = config.optimizer.get("layer_lr", None)
     if lr_conf:
-        lr_groups = {}  # Dictionary to store parameters grouped by their LR
+        lr_groups = [{"params": [], "lr": list(it.items())[1]} for it in lr_conf]
         params_without_lr = []
         
         for name, param in model.model.diffusion_model.named_parameters():
-            layer_lr = get_lr_for_name(name, lr_conf)
-            if layer_lr:
-                if layer_lr not in lr_groups:
-                    lr_groups[layer_lr] = []
-                lr_groups[layer_lr].append(param)
-            else:
-                params_without_lr.append(param)
-
-        params_to_optim = []
-        for lr, params in lr_groups.items():
-            params_to_optim.append({'params': params, 'lr': lr})
-        if params_without_lr:
-            params_to_optim.append({'params': params_without_lr})
+            for idx, item in enumerate(lr_conf):
+                regex_pattern, lr = list(item.items())[0]
+                if re.match(regex_pattern, name):
+                    lr_groups[idx]["params"].append(param)
+                    continue
+            params_without_lr.append(param)
+            
+        params_without_lr = [{"params": params_without_lr}]
+        params_to_optim = [*lr_groups, *params_without_lr]
     else:
         params_to_optim = [{'params': model.model.parameters()}]   
 
