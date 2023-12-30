@@ -1,5 +1,8 @@
 import argparse
+import functools
 import hashlib
+import math
+import random
 import h5py as h5
 import json
 import numpy as np
@@ -110,9 +113,7 @@ class LatentEncodingDataset(Dataset):
 
         resos = set(zip(width[valid_mask], height[valid_mask]))
         resos.update(zip(height[valid_mask], width[valid_mask]))
-        resos.add(
-            ((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2
-        )
+        resos.add(((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2)
         self.buckets_sizes = np.array(sorted(resos))
         self.bucket_ratios = self.buckets_sizes[:, 0] / self.buckets_sizes[:, 1]
         self.ratio_to_bucket = {
@@ -131,6 +132,28 @@ class LatentEncodingDataset(Dataset):
             bucket_idx = np.argmin(diff)
             self.bucket_content[bucket_idx].append(idx)
             self.to_ratio[idx] = self.bucket_ratios[bucket_idx]
+            
+    @staticmethod
+    @functools.cache
+    def fit_dimensions(target_ratio, min_h, min_w):
+        min_area = min_h * min_w
+        h = max(min_h, math.ceil(math.sqrt(min_area * target_ratio)))
+        w = max(min_w, math.ceil(h / target_ratio))
+        
+        if w < min_w:
+            w = min_w
+            h = max(min_h, math.ceil(w * target_ratio))
+        
+        while h * w < min_area:
+            increment = 8
+            if target_ratio >= 1:
+                h += increment
+            else:
+                w += increment
+
+            w = max(min_w, math.ceil(h / target_ratio))
+            h = max(min_h, math.ceil(w * target_ratio))
+        return int(h), int(w)
 
     @torch.no_grad()
     def fit_bucket(self, idx, img: np.ndarray) -> np.ndarray:
@@ -138,13 +161,8 @@ class LatentEncodingDataset(Dataset):
         base_ratio = h / w
         target_ratio = self.to_ratio[idx]
         target_h, target_w = self.ratio_to_bucket[target_ratio]
-        if base_ratio > target_ratio:
-            resize_h = int(target_w * base_ratio)
-            resize_w = int(target_w)
-        else:
-            resize_h = int(target_h)
-            resize_w = int(target_h / base_ratio)
-        img = transforms.Resize((resize_h, resize_w), antialias=True)(img)
+        resize_h, resize_w = self.fit_dimensions(base_ratio, target_h, target_w)
+        img = transforms.Resize((resize_h, resize_w), antialias=None)(img)
         return img
 
     def __getitem__(self, index) -> tuple[list[torch.Tensor], str, str, (int, int)]:
@@ -154,8 +172,8 @@ class LatentEncodingDataset(Dataset):
             img = self.fit_bucket(index, self.tr(img)).to(self.dtype)
             sha1 = get_sha1(self.paths[index])
         except Exception as e:
-            print(f"\033[31mError processing {self.paths[index]}\033[0m")
-            return None, None, None, None, None
+            print(f"\033[31mError processing {self.paths[index]}: {e}\033[0m")
+            return None, self.paths[index], None, None, None
         return img, self.paths[index], prompt, sha1, original_size
 
     def __len__(self):

@@ -1,5 +1,6 @@
+import functools
 import hashlib
-import cv2
+import math
 import h5py as h5
 import numpy as np
 import random
@@ -112,6 +113,28 @@ class StoreBase(Dataset):
 
     def fix_aspect_randomness(self, rng: np.random.Generator):
         raise NotImplementedError
+    
+    @staticmethod
+    @functools.cache
+    def fit_dimensions(target_ratio, min_h, min_w):
+        min_area = min_h * min_w
+        h = max(min_h, math.ceil(math.sqrt(min_area * target_ratio)))
+        w = max(min_w, math.ceil(h / target_ratio))
+        
+        if w < min_w:
+            w = min_w
+            h = max(min_h, math.ceil(w * target_ratio))
+        
+        while h * w < min_area:
+            increment = 8
+            if target_ratio >= 1:
+                h += increment
+            else:
+                w += increment
+
+            w = max(min_w, math.ceil(h / target_ratio))
+            h = max(min_h, math.ceil(w * target_ratio))
+        return int(h), int(w)
 
     def crop(self, entry: Entry, i: int) -> Entry:
         assert self.to_ratio is not None, "to_ratio is not initialized"
@@ -119,14 +142,10 @@ class StoreBase(Dataset):
         base_ratio = H / W
         target_ratio = self.to_ratio[i]
         h, w = self.ratio_to_bucket[target_ratio]
+        H, W = entry.pixel.shape[-2:]
         if not entry.is_latent:
-            if base_ratio > target_ratio:
-                resize_h = int(w * base_ratio)
-                resize_w = int(w)
-            else:
-                resize_h = int(h)
-                resize_w = int(h / base_ratio)
-            entry.pixel = transforms.Resize((resize_h, resize_w), antialias=True)(entry.pixel)
+            resize_h, resize_w = self.fit_dimensions(base_ratio, H, W)
+            entry.pixel = transforms.Resize((resize_h, resize_w), antialias=None)(entry.pixel)
         else:
             h, w = h // 8 , w // 8 
         
