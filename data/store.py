@@ -17,7 +17,7 @@ from typing import Callable, Generator, Optional# type: ignore
 from data.processors import placebo
 from data.embeddings import get_size_embeddings
 from torchvision import transforms
-from lib.logging import logger
+from lib.utils import rank_zero_debug
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -275,15 +275,10 @@ class LatentStore(StoreBase):
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
-        for h5_path in tqdm(
-            self.h5_paths,
-            desc="Loading latents",
-            disable=self.rank != 0,
-            leave=False,
-            ascii=True,
-        ):
+        total_latents = len(self.h5_paths)
+        for idx, h5_path in enumerate(self.h5_paths):
             fs = h5.File(h5_path, "r", libver="latest")
-            for k in fs.keys():
+            for k in tqdm(fs.keys(), desc=f"Loading latents {idx+1}/{total_latents}", disable=self.rank != 0, leave=False, ascii=True):
                 hashkey = k[:-8] # ".latents"
                 assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
                 it = prompt_mapping[hashkey]
@@ -296,11 +291,11 @@ class LatentStore(StoreBase):
         
         self.keys = list(self.h5_keymap.keys())
         self.length = len(self.keys)
-        logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
+        rank_zero_debug(f"Loaded {self.length} latent codes from {self.root_path}")
         
         self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
         self.length = len(self.paths)
-        logger.debug(f"Using {self.length} entries after applied repeat strategy")
+        rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
         
     def setup_filehandles(self):
         self.h5_filehandles = {}
