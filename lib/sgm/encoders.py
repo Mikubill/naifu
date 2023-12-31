@@ -10,7 +10,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from omegaconf import ListConfig
 from torch.utils.checkpoint import checkpoint
-from .model_util import use_noinit_ops, rank_zero_print
+from .model_util import rank_zero_print
 from transformers import (
     CLIPTextModel,
     CLIPTextConfig,
@@ -18,7 +18,6 @@ from transformers import (
     modeling_utils,
 )
 from .encoder_util import (
-    autocast,
     count_params,
     default,
     disabled_train,
@@ -287,7 +286,7 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         super().__init__()
         assert layer in self.LAYERS
         self.tokenizer = CLIPTokenizer.from_pretrained(version)
-        with use_noinit_ops(), modeling_utils.no_init_weights():
+        with modeling_utils.no_init_weights():
             config = CLIPTextConfig.from_pretrained(version)
             self.transformer = CLIPTextModel(config)
             # self.transformer = CLIPTextModel.from_pretrained(version)
@@ -372,12 +371,11 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     ):
         super().__init__()
         assert layer in self.LAYERS
-        with use_noinit_ops():
-            model = open_clip.create_model(
-                arch,
-                device=torch.device("cpu"),
-                require_pretrained=False,
-            )
+        model = open_clip.create_model(
+            arch,
+            device=torch.device("cpu"),
+            require_pretrained=False,
+        )
         del model.visual
         self.model = model
 

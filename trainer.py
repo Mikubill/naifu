@@ -144,13 +144,18 @@ class Trainer():
             return
         
         with self.trainer_ctx():
+            model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}")
+            if global_step % cfg.checkpoint_steps == 0:
+                model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-s{global_step:02d}")
+                
             if cfg.get("save_format", "safetensors"):
                 string_cfg = OmegaConf.to_yaml(config)
-                model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.safetensors")
+                model_path += ".safetensors"
                 save_model(_unwrap_objects(self.model), model_path, metadata={"trainer_cfg": string_cfg})
             else:
-                model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.ckpt")
+                model_path += ".ckpt"
                 fabric.save(model_path, state)
+                
             rank_zero_print(f"Saved model to {model_path}")
                     
     def perform_sampling(self, global_step, current_epoch):

@@ -20,3 +20,4 @@ sagemaker_launch.ipynb
 train-*.yaml
 trainer_with*
 *.safetensors
+*special.yaml
