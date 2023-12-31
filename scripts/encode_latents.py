@@ -293,7 +293,8 @@ if __name__ == "__main__":
                 for i in range(dist.get_world_size()):
                     with h5.File(opt / f"cache_{i+1}.h5", "r", libver="latest") as f1:
                         for k in f1.keys():
-                            f.copy(f1[k], k)
+                            if k not in f:
+                                f.copy(f1[k], k)
                     Path(opt / f"cache_{i+1}.h5").unlink()
         dist.barrier()
         dist.destroy_process_group()

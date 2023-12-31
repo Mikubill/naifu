@@ -7,6 +7,7 @@ trainer:
   seed: 1138
   wandb_id: ""
   use_ema: false
+  use_compile: false
   use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0

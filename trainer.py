@@ -138,14 +138,15 @@ class Trainer():
         config = self.model.config
         cfg = config.trainer
         fabric = self.fabric
-        to_save = (cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0) or is_last
+        is_checkpoint_step = cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0
+        to_save = is_checkpoint_step or is_last
 
         if not (fabric.is_global_zero and to_save):
             return
         
         with self.trainer_ctx():
             model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}")
-            if global_step % cfg.checkpoint_steps == 0:
+            if is_checkpoint_step:
                 model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-s{global_step:02d}")
                 
             if cfg.get("save_format", "safetensors"):
@@ -258,7 +259,7 @@ class Trainer():
                     self.fabric.backward(loss / grad_accum_steps)
                     
                 if fabric.is_global_zero:  
-                    loss_rec.add(epoch=current_epoch, step=local_step, loss=loss.item())
+                    loss_rec.add(epoch=current_epoch, step=batch_idx, loss=loss.item())
                     prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}") 
         
                 if is_accumulating:

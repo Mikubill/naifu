@@ -121,6 +121,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.init_model()
 
     def init_model(self):
+        trainer_cfg = self.config.trainer
         config = self.config
         sd = load_torch_file(self.model_path)
         key_name_sd_xl_refiner = ("conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias")
@@ -138,7 +139,7 @@ class StableDiffusionModel(pl.LightningModule):
             item["target"] = item["target"].replace("modules.", "")
             item["target"] = "lib." + item["target"]
 
-        if self.config.trainer.use_xformers:
+        if trainer_cfg.use_xformers:
             model_params.network_config.params.spatial_transformer_attn_type = ("softmax-xformers")
             model_params.first_stage_config.params.ddconfig.attn_type = ("vanilla-xformers")
 
@@ -156,7 +157,7 @@ class StableDiffusionModel(pl.LightningModule):
             if "CLIPEmbedder" not in conditioner.target:
                 continue
             conditioner.params["max_length"] = (self.config.dataset.get("max_token_length", 75) + 2)
-
+            
         self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
         self.to(self.target_device)
         
@@ -168,8 +169,6 @@ class StableDiffusionModel(pl.LightningModule):
             rank_zero_print(f"Unexpected Keys: {unexpected}")
 
         self.cast_dtype = torch.float32
-        self.offset_noise_level = self.config.trainer.get("offset_noise_val")
-        self.extra_config = self.config.get("extra", None)
         self.noise_scheduler = DDPMScheduler(
             beta_start=0.00085,
             beta_end=0.012,
@@ -179,14 +178,15 @@ class StableDiffusionModel(pl.LightningModule):
         )
         prepare_scheduler_for_custom_training(self.noise_scheduler, self.device)
         
-        advanced = self.config.get("advanced", {})
+        advanced = config.get("advanced", {})
         if advanced.get("zero_terminal_snr", None):
             fix_noise_scheduler_betas_for_zero_terminal_snr(self.noise_scheduler)
+            
+        if trainer_cfg.get("use_compile", False):
+            self.model = torch.compile(self.model, dynamic=True, backend="eager")
 
-        if config.trainer.use_ema:
-            self.model_ema = ExponentialMovingAverage(
-                self.model.parameters(), decay=0.9999
-            )
+        if trainer_cfg.use_ema:
+            self.model_ema = ExponentialMovingAverage(self.model.parameters(), decay=0.9999)
             rank_zero_print(f"EMA is enabled with decay {self.model_ema.decay}")
 
     @torch.no_grad()
