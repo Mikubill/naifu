@@ -276,7 +276,7 @@ class LatentStore(StoreBase):
         self.h5_filehandles = {}
         self.paths = []
         for h5_path in tqdm(
-            self.h5paths,
+            self.h5_paths,
             desc="Loading latents",
             disable=self.rank != 0,
             leave=False,
