@@ -274,8 +274,8 @@ class LatentStore(StoreBase):
         self.h5_filehandles = {}
         self.paths = []
         for h5_path in self.h5_paths:
-            self.h5_filehandles[h5_path] = h5.File(h5_path, "r", libver="latest")
-            for k in self.h5_filehandles[h5_path].keys():
+            fs = h5.File(h5_path, "r", libver="latest")
+            for k in fs.keys():
                 hashkey = k[:-8] # ".latents"
                 assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
                 it = prompt_mapping[hashkey]
@@ -293,8 +293,15 @@ class LatentStore(StoreBase):
         self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
         self.length = len(self.paths)
         logger.debug(f"Using {self.length} entries after applied repeat strategy")
+        
+    def setup_filehandles(self):
+        self.h5_filehandles = {}
+        for h5_path in self.h5_paths:
+            self.h5_filehandles[h5_path] = h5.File(h5_path, "r", libver="latest")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
+        if len(self.h5_filehandles) == 0:
+            self.setup_filehandles()
         latent_key = self.keys[index]
         h5_path, prompt, original_size = self.h5_keymap[latent_key]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
