@@ -104,9 +104,9 @@ class StoreBase(Dataset):
         else:
             self.prompt_processor = placebo
             
-        self.embeds_cache = kwargs.get("precompure_embeds", None)
+        self.embeds_cache = kwargs.get("precompute_embeds", None)
         self.embeds_cache_keys = None
-        if self.embeds_cache is not None:
+        if self.embeds_cache:
             self.embeds_cache = h5.File(self.embeds_cache, "r", libver="latest")
             self.embeds_cache_keys = {k[:-5] for k in self.embeds_cache.keys() if k.endswith(".emb1")}
 
@@ -266,7 +266,7 @@ class StoreBase(Dataset):
 class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        prompt_mapping = list(dirwalk(self.root_path, lambda p: p.suffix == ".json"))[0]
+        prompt_mapping = next(dirwalk(self.root_path, lambda p: p.suffix == ".json"))
         prompt_mapping = json.loads(Path(prompt_mapping).read_text())
         
         self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem))
