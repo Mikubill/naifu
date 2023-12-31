@@ -367,7 +367,11 @@ def setup_optimizer(config, model):
         params_without_lr = [{"params": params_without_lr}]
         params_to_optim = [*lr_groups, *params_without_lr]
     else:
-        params_to_optim = [{'params': model.model.parameters()}]   
+        params_to_optim = [{'params': model.model.parameters()}]  
+        
+    for embedder in model.conditioner.embedders:
+        if embedder.is_trainable:
+            params_to_optim.append({'params': embedder.parameters()}) 
 
     if config.get("lora") and config.lora.enabled:
         lora = LoConBaseModel(model.model, config.lora)

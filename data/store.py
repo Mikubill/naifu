@@ -260,6 +260,8 @@ class StoreBase(Dataset):
                         res = res + [res[i]] * (mult-1)
                         index_new = index_new + [index_new[i]] * (mult-1)
                         break
+        else:
+            index_new = index
         return k, res, index_new
 
 
@@ -273,7 +275,13 @@ class LatentStore(StoreBase):
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
-        for h5_path in self.h5_paths:
+        for h5_path in tqdm(
+            self.h5paths,
+            desc="Loading latents",
+            disable=self.rank != 0,
+            leave=False,
+            ascii=True,
+        ):
             fs = h5.File(h5_path, "r", libver="latest")
             for k in fs.keys():
                 hashkey = k[:-8] # ".latents"
