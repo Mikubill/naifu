@@ -2,7 +2,6 @@ import itertools
 import numpy as np
 import random
 import torch
-import json
 
 from pathlib import Path
 from torch.utils.data import Dataset, get_worker_info
@@ -43,21 +42,13 @@ class AspectRatioDataset(Dataset):
         assert root_path.exists()
 
         store_class = DirectoryImageStore
-        prompt_mapping = None
         if is_latent_folder(root_path):
-            prompt_mapping = Path("dataset.json")
-            if not prompt_mapping.exists():
-                prompt_mapping = Path(root_path.parent / "dataset.json")
-
-            assert prompt_mapping.exists()
-            prompt_mapping = json.loads(prompt_mapping.read_text())
             store_class = LatentStore
 
         self.store = store_class(
             root_path,
             rank=rank,
             ucg=ucg,
-            prompt_mapping=prompt_mapping,
             prompt_processor=prompt_processor,
             use_central_crop=use_central_crop,
             dtype=dtype,

@@ -149,7 +149,7 @@ class Trainer():
                 model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.safetensors")
                 save_model(_unwrap_objects(self.model), model_path, metadata={"trainer_cfg": string_cfg})
             else:
-                model_path = os.path.join(cfg.checkpoint_dir, f"nd-epoch-{current_epoch:02d}.ckpt")
+                model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-e{current_epoch:02d}.ckpt")
                 fabric.save(model_path, state)
             rank_zero_print(f"Saved model to {model_path}")
                     

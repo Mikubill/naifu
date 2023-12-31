@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import json
 import math
 import cv2
 import h5py as h5
@@ -265,7 +266,9 @@ class StoreBase(Dataset):
 class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        prompt_mapping = self.kwargs.get("prompt_mapping")
+        prompt_mapping = list(dirwalk(self.root_path, lambda p: p.suffix == ".json"))[0]
+        prompt_mapping = json.loads(Path(prompt_mapping).read_text())
+        
         self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem))
         self.h5_keymap = {}
         self.h5_filehandles = {}
