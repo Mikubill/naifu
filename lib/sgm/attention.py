@@ -20,7 +20,7 @@ except:
     XFORMERS_IS_AVAILABLE = False
     # print("no module 'xformers'. Processing without...")
 
-from .model_util import checkpoint, Linear
+from .model_util import checkpoint
 
 
 def exists(val):
@@ -52,7 +52,7 @@ def init_(tensor):
 class GEGLU(nn.Module):
     def __init__(self, dim_in, dim_out):
         super().__init__()
-        self.proj = Linear(dim_in, dim_out * 2)
+        self.proj = nn.Linear(dim_in, dim_out * 2)
 
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim=-1)
@@ -65,13 +65,13 @@ class FeedForward(nn.Module):
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
         project_in = (
-            nn.Sequential(Linear(dim, inner_dim), nn.GELU())
+            nn.Sequential(nn.Linear(dim, inner_dim), nn.GELU())
             if not glu
             else GEGLU(dim, inner_dim)
         )
 
         self.net = nn.Sequential(
-            project_in, nn.Dropout(dropout), Linear(inner_dim, dim_out)
+            project_in, nn.Dropout(dropout), nn.Linear(inner_dim, dim_out)
         )
 
     def forward(self, x):
@@ -110,12 +110,12 @@ class CrossAttention(nn.Module):
         self.scale = dim_head**-0.5
         self.heads = heads
 
-        self.to_q = Linear(query_dim, inner_dim, bias=False)
-        self.to_k = Linear(context_dim, inner_dim, bias=False)
-        self.to_v = Linear(context_dim, inner_dim, bias=False)
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
         self.to_out = nn.Sequential(
-            Linear(inner_dim, query_dim), nn.Dropout(dropout)
+            nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)
         )
         self.backend = backend
 
@@ -178,12 +178,12 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
 
-        self.to_q = Linear(query_dim, inner_dim, bias=False)
-        self.to_k = Linear(context_dim, inner_dim, bias=False)
-        self.to_v = Linear(context_dim, inner_dim, bias=False)
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
         self.to_out = nn.Sequential(
-            Linear(inner_dim, query_dim), nn.Dropout(dropout)
+            nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)
         )
         self.attention_op: Optional[Any] = None
 
@@ -385,7 +385,7 @@ class SpatialTransformer(nn.Module):
                 in_channels, inner_dim, kernel_size=1, stride=1, padding=0
             )
         else:
-            self.proj_in = Linear(in_channels, inner_dim)
+            self.proj_in = nn.Linear(in_channels, inner_dim)
 
         self.transformer_blocks = nn.ModuleList(
             [
@@ -407,8 +407,8 @@ class SpatialTransformer(nn.Module):
                 nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
             )
         else:
-            # self.proj_out = zero_module(Linear(in_channels, inner_dim))
-            self.proj_out = zero_module(Linear(inner_dim, in_channels))
+            # self.proj_out = zero_module(nn.Linear(in_channels, inner_dim))
+            self.proj_out = zero_module(nn.Linear(inner_dim, in_channels))
         self.use_linear = use_linear
 
     def forward(self, x, context=None):

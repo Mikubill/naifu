@@ -1,5 +1,5 @@
 from contextlib import nullcontext
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import math
 
@@ -10,7 +10,10 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from omegaconf import ListConfig
 from torch.utils.checkpoint import checkpoint
-from .model_util import rank_zero_print
+from .model_util import (
+    rank_zero_print,
+    EmptyInitWrapper
+)
 from transformers import (
     CLIPTextModel,
     CLIPTextConfig,
@@ -351,6 +354,40 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         return self(text)
 
 
+class OpenClipTextModel(open_clip.CLIP):
+    output_dict: torch.jit.Final[bool]
+
+    def __init__(
+            self,
+            embed_dim,
+            vision_cfg,
+            text_cfg,
+            quick_gelu: bool = False,
+            init_logit_scale: float = np.log(1 / 0.07),
+            init_logit_bias: Optional[float] = None,
+            cast_dtype: Optional[torch.dtype] = None,
+            output_dict: bool = False,
+    ):
+        nn.Module.__init__(self)
+        self.output_dict = output_dict
+        text = open_clip.model._build_text_tower(embed_dim, text_cfg, quick_gelu, cast_dtype)
+            
+        self.transformer = text.transformer
+        self.context_length = text.context_length
+        self.vocab_size = text.vocab_size
+        self.token_embedding = text.token_embedding
+        self.positional_embedding = text.positional_embedding
+        self.ln_final = text.ln_final
+        self.text_projection = text.text_projection
+        self.text_pool_type = text.pool_type
+        self.register_buffer('attn_mask', text.attn_mask, persistent=False)
+
+        self.logit_scale = nn.Parameter(torch.ones([]) * init_logit_scale)
+        self.logit_bias = None
+        if init_logit_bias is not None:
+            self.logit_bias = nn.Parameter(torch.ones([]) * init_logit_bias)
+            
+
 class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     """
     Uses the OpenCLIP transformer encoder for text
@@ -371,14 +408,10 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     ):
         super().__init__()
         assert layer in self.LAYERS
-        model = open_clip.create_model(
-            arch,
-            device=torch.device("cpu"),
-            require_pretrained=False,
-        )
-        del model.visual
+        with EmptyInitWrapper(device):
+            model = OpenClipTextModel(**open_clip.get_model_config(arch))
+            
         self.model = model
-
         self.device = device
         self.max_length = max_length
         self.return_pooled = always_return_pooled
@@ -392,7 +425,10 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         else:
             raise NotImplementedError()
         self.legacy = legacy
-        self.clip_tokenizer = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", pad_token="!") # same as open clip tokenizer
+        self.clip_tokenizer = CLIPTokenizer.from_pretrained(
+            "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", 
+            pad_token="!"
+        ) # same as open clip tokenizer
 
     def freeze(self):
         self.model = self.model.eval()
@@ -473,8 +509,6 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
 
     def encode(self, text):
         return self(text)
-    
-
 class ConcatTimestepEmbedderND(AbstractEmbModel):
     """embeds each dimension independently and concatenates them"""
 

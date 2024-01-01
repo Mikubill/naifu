@@ -1,6 +1,5 @@
 import lightning as pl
 import torch
-import torch.nn.functional as F
 import torch.utils.checkpoint
 from PIL import Image
 from omegaconf import OmegaConf
@@ -8,13 +7,14 @@ from pathlib import Path
 from torch_ema import ExponentialMovingAverage
 
 from lib.sgm import GeneralConditioner
+from lib.sgm.model_util import EmptyInitWrapper
 from lib.wrappers import AutoencoderKLWrapper, UnetWrapper
 from lib.utils import load_torch_file, rank_zero_print
 
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 
-
+# optimizations partly from kohya-ss
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
     does not change anymore."""
@@ -152,10 +152,13 @@ class StableDiffusionModel(pl.LightningModule):
         self.first_stage_model = encoder
         self.scale_factor = model_params.scale_factor
 
-        self.model = UnetWrapper(model_params.network_config.params)
+        with EmptyInitWrapper(self.target_device):
+            self.model = UnetWrapper(model_params.network_config.params)
+            
         for conditioner in model_params.conditioner_config.params.emb_models:
             if "CLIPEmbedder" not in conditioner.target:
                 continue
+            conditioner.params["device"] = str(self.target_device)
             conditioner.params["max_length"] = (self.config.dataset.get("max_token_length", 75) + 2)
             
         self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
@@ -320,10 +323,8 @@ class StableDiffusionModel(pl.LightningModule):
         noise_pred = self.model(noisy_latents, timesteps, cond)
 
         # Get the target for loss depending on the prediction type
-        if self.noise_scheduler.config.prediction_type == "epsilon":
-            target = noise
-        elif self.noise_scheduler.config.prediction_type == "v_prediction":
-            target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        is_v = advanced.get("v_parameterization", False)
+        target = noise if not is_v else self.noise_scheduler.get_velocity(latents, noise, timesteps)
 
         min_snr_gamma = advanced.get("min_snr_val", None)
         scale_pred = advanced.get("scale_v_pred_loss_like_noise_pred", False)
@@ -333,13 +334,15 @@ class StableDiffusionModel(pl.LightningModule):
             # do not mean over batch dimension for snr weight or scale v-pred loss
             loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
             loss = loss.mean([1, 2, 3])
-            is_v = self.noise_scheduler.config.prediction_type == "v_prediction"
 
             if min_snr_gamma:
+                assert is_v, "min_snr_gamma is only for v_prediction"
                 loss = apply_snr_weight(loss, timesteps, self.noise_scheduler, min_snr_gamma, is_v)
             if scale_pred:
+                assert is_v, "scale_v_pred_loss_like_noise_pred is only for v_prediction"
                 loss = scale_v_prediction_loss_like_noise_prediction(loss, timesteps, self.noise_scheduler)
             if vl_loss:
+                assert not is_v, "v_pred_like_loss is only for epsilon prediction"
                 loss = add_v_prediction_like_loss(loss, timesteps, self.noise_scheduler, vl_loss)
             if de_loss:
                 loss = apply_debiased_estimation(loss, timesteps, self.noise_scheduler)

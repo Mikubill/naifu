@@ -28,6 +28,7 @@ advanced:
   timestep_end: 1000
   input_perturbation: false
   input_perturbation_val: 0.0
+  v_parameterization: false
   scale_v_pred_loss_like_noise_pred: false
   v_pred_like_loss: 0
   debiased_estimation_loss: false
