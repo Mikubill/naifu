@@ -43,7 +43,7 @@ dataset:
   img_path: "/notebooks/rurudo_lion_imgonly"
   tag_processor: data.processors.placebo
   precompure_embeds: false # or .../prompt_cache.h5
-  center_crop: false
+  use_central_crop: true
   ucg: 0.1
   max_token_length: 225 # [75, 150, 225]
   # repeat_strategy:

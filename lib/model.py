@@ -123,7 +123,7 @@ class StableDiffusionModel(pl.LightningModule):
     def init_model(self):
         trainer_cfg = self.config.trainer
         config = self.config
-        sd = load_torch_file(self.model_path)
+        sd = load_torch_file(self.model_path, self.target_device)
         key_name_sd_xl_refiner = ("conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias")
 
         config_file = Path(self.model_path).with_suffix(".yaml")

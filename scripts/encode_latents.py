@@ -164,18 +164,22 @@ class LatentEncodingDataset(Dataset):
         resize_h, resize_w = self.fit_dimensions(base_ratio, target_h, target_w)
         interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
         img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
-        return img
+        
+        dh, dw = abs(target_h - img.shape[0]) // 2, abs(target_w - img.shape[1]) // 2
+        img = img[dh:dh+target_h, dw:dw+target_w]
+        return img, (dh, dw)
 
     def __getitem__(self, index) -> tuple[list[torch.Tensor], str, str, (int, int)]:
         try:
             img, prompt = load_entry(self.paths[index])
             original_size = img.shape[:2]
-            img = self.tr(self.fit_bucket(index, img)).to(self.dtype)
+            img, dhdw = self.fit_bucket(index, img)
+            img = self.tr(img).to(self.dtype)
             sha1 = get_sha1(self.paths[index])
         except Exception as e:
             print(f"\033[31mError processing {self.paths[index]}: {e}\033[0m")
             return None, self.paths[index], None, None, None
-        return img, self.paths[index], prompt, sha1, original_size
+        return img, self.paths[index], prompt, sha1, original_size, dhdw
 
     def __len__(self):
         return len(self.paths)
@@ -249,7 +253,7 @@ if __name__ == "__main__":
     file_mode = "w" if not h5_cache_file.exists() else "r+"
     with h5.File(h5_cache_file, file_mode, libver="latest") as f:
         with torch.no_grad():
-            for img, basepath, prompt, sha1, original_size in tqdm(dataloader, position=rank):
+            for img, basepath, prompt, sha1, original_size, dhdw in tqdm(dataloader, position=rank):
                 if sha1 is None:
                     print(f"\033[33mWarning: {basepath} is invalid. Skipping... \033[0m")
                     continue
@@ -276,12 +280,14 @@ if __name__ == "__main__":
                     compression=args.compress,
                 )
                 d.attrs["scale"] = False
+                d.attrs["dhdw"] = dhdw
 
     json_filename = f"dataset_{rank+1}.json" if multi_node else "dataset.json"
     with open(opt / json_filename, "w") as f:
         json.dump(dataset_mapping, f, indent=4)
 
     if multi_node:
+        dist.barrier()
         if rank == 0:
             # merge all json and h5 file
             with open(opt / "dataset.json", "w") as f:

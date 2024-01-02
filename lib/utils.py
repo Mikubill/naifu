@@ -129,9 +129,9 @@ def detect_unet_config(state_dict, key_prefix):
 
 import safetensors.torch
 
-def load_torch_file(ckpt, safe_load=False):
+def load_torch_file(ckpt, safe_load=False, device=None):
     if ckpt.lower().endswith(".safetensors"):
-        sd = safetensors.torch.load_file(ckpt, device="cpu")
+        sd = safetensors.torch.load_file(ckpt, device=device)
     else:
         if safe_load:
             if not 'weights_only' in torch.load.__code__.co_varnames:

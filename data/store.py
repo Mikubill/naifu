@@ -53,6 +53,7 @@ class Entry:
     prompt: str
     original_size: tuple[int, int] # h, w
     cropped_size: Optional[tuple[int, int]] # h, w
+    dhdw: Optional[tuple[int, int]] # dh, dw
     # mask: torch.Tensor | None = None
 
 
@@ -184,8 +185,9 @@ class StoreBase(Dataset):
             
             cropped_pos = (dh, dw)
             cropped_pos = (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            cropped_pos = (cropped_pos[0] + e.dhdw[0], cropped_pos[1] + e.dhdw[1])
             cropped_pos = torch.asarray(cropped_pos)
-            crop_pos.append(torch.asarray(cropped_pos))
+            crop_pos.append(cropped_pos)
             
             hashkey = sha1sum(e.prompt)
             if self.embeds_cache is not None:
@@ -235,7 +237,7 @@ class StoreBase(Dataset):
         raise NotImplementedError
 
     def _get_entry(self, index) -> Entry:
-        is_latent, pixel, prompt, original_size = self.get_raw_entry(index)
+        is_latent, pixel, prompt, original_size, dhdw = self.get_raw_entry(index)
 
         if self.ucg and np.random.rand() < self.ucg:
             prompt = ""
@@ -246,7 +248,7 @@ class StoreBase(Dataset):
         if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:  
             pixel = pixel.permute(2, 0, 1) # HWC -> CHW
             
-        return Entry(is_latent, pixel, prompt, original_size, None)
+        return Entry(is_latent, pixel, prompt, original_size, None, dhdw)
     
     def repeat_entries(self, k, res, index=None):
         repeat_strategy = self.kwargs.get("repeat_strategy", None)
@@ -309,8 +311,9 @@ class LatentStore(StoreBase):
         h5_path, prompt, original_size = self.h5_keymap[latent_key]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
         scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
+        dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
         latent = latent * 0.13025 if not scaled else latent
-        return True, latent, prompt, original_size
+        return True, latent, prompt, original_size, dhdw
 
 
 class DirectoryImageStore(StoreBase):
@@ -374,4 +377,5 @@ class DirectoryImageStore(StoreBase):
             
         img = IMAGE_TRANSFORMS(img)
         h, w = img.shape[-2:]
-        return False, img, prompt, (h, w)
+        dhdw = (0, 0)
+        return False, img, prompt, (h, w), dhdw
