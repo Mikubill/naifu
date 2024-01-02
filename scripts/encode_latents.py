@@ -78,8 +78,8 @@ class LatentEncodingDataset(Dataset):
         print(f"Found {len(self.paths)} images")
         self.dtype = dtype
         self.raw_res = []
-        
-        cloned_paths = self.paths.copy()
+
+        remove_paths = []
         for p in tqdm(
             self.paths, desc="Loading image sizes", leave=False, ascii=True,
         ):
@@ -88,9 +88,10 @@ class LatentEncodingDataset(Dataset):
                 self.raw_res.append((h, w))
             except Exception as e:
                 print(f"\033[33mSkipped: error processing {p}: {e}\033[0m")
-                cloned_paths.remove(p)
-        
-        self.paths = cloned_paths    
+                remove_paths.append(p)
+
+        remove_paths = set(remove_paths)
+        self.paths = [p for p in self.paths if p not in remove_paths]  
         self.length = len(self.raw_res)
         print(f"Loaded {self.length} image sizes")
 

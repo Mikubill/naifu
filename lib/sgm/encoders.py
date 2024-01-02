@@ -509,6 +509,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
 
     def encode(self, text):
         return self(text)
+    
 class ConcatTimestepEmbedderND(AbstractEmbModel):
     """embeds each dimension independently and concatenates them"""
 

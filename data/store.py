@@ -319,9 +319,9 @@ class DirectoryImageStore(StoreBase):
         label_ext = self.kwargs.get("label_ext", ".txt")
         self.paths = list(dirwalk(self.root_path, is_img))
         self.length = len(self.paths)
-        logger.debug(f"Found {self.length} images in {self.root_path}")
+        rank_zero_debug(f"Found {self.length} images in {self.root_path}")
 
-        cloned_paths = self.paths.copy()
+        remove_paths = []
         for p in tqdm(
             self.paths, desc="Loading image sizes", leave=False, ascii=True,
         ):
@@ -329,10 +329,13 @@ class DirectoryImageStore(StoreBase):
                 w, h = Image.open(p).size
                 self.raw_res.append((h, w))
             except Exception as e:
-                logger.warn(f"Error processing {p}: {e}")
-                cloned_paths.remove(p)
-                
-        self.paths = cloned_paths
+                print(f"\033[33mSkipped: error processing {p}: {e}\033[0m")
+                remove_paths.append(p)
+
+        remove_paths = set(remove_paths)
+        self.paths = [p for p in self.paths if p not in remove_paths]  
+        self.length = len(self.raw_res)
+        
         self.length = len(self.paths)
         self.prompts: list[str] = []
         for path in tqdm(
@@ -345,14 +348,14 @@ class DirectoryImageStore(StoreBase):
             p = path.with_suffix(label_ext)
             with open(p, "r") as f:
                 self.prompts.append(f.read())
-        logger.debug(f"Loaded {len(self.prompts)} prompts")
+        rank_zero_debug(f"Loaded {len(self.prompts)} prompts")
             
         self.base_len = self.kwargs["base_len"]
-        logger.debug(f"Loaded {self.length} image sizes")
+        rank_zero_debug(f"Loaded {self.length} image sizes")
         
         self.prompts, self.raw_res, self.paths = self.repeat_entries(self.prompts, self.raw_res, index=self.paths)
         self.length = len(self.paths)
-        logger.debug(f"Using {self.length} entries after applied repeat strategy")
+        rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         p = self.paths[index]
