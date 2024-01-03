@@ -309,6 +309,8 @@ class LossRecorder:
 
     @property
     def moving_average(self) -> float:
+        if len(self.loss_list) == 0:
+            return 0.0
         return self.loss_total / len(self.loss_list)
     
 
@@ -453,8 +455,7 @@ def main(args):
     if fabric.is_global_zero and os.name != 'nt':
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
     
-    fabric.to_device(model)
-    model, optimizer = fabric.setup(model, optimizer, move_to_device=False)
+    model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
             
     if model_precision:
