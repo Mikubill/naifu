@@ -18,6 +18,7 @@ from data.processors import placebo
 from data.embeddings import get_size_embeddings
 from torchvision import transforms
 from lib.utils import rank_zero_debug, rank_zero_warn
+from torchvision.transforms import Resize, InterpolationMode
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -146,9 +147,9 @@ class StoreBase(Dataset):
         target_ratio = self.to_ratio[i]
         h, w = self.ratio_to_bucket[target_ratio]
         if not entry.is_latent:
-            resize_h, resize_w = self.fit_dimensions(base_ratio, H, W)
-            interp = cv2.INTER_AREA if resize_h < H else cv2.INTER_CUBIC
-            entry.pixel = cv2.resize(entry.pixel, (resize_w, resize_h, ), interpolation=interp)
+            resize_h, resize_w = self.fit_dimensions(base_ratio, h, w)
+            interp = InterpolationMode.BILINEAR if resize_h < H else InterpolationMode.BICUBIC
+            entry.pixel = Resize((resize_h, resize_w), interpolation=interp, antialias=None)(entry.pixel)
         else:
             h, w = h // 8 , w // 8 
         
