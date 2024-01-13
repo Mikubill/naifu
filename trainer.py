@@ -103,7 +103,9 @@ class Trainer():
         fabric = self.fabric
         if fabric.logger:
             config = OmegaConf.to_container(self.model.config, resolve=True)
-            fabric.logger.experiment.config.update(config)
+            logger_config = fabric.logger.experiment.config
+            if isinstance(logger_config, dict):
+                logger_config.update(config)
             
     def on_post_training_batch(self, global_step, current_epoch, state):
         config = self.model.config
