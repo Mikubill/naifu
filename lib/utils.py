@@ -26,6 +26,9 @@ def count_blocks(state_dict_keys, prefix_string):
 def rank_zero_print(*args, **kwargs):
     logger.info(*args, **kwargs)
     
+@rank_zero_only
+def rank_zero_warn(*args, **kwargs):
+    logger.warning(*args, **kwargs)
 
 @rank_zero_only
 def rank_zero_debug(*args, **kwargs):

@@ -412,10 +412,6 @@ def main(args):
             config = {"gradient_clipping": 1.0},
             contiguous_memory_optimization=True,
         )
-        
-    if config.get("s3") and config.s3.enabled:
-        import fsspec
-        fsspec.config.conf['s3'] = dict(config.s3.params)
             
     if os.environ.get('SM_TRAINING', False):
         strategy, init_params = setup_smddp()

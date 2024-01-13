@@ -17,7 +17,7 @@ from typing import Callable, Generator, Optional# type: ignore
 from data.processors import placebo
 from data.embeddings import get_size_embeddings
 from torchvision import transforms
-from lib.utils import rank_zero_debug
+from lib.utils import rank_zero_debug, rank_zero_warn
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -349,8 +349,12 @@ class DirectoryImageStore(StoreBase):
             ascii=True,
         ):
             p = path.with_suffix(label_ext)
-            with open(p, "r") as f:
-                self.prompts.append(f.read())
+            try:
+                with open(p, "r") as f:
+                    self.prompts.append(f.read())
+            except Exception as e:
+                rank_zero_warn(f"Skipped: error processing {p}: {e}")
+                self.prompts.append("")
         rank_zero_debug(f"Loaded {len(self.prompts)} prompts")
             
         self.base_len = self.kwargs["base_len"]
