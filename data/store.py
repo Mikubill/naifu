@@ -107,6 +107,9 @@ class StoreBase(Dataset):
             self.prompt_processor = placebo
             
         self.embeds_cache = kwargs.get("precompute_embeds", None)
+        if self.embeds_cache == False:
+            self.embeds_cache = None
+        
         self.embeds_cache_keys = None
         if self.embeds_cache:
             self.embeds_cache = h5.File(self.embeds_cache, "r", libver="latest")
