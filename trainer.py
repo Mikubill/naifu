@@ -173,7 +173,7 @@ class Trainer():
                 self.sampler(self.fabric.logger, sampling_cfg, self.model, current_epoch, global_step)
       
     @rank_zero_only
-    def sampler(logger, config, model, current_epoch, global_step):
+    def sampler(self, logger, config, model, current_epoch, global_step):
         if not any(config.prompts):
             return
         
@@ -401,6 +401,26 @@ def setup_optimizer(config, model):
         scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
     return optimizer, scheduler
 
+def cache_latents_subprocess(dataset_path, dataset_path_latents):
+    rank_zero_print(f"Caching latents from {dataset_path}")
+    # execute once to cache latents
+    # external process: python parent(self)/scripts/cache_latents.py -i dataset_path -o dataset_path_latents
+    import subprocess, sys
+    trainer_dir = os.path.dirname(os.path.abspath(__file__))
+    caceh_latents_script = os.path.join(trainer_dir, "scripts", "encode_latents.py")
+    command = [
+        sys.executable, caceh_latents_script,
+        "-i", dataset_path,
+        "-o", dataset_path_latents
+    ]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
+        for line in proc.stdout:
+            print(line.strip())
+        if proc.stderr:
+            print(proc.stderr.read().strip(), file=sys.stderr)
+
+    proc.wait()
+
 def main(args):
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
@@ -408,6 +428,13 @@ def main(args):
     setup_torch(config)
     if args.model_path != None:
         config.trainer.model_path = args.model_path 
+        
+    if config.dataset.get("cache_latents"):
+        dataset_path = config.dataset.get("img_path")
+        dataset_path_latents = config.dataset.get("cache_latents_path", dataset_path + "_latents")
+        config.dataset.img_path = dataset_path_latents
+        cache_latents_subprocess(dataset_path, dataset_path_latents)
+        rank_zero_print(f"Using cached latents from {dataset_path_latents}")
         
     plugins = []
     strategy = config.lightning.get("strategy", "auto")

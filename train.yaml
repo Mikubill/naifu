@@ -50,6 +50,8 @@ dataset:
   use_central_crop: true
   ucg: 0.1
   max_token_length: 225 # [75, 150, 225]
+  # cache_latents: true
+  # cache_latents_path: /notebooks/BA_latents
   # repeat_strategy:
   #   - [/rurudo_lion_imgonly/, 2]
   #
@@ -71,7 +73,7 @@ optimizer:
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 100
+    num_warmup_steps: 0
     last_epoch: -1
 
 sampling:
@@ -97,10 +99,3 @@ sampling:
     - "masterpiece, best quality, 1girl, solo,loli,wedding dress|see-through highleg leotard, veil, elbow gloves, white thighhighs, crown, earrings, bow on waist, sideboob, lace,"
     - "1girl, solo, shirt, thighhighs, skirt, hands on hips, white shirt, crystal, flandre scarlet, blonde hair, grey skirt, red bow, red eyes, black thighhighs, wings, white background,"
     - "1girl,sitting,fantasy,masterpiece,best quality,(long blonde hair),(blue eyes),(floating hair),(black ribbed sweater:1.1),(red plaid skirt:1.1),(cat ears)"
- 
-# lora:
-#   enabled: true
-#   rank: 16
-#   lora_alpha: 8
-#   multipier: 1.0
-#   unet_lr: 1e-4

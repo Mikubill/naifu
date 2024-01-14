@@ -219,19 +219,19 @@ class StableDiffusionModel(pl.LightningModule):
         generator=None,
         size=(1024, 1024),
         steps=20,
-        guidance_scale=7.5,
+        guidance_scale=6.5,
     ):
         self.model.eval()
-        self.conditioner.cuda()
+        self.conditioner.to(self.target_device)
+        self.first_stage_model.to(self.target_device)
+        
+        model_dtype = next(self.model.parameters()).dtype
         scheduler = EulerDiscreteScheduler(
             beta_start=0.00085,
             beta_end=0.012,
             beta_schedule="scaled_linear",
             num_train_timesteps=1000,
         )
-
-        # first construct batch
-        model_dtype = next(self.model.parameters()).dtype
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
             "original_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
@@ -266,7 +266,7 @@ class StableDiffusionModel(pl.LightningModule):
             # compute the previous noisy sample x_t -> x_t-1
             latents = scheduler.step(noise_pred, t, latents.cuda()).prev_sample
 
-        self.first_stage_model.cuda()
+        latents = latents.to(torch.float32)
         image = (torch.clamp((self.decode_first_stage(latents) + 1.0) / 2.0, min=0.0, max=1.0).cpu().float())
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 

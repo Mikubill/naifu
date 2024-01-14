@@ -267,7 +267,7 @@ if __name__ == "__main__":
                     "train_height": h,
                 }
                 if f"{sha1}.latents" in f:
-                    print(f"\033[33mWarning: {sha1} is already cached. Skipping... \033[0m")
+                    print(f"\033[33mWarning: {str(basepath)} is already cached. Skipping... \033[0m")
                     continue
                 
                 img = img.unsqueeze(0).to(torch.device(f"cuda:{rank}"))
@@ -276,7 +276,7 @@ if __name__ == "__main__":
                 latent = latent.sample()[0]
                 d = f.create_dataset(
                     f"{sha1}.latents",
-                    data=latent.half().cpu().numpy(),
+                    data=latent.float().cpu().numpy(),
                     compression=args.compress,
                 )
                 d.attrs["scale"] = False
