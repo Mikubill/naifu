@@ -50,8 +50,10 @@ dataset:
   use_central_crop: true
   ucg: 0.1
   max_token_length: 225 # [75, 150, 225]
+  # (not recommended) - use scripts/cache_latents.py instead and set img_path to the cached latents
   # cache_latents: true
   # cache_latents_path: /notebooks/BA_latents
+  # 
   # repeat_strategy:
   #   - [/rurudo_lion_imgonly/, 2]
   #

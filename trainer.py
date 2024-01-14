@@ -25,7 +25,7 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
 from lightning.fabric.wrappers import _unwrap_objects
 from lightning.fabric.plugins.precision.amp import MixedPrecision
-from safetensors.torch import save_model
+from safetensors.torch import save_file
 from contextlib import ExitStack, contextmanager
 
 def setup_torch(config):
@@ -151,10 +151,14 @@ class Trainer():
             if is_checkpoint_step:
                 model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-s{global_step:02d}")
                 
-            if cfg.get("save_format") == "safetensors" and os.name != 'nt':
+            if cfg.get("save_format") == "safetensors":
                 string_cfg = OmegaConf.to_yaml(config)
                 model_path += ".safetensors"
-                save_model(_unwrap_objects(self.model), model_path, metadata={"trainer_cfg": string_cfg})
+                state_dict = _unwrap_objects(self.model).state_dict()
+                # check if any keys startswith modules. if so, remove the modules. prefix
+                if any([key.startswith("module.") for key in state_dict.keys()]):
+                    state_dict = {key.replace("module.", ""): value for key, value in state_dict.items()}
+                save_file(state_dict, model_path, metadata={"trainer_cfg": string_cfg})
             else:
                 model_path += ".ckpt"
                 fabric.save(model_path, state)
