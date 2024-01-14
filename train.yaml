@@ -21,6 +21,10 @@ trainer:
   max_steps: -1
 
 advanced:
+  train_text_encoder_1: false
+  train_text_encoder_2: false
+  text_encoder_1_lr: 3e-6
+  text_encoder_2_lr: 3e-6
   offset_noise: true
   offset_noise_val: 0.0375
   min_snr_val: 5

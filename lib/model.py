@@ -35,7 +35,7 @@ def prepare_scheduler_for_custom_training(noise_scheduler, device):
 
 def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
     # fix beta: zero terminal SNR
-    print(f"fix noise scheduler betas: https://arxiv.org/abs/2305.08891")
+    # print(f"fix noise scheduler betas: https://arxiv.org/abs/2305.08891")
 
     def enforce_zero_terminal_snr(betas):
         # Convert betas to alphas_bar_sqrt
@@ -123,6 +123,8 @@ class StableDiffusionModel(pl.LightningModule):
     def init_model(self):
         trainer_cfg = self.config.trainer
         config = self.config
+        advanced = config.get("advanced", {})
+        
         sd = load_torch_file(self.model_path, self.target_device)
         key_name_sd_xl_refiner = ("conditioner.embedders.0.model.transformer.resblocks.9.mlp.c_proj.bias")
 
@@ -161,6 +163,9 @@ class StableDiffusionModel(pl.LightningModule):
             conditioner.params["device"] = str(self.target_device)
             conditioner.params["max_length"] = (self.config.dataset.get("max_token_length", 75) + 2)
             
+        model_params.conditioner_config.params.emb_models[0]["is_trainable"] = advanced.get("train_text_encoder_1", False)
+        model_params.conditioner_config.params.emb_models[1]["is_trainable"] = advanced.get("train_text_encoder_2", False)
+            
         self.conditioner = GeneralConditioner(**model_params.conditioner_config.params)
         self.to(self.target_device)
         
@@ -181,7 +186,6 @@ class StableDiffusionModel(pl.LightningModule):
         )
         prepare_scheduler_for_custom_training(self.noise_scheduler, self.device)
         
-        advanced = config.get("advanced", {})
         if advanced.get("zero_terminal_snr", None):
             fix_noise_scheduler_betas_for_zero_terminal_snr(self.noise_scheduler)
             

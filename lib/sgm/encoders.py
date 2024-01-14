@@ -159,6 +159,8 @@ class GeneralConditioner(nn.Module):
             embedder.ucg_rate = embconfig.get("ucg_rate", 0.0)
             if not embedder.is_trainable:
                 embedder.train = disabled_train
+                if hasattr(embedder, "freeze"):
+                    embedder.freeze()
                 for param in embedder.parameters():
                     param.requires_grad = False
                 embedder.eval()
@@ -281,7 +283,6 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         version="openai/clip-vit-large-patch14",
         device="cuda",
         max_length=227,
-        freeze=True,
         layer="last",
         layer_idx=None,
         always_return_pooled=False,
@@ -296,8 +297,6 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
                 
         self.device = device
         self.max_length = max_length
-        if freeze:
-            self.freeze()
         self.layer = layer
         self.layer_idx = layer_idx
         self.return_pooled = always_return_pooled
@@ -401,7 +400,6 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         version="laion2b_s32b_b79k",
         device="cuda",
         max_length=227,
-        freeze=True,
         layer="last",
         always_return_pooled=False,
         legacy=True,
@@ -415,8 +413,6 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
         self.device = device
         self.max_length = max_length
         self.return_pooled = always_return_pooled
-        if freeze:
-            self.freeze()
         self.layer = layer
         if self.layer == "last":
             self.layer_idx = 0

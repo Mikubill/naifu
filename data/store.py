@@ -300,8 +300,10 @@ class LatentStore(StoreBase):
         rank_zero_debug(f"Loaded {self.length} latent codes from {self.root_path}")
         
         self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
-        self.length = len(self.paths)
-        rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
+        new_length = len(self.paths)
+        if new_length != self.length:
+            self.length = new_length
+            rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
         
     def setup_filehandles(self):
         self.h5_filehandles = {}
@@ -359,14 +361,15 @@ class DirectoryImageStore(StoreBase):
             except Exception as e:
                 rank_zero_warn(f"Skipped: error processing {p}: {e}")
                 self.prompts.append("")
-        rank_zero_debug(f"Loaded {len(self.prompts)} prompts")
             
         self.base_len = self.kwargs["base_len"]
-        rank_zero_debug(f"Loaded {self.length} image sizes")
+        rank_zero_debug(f"Loaded {len(self.prompts)} prompts, {self.length} image sizes")
         
         self.prompts, self.raw_res, self.paths = self.repeat_entries(self.prompts, self.raw_res, index=self.paths)
-        self.length = len(self.paths)
-        rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
+        new_length = len(self.paths)
+        if new_length != self.length:
+            self.length = new_length
+            rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         p = self.paths[index]

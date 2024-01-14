@@ -372,10 +372,6 @@ def setup_optimizer(config, model):
         params_to_optim = [*lr_groups, *params_without_lr]
     else:
         params_to_optim = [{'params': model.model.parameters()}]  
-        
-    for embedder in model.conditioner.embedders:
-        if embedder.is_trainable:
-            params_to_optim.append({'params': embedder.parameters()}) 
 
     if config.get("lora") and config.lora.enabled:
         lora = LoConBaseModel(model.model, config.lora)
@@ -386,6 +382,18 @@ def setup_optimizer(config, model):
         lora.inject()
         model.lora = lora
         params_to_optim = [{'params': lora.parameters(), 'lr': config.lora.unet_lr}]
+        
+    if config.get("advanced"):
+        if config.advanced.get("train_text_encoder_1"):
+            lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
+            params_to_optim.append({'params': model.conditioner.embedders[0].parameters(), 'lr': lr})
+        if config.advanced.get("train_text_encoder_2"):
+            lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
+            params_to_optim.append({'params': model.conditioner.embedders[1].parameters(), 'lr': lr})
+            
+    for embedder in model.conditioner.embedders[2:]:
+        if embedder.is_trainable:
+            params_to_optim.append({'params': embedder.parameters()}) 
 
     optimizer = get_class(config.optimizer.name)(params_to_optim, **config.optimizer.params)
     scheduler = None

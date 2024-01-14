@@ -48,7 +48,6 @@ model:
               arch: ViT-bigG-14
               version: laion2b_s39b_b160k
               legacy: False
-              freeze: True
               layer: penultimate
               always_return_pooled: True
           # vector cond
