@@ -151,7 +151,7 @@ class Trainer():
             if is_checkpoint_step:
                 model_path = os.path.join(cfg.checkpoint_dir, f"nd-checkpoint-s{global_step:02d}")
                 
-            if cfg.get("save_format", "safetensors"):
+            if cfg.get("save_format") == "safetensors" and os.name != 'nt':
                 string_cfg = OmegaConf.to_yaml(config)
                 model_path += ".safetensors"
                 save_model(_unwrap_objects(self.model), model_path, metadata={"trainer_cfg": string_cfg})
