@@ -25,8 +25,7 @@ def parse_args():
     )
     parser.add_argument(
         "--resume",
-        type=str,
-        default=None,
+        action='store_true',
         help="Resume from previous saved checkpoint.",
     )
 
