@@ -239,6 +239,7 @@ class Trainer():
             remainder = self.fabric.load(latest_checkpoint_path, state)
             global_step = remainder.pop("global_step")
             current_epoch = remainder.pop("current_epoch")
+            rank_zero_print(f"Resuming from checkpoint {latest_checkpoint_path}")
 
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
             should_stop = True
@@ -261,7 +262,6 @@ class Trainer():
                 prog_bar.total = len(self.dataloader) // grad_accum_steps
                 prog_bar.set_description(f"Epoch {current_epoch}")
             
-            import time
             assert len(self.dataloader) > 0, "Dataloader is empty, please check your dataset"
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1  
@@ -313,7 +313,7 @@ class LossRecorder:
         self.loss_total = 0.0
 
     def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0 or len(self.loss_list) < step:
+        if epoch == 0 or len(self.loss_list) <= step:
             self.loss_list.append(loss)
         else:
             self.loss_total -= self.loss_list[step]
