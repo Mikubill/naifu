@@ -165,12 +165,19 @@ class Trainer():
                 
             rank_zero_print(f"Saved model to {model_path}")
                     
-    def perform_sampling(self, global_step, current_epoch):
+    def perform_sampling(self, global_step, current_epoch, is_last=False):
         config = self.model.config
         enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled
+        if not enabled_sampling:
+            return
+        
         sampling_cfg =  config.sampling
         sampling_steps = sampling_cfg.every_n_steps
-        if enabled_sampling and sampling_steps > 0 and global_step % sampling_steps == 0:
+        sample_by_step = sampling_steps > 0 and global_step % sampling_steps == 0
+        sampling_epochs = sampling_cfg.every_n_epochs
+        sample_by_epoch = is_last and sampling_epochs > 0 and current_epoch % sampling_epochs == 0
+
+        if sample_by_epoch or sample_by_step:
             size = (sampling_cfg.height, sampling_cfg.width)
             assert size[0] % 64 == 0 and size[1] % 64 == 0, "Sample image size must be a multiple of 64"
             with self.trainer_ctx():
@@ -296,7 +303,7 @@ class Trainer():
                 should_stop = True
             
             state.update(global_step=global_step, current_epoch=current_epoch)
-            self.perform_sampling(global_step, current_epoch)
+            self.perform_sampling(global_step, current_epoch, is_last=True)
             self.save_model(global_step, current_epoch, state, is_last=True)
             
 
