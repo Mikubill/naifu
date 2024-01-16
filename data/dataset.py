@@ -57,12 +57,19 @@ class AspectRatioDataset(Dataset):
 
         self.target_area = target_area
         self.max_size, self.min_size, self.divisible = max_size, min_size, divisible
-        self._length = int(np.ceil(self.store.length / self.batch_size))
-        self.generate_buckets()
         self.first_time = True
+        self.generate_buckets()
+        self.init_batches()
+        
+    def init_batches(self):
+        self.assign_buckets()
+        self.assign_batches()
+        if self.first_time:
+            self.put_most_oom_like_batch_first()
+            self.first_time = False
 
     def __len__(self):
-        return self._length
+        return len(self.batch_idxs)
 
     def generate_buckets(self):
         assert (
@@ -125,8 +132,4 @@ def worker_init_fn(worker_id):
     worker_info = get_worker_info()
     dataset: AspectRatioDataset = worker_info.dataset  # type: ignore
     random.seed(worker_info.seed)  # type: ignore
-    dataset.assign_buckets()
-    dataset.assign_batches()
-    if dataset.first_time:
-        dataset.put_most_oom_like_batch_first()
-        dataset.first_time = False
+    dataset.init_batches()
