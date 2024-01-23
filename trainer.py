@@ -141,7 +141,12 @@ class Trainer():
         cfg = config.trainer
         fabric = self.fabric
         is_checkpoint_step = cfg.checkpoint_steps > 0 and global_step % cfg.checkpoint_steps == 0
-        to_save = is_checkpoint_step or is_last
+        is_checkpoint_epoch = cfg.checkpoint_freq > 0 and current_epoch % cfg.checkpoint_freq == 0
+        to_save = is_checkpoint_epoch or is_checkpoint_step or is_last
+        
+        if is_checkpoint_epoch and is_last:
+            # we have already saved the last checkpoint
+            return
 
         if not (fabric.is_global_zero and to_save):
             return
@@ -165,7 +170,7 @@ class Trainer():
                 
             rank_zero_print(f"Saved model to {model_path}")
                     
-    def perform_sampling(self, global_step, current_epoch, is_last=False):
+    def perform_sampling(self, global_step, current_epoch):
         config = self.model.config
         enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled
         if not enabled_sampling:
@@ -175,7 +180,7 @@ class Trainer():
         sampling_steps = sampling_cfg.every_n_steps
         sample_by_step = sampling_steps > 0 and global_step % sampling_steps == 0
         sampling_epochs = sampling_cfg.every_n_epochs
-        sample_by_epoch = is_last and sampling_epochs > 0 and current_epoch % sampling_epochs == 0
+        sample_by_epoch = sampling_epochs > 0 and current_epoch % sampling_epochs == 0
 
         if sample_by_epoch or sample_by_step:
             size = (sampling_cfg.height, sampling_cfg.width)
@@ -303,8 +308,11 @@ class Trainer():
                 should_stop = True
             
             state.update(global_step=global_step, current_epoch=current_epoch)
-            self.perform_sampling(global_step, current_epoch, is_last=True)
-            self.save_model(global_step, current_epoch, state, is_last=True)
+            self.perform_sampling(global_step, current_epoch)
+            self.save_model(global_step, current_epoch, state)
+        
+        # final save, if we are not saving on last epoch
+        self.save_model(global_step, current_epoch, state, is_last=True)
             
 
 class LossRecorder:
