@@ -262,9 +262,9 @@ class StoreBase(Dataset):
             for i, ent in enumerate(index):
                 for strategy, mult in repeat_strategy:
                     if strategy in str(ent):
-                        k = k + [k[i]] * (mult-1)
-                        res = res + [res[i]] * (mult-1)
-                        index_new = index_new + [index_new[i]] * (mult-1)
+                        k.extend([k[i]] * (mult-1))
+                        res.extend([res[i]] * (mult-1))
+                        index_new.extend([index_new[i]] * (mult-1))
                         break
         else:
             index_new = index
