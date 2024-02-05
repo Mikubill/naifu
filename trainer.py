@@ -307,6 +307,16 @@ class Trainer():
             self.perform_sampling(global_step, current_epoch, is_last=True)
             self.save_model(global_step, current_epoch, state, is_last=True)
             
+            
+class NonAutocastMixedPrecision(pl.fabric.plugins.precision.amp.MixedPrecision):
+    """Mixed precision training without automatic casting inputs and outputs."""
+
+    def convert_input(self, data):
+        return data
+    
+    def convert_output(self, data):
+        return data
+            
 
 class LossRecorder:
     def __init__(self):
@@ -488,7 +498,12 @@ def main(args):
     elif target_precision == "bf16-true":
         model_precision = torch.bfloat16
         config.lightning.precision = None
-        plugins.append(MixedPrecision("bf16-mixed", "cuda"))
+        plugins.append(NonAutocastMixedPrecision("bf16-mixed", "cuda"))
+    elif target_precision == "16-mixed":
+        config.lightning.precision = None
+        plugins.append(NonAutocastMixedPrecision("16-mixed", "cuda"))
+    elif target_precision == "bf16-mixed":
+        config.lightning.precision = None
 
     loggers = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[loggers], plugins=plugins, strategy=strategy, **config.lightning)
