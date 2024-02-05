@@ -504,6 +504,7 @@ def main(args):
         plugins.append(NonAutocastMixedPrecision("16-mixed", "cuda"))
     elif target_precision == "bf16-mixed":
         config.lightning.precision = None
+        plugins.append(NonAutocastMixedPrecision("bf16-mixed", "cuda"))
 
     loggers = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[loggers], plugins=plugins, strategy=strategy, **config.lightning)
