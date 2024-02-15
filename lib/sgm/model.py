@@ -88,7 +88,7 @@ class Upsample(nn.Module):
                 dims, self.channels, self.out_channels, 3, padding=padding
             )
 
-    def _forward(self, x):
+    def forward(self, x):
         assert x.shape[1] == self.channels
         
         # Cast to float32 to as 'upsample_nearest2d_out_frame' op does not support bfloat16
@@ -116,9 +116,6 @@ class Upsample(nn.Module):
         if self.use_conv:
             x = self.conv(x)
         return x
-    
-    def forward(self, x):
-        return checkpoint(self._forward, (x, ), self.use_checkpoint)
     
     
 class Downsample(nn.Module):
@@ -161,13 +158,9 @@ class Downsample(nn.Module):
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
             
-    def _forward(self, x):
+    def forward(self, x):
         assert x.shape[1] == self.channels
         return self.op(x)
-
-    def forward(self, x):
-        return checkpoint(self._forward, (x, ), self.use_checkpoint)
-        # return self.op(x)
 
 
 class ResBlock(TimestepBlock):

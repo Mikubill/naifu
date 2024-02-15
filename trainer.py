@@ -1,7 +1,7 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
 import copy
 import os
-import h5py
+import argparse
 import re
 
 # Hide welcome message from bitsandbytes
@@ -10,9 +10,7 @@ os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 import torch
 import lightning as pl
 
-from lib.args import parse_args
 from lib.model import StableDiffusionModel
-from lib.lora import LoConBaseModel
 from lib.utils import rank_zero_print
 
 from omegaconf import OmegaConf
@@ -86,13 +84,8 @@ class Trainer():
         if cfg.use_ema:
             ema_ctx = self.model.model_ema.average_parameters
             self.model.model_ema.to(self.fabric.device)
-            
-        lora_ctx = nullcontext
-        if cfg.get("lora") and cfg.lora.enabled:
-            lora_ctx = self.model.lora.apply_weights
-            self.model.lora.to(self.fabric.device)
         
-        self.context = [ema_ctx, lora_ctx]
+        self.context = [ema_ctx]
             
     @contextmanager
     def trainer_ctx(self):
@@ -267,13 +260,14 @@ class Trainer():
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1  
                 is_accumulating = local_step % grad_accum_steps != 0
-                
+
                 with fabric.no_backward_sync(self.model, enabled=is_accumulating):
                     loss = self.model(batch)
                     self.fabric.backward(loss / grad_accum_steps)
-                    
+
+                loss = loss.detach().item()
                 if fabric.is_global_zero:  
-                    loss_rec.add(epoch=current_epoch, step=batch_idx, loss=loss.item())
+                    loss_rec.add(epoch=current_epoch, step=batch_idx, loss=loss)
                     prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}") 
         
                 if is_accumulating:
@@ -298,7 +292,7 @@ class Trainer():
                 prog_bar.set_postfix_str(f"train_loss: {loss:.3f}, avg_loss: {loss_rec.moving_average:.3f}")  
                 state.update(global_step=global_step, current_epoch=current_epoch)
                 self.on_post_training_batch(global_step, current_epoch, state)
-                
+
             current_epoch += 1
             if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:
                 should_stop = True
@@ -395,16 +389,6 @@ def setup_optimizer(config, model):
     else:
         params_to_optim = [{'params': model.model.parameters()}]  
 
-    if config.get("lora") and config.lora.enabled:
-        lora = LoConBaseModel(model.model, config.lora)
-        for param in model.parameters():
-            param.requires_grad = False
-        
-        lora.requires_grad_(True)
-        lora.inject()
-        model.lora = lora
-        params_to_optim = [{'params': lora.parameters(), 'lr': config.lora.unet_lr}]
-        
     if config.get("advanced"):
         if config.advanced.get("train_text_encoder_1"):
             lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
@@ -444,8 +428,12 @@ def cache_latents_subprocess(dataset_path, dataset_path_latents):
     proc.wait()
 
 def main(args):
+    plugins = []
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
+    strategy = config.lightning.get("strategy", "auto")
+    model_precision = config.trainer.get("model_precision", torch.float32)
+    target_precision = config.lightning.precision
     
     setup_torch(config)
     if args.model_path != None:
@@ -457,21 +445,7 @@ def main(args):
         config.dataset.img_path = dataset_path_latents
         cache_latents_subprocess(dataset_path, dataset_path_latents)
         rank_zero_print(f"Using cached latents from {dataset_path_latents}")
-        
-    plugins = []
-    strategy = config.lightning.get("strategy", "auto")
-    if config.get("lora") and config.lora.enabled:
-        from lightning.fabric.strategies import DDPStrategy
-        strategy = DDPStrategy(static_graph=True) if torch.cuda.device_count() > 1 else "auto"
-        
-    if config.trainer.get("deepspeed", False):
-        assert torch.cuda.device_count() > 1, "DeepSpeed requires multiple GPUs"
-        from lightning.fabric.strategies import DeepSpeedStrategy
-        strategy = DeepSpeedStrategy(
-            config = {"gradient_clipping": 1.0},
-            contiguous_memory_optimization=True,
-        )
-            
+    
     if os.environ.get('SM_TRAINING', False):
         strategy, init_params = setup_smddp()
         config.lightning.update(init_params)
@@ -479,9 +453,6 @@ def main(args):
         
         config.trainer.checkpoint_dir = os.path.join("/opt/ml/checkpoints", config.trainer.checkpoint_dir)
         config.sampling.save_dir = os.path.join(os.environ.get('SM_OUTPUT_DIR'), config.sampling.save_dir)
-    
-    model_precision = config.trainer.get("model_precision", torch.float32)
-    target_precision = config.lightning.precision
     
     if target_precision == "16-true":
         model_precision = torch.float16
@@ -493,18 +464,17 @@ def main(args):
         def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
             return org_unscale_grads(optimizer, inv_scale, found_inf, True)
         scaler._unscale_grads_ = _unscale_grads_replacer
-
+        
         plugins.append(MixedPrecision("16-mixed", "cuda", scaler))
+        
     elif target_precision == "bf16-true":
         model_precision = torch.bfloat16
         config.lightning.precision = None
         plugins.append(NonAutocastMixedPrecision("bf16-mixed", "cuda"))
-    elif target_precision == "16-mixed":
+        
+    elif target_precision in ["16-mixed", "bf16-mixed"]:
         config.lightning.precision = None
-        plugins.append(NonAutocastMixedPrecision("16-mixed", "cuda"))
-    elif target_precision == "bf16-mixed":
-        config.lightning.precision = None
-        plugins.append(NonAutocastMixedPrecision("bf16-mixed", "cuda"))
+        plugins.append(NonAutocastMixedPrecision(target_precision, "cuda"))
 
     loggers = WandbLogger(project=config.trainer.wandb_id) if config.trainer.wandb_id != "" else None
     fabric = pl.Fabric(loggers=[loggers], plugins=plugins, strategy=strategy, **config.lightning)
@@ -531,5 +501,22 @@ def main(args):
     trainer.train()
 
 if __name__ == "__main__":
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--config", 
+        type=str, 
+        default=None
+    )
+    parser.add_argument(
+        "--resume",
+        action='store_true',
+        help="Resume from previous saved checkpoint.",
+    )
+    args = parser.parse_args()
     main(args)

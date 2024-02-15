@@ -184,11 +184,12 @@ class StableDiffusionModel(pl.LightningModule):
             num_train_timesteps=1000,
             clip_sample=False,
         )
-        prepare_scheduler_for_custom_training(self.noise_scheduler, self.device)
-        
         if advanced.get("zero_terminal_snr", None):
             fix_noise_scheduler_betas_for_zero_terminal_snr(self.noise_scheduler)
             
+        # cache snr
+        prepare_scheduler_for_custom_training(self.noise_scheduler, self.device)
+        
         if trainer_cfg.get("use_compile", False):
             self.model = torch.compile(self.model, dynamic=True, backend="eager")
 
