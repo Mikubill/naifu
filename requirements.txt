@@ -1,0 +1,25 @@
+numpy
+accelerate
+lightning>=2.0
+omegaconf>=2.1.1
+lightning_lite
+transformers>=4.25.1
+datasets>=2.17
+diffusers>=0.18
+bitsandbytes>=0.41
+wandb
+ftfy
+torchvision
+requests
+timm
+safetensors
+tensorboard
+h5py
+open-clip-torch
+einops
+scipy
+torch_ema
+opencv-python
+
+# prodigyopt
+# xformers
