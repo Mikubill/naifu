@@ -59,12 +59,10 @@ class StableDiffusionModel(pl.LightningModule):
 
             vae = AutoencoderKLWrapper(**vae_config) if init_vae else None
             unet = UnetWrapper(unet_config) if init_unet else None
-            conditioner = (
-                GeneralConditioner(**cond_config) if init_conditioner else None
-            )
+            conditioner = GeneralConditioner(**cond_config) if init_conditioner else None
 
-        vae.train = disabled_train
         vae.eval()
+        vae.train = disabled_train
         vae.requires_grad_(False)
         return vae, unet, conditioner
 
@@ -93,7 +91,7 @@ class StableDiffusionModel(pl.LightningModule):
         if self.vae_encode_bsz < 0:
             self.vae_encode_bsz = self.batch_size
             
-        if advanced.zero_terminal_snr:
+        if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
             
@@ -120,7 +118,8 @@ class StableDiffusionModel(pl.LightningModule):
         latents = []
         with torch.autocast("cuda", enabled=False):
             for i in range(0, x.shape[0], self.vae_encode_bsz):
-                latents.append(self.first_stage_model.encode(x).sample())
+                o = x[i : i + self.vae_encode_bsz]
+                latents.append(self.first_stage_model.encode(o).sample())
         z = torch.cat(latents, dim=0)
         z = self.scale_factor * z
         return z

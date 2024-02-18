@@ -1,5 +1,5 @@
 name: test-run
-target: modules.sdxl_dpo_hfdataset.setup
+target: modules.sdxl_dpo_sgm.setup
 beta_dpo: 5000
 
 trainer:
