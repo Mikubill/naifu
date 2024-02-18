@@ -122,8 +122,10 @@ class Trainer:
         prompts = list(config.prompts)
         prompt_to_gen = copy.deepcopy(prompts)
         images = []
+        height, width = config.get("height", 1024), config.get("width", 1024)
+        size = (height, width)
         for prompt in zip(prompt_to_gen):
-            images.extend(model.sample(prompt, generator=generator))
+            images.extend(model.sample(prompt, size=size, generator=generator))
 
         for j, image in enumerate(images):
             image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")

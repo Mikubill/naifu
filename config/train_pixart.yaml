@@ -18,16 +18,6 @@ trainer:
   max_epochs: 60
   max_steps: -1
 
-advanced:
-  offset_noise: true
-  offset_noise_val: 0.0375
-  min_snr_val: 5
-  timestep_start: 0
-  timestep_end: 1000
-  input_perturbation: false
-  input_perturbation_val: 0.0
-  zero_terminal_snr: false
-  
 lightning:
   accelerator: gpu
   devices: -1

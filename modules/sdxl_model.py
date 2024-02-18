@@ -8,6 +8,7 @@ import torch
 
 from models.sgm import GeneralConditioner
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
+from modules.utils import apply_zero_terminal_snr, cache_snr_values   
 from common.utils import load_torch_file, rank_zero_print, EmptyInitWrapper
 
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
@@ -68,6 +69,7 @@ class StableDiffusionModel(pl.LightningModule):
         return vae, unet, conditioner
 
     def init_model(self):
+        advanced = self.config.get("advanced", {})
         sd = load_torch_file(self.model_path, self.target_device)
         self.first_stage_model, self.model, self.conditioner = self.build_models()
         self.noise_scheduler = DDPMScheduler(
@@ -90,6 +92,10 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
         if self.vae_encode_bsz < 0:
             self.vae_encode_bsz = self.batch_size
+            
+        if advanced.zero_terminal_snr:
+            apply_zero_terminal_snr(self.noise_scheduler)
+        cache_snr_values(self.noise_scheduler, self.target_device)
             
     def encode_pixels(self, inputs):
         feed_pixel_values = inputs

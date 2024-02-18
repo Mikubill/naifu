@@ -7,6 +7,7 @@ from common.utils import rank_zero_print
 from diffusers import StableDiffusionPipeline
 from diffusers import DDIMScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
+from modules.utils import apply_zero_terminal_snr, cache_snr_values
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -54,6 +55,9 @@ class StableDiffusionModel(pl.LightningModule):
             num_train_timesteps=1000,
             clip_sample=False,
         )
+        if advanced.zero_terminal_snr:
+            apply_zero_terminal_snr(self.noise_scheduler)
+        cache_snr_values(self.noise_scheduler, self.target_device)
 
     def encode_prompts(self, prompts):            
         input_ids = self.tokenizer(prompts, padding="do_not_pad", truncation=True, max_length=225).input_ids 

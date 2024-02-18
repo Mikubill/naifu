@@ -7,6 +7,7 @@ from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.train import SupervisedFineTune
 from modules.sdxl_utils import get_hidden_states_sdxl, convert_sdxl_text_encoder_2_checkpoint
 from modules.sdxl_utils import get_size_embeddings
+from modules.utils import apply_zero_terminal_snr, cache_snr_values
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from safetensors.torch import save_file
 
@@ -90,7 +91,7 @@ def init_text_encoder():
 # define the LightningModule
 class StableDiffusionModel(SupervisedFineTune):
     def init_model(self):
-        trainer_cfg = self.config.trainer
+        advanced = self.config.get("advanced", {})
         sd = load_torch_file(self.model_path, self.target_device)
         vae, unet, _ = self.build_models(init_conditioner=False)
         self.first_stage_model = vae
@@ -120,6 +121,9 @@ class StableDiffusionModel(SupervisedFineTune):
             num_train_timesteps=1000,
             clip_sample=False,
         )
+        if advanced.zero_terminal_snr:
+            apply_zero_terminal_snr(self.noise_scheduler)
+        cache_snr_values(self.noise_scheduler, self.target_device)
         self.init_lycoris()
         
     def init_lycoris(self):

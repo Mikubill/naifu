@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
 from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.sdxl_model_diffusers import StableDiffusionModel
+from modules.utils import apply_snr_weight
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
 
@@ -128,13 +129,21 @@ class SupervisedFineTune(StableDiffusionModel):
 
         # Get the target for loss depending on the prediction type
         is_v = advanced.get("v_parameterization", False)
-        target = noise if not is_v \
-            else self.noise_scheduler.get_velocity(latents, noise, timesteps)
-        
+        target = noise if not is_v else self.noise_scheduler.get_velocity(latents, noise, timesteps)
 
-        loss = torch.nn.functional.mse_loss(
-            noise_pred.float(), target.float(), reduction="mean"
-        )
+        min_snr_gamma = advanced.get("min_snr", False)
+        if min_snr_gamma:
+            # do not mean over batch dimension for snr weight or scale v-pred loss
+            loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
+            loss = loss.mean([1, 2, 3])
+
+            if min_snr_gamma:
+                loss = apply_snr_weight(loss, timesteps, self.noise_scheduler, advanced.min_snr_val, is_v)
+                
+            loss = loss.mean()  # mean over batch dimension
+        else:
+            loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="mean")
+
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
 

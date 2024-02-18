@@ -28,11 +28,10 @@ advanced:
   text_encoder_lr: 3e-6
   offset_noise: true
   offset_noise_val: 0.0375
+  min_snr: false
   min_snr_val: 5
   timestep_start: 0
   timestep_end: 1000
-  input_perturbation: false
-  input_perturbation_val: 0.0
   v_parameterization: false
   zero_terminal_snr: false
   

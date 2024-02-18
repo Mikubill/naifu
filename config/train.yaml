@@ -2,7 +2,7 @@ name: test-run
 target: modules.train.setup
 
 trainer:
-  model_path: sd_xl_base_1.0_0.9vae.safetensors
+  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
   resolution: 1024
   seed: 1138
@@ -29,11 +29,10 @@ advanced:
   text_encoder_2_lr: 3e-6
   offset_noise: true
   offset_noise_val: 0.0375
+  min_snr: false
   min_snr_val: 5
   timestep_start: 0
   timestep_end: 1000
-  input_perturbation: false
-  input_perturbation_val: 0.0
   v_parameterization: false
   zero_terminal_snr: false
   
@@ -62,6 +61,8 @@ sampling:
   enabled: false
   use_wandb: true
   seed: 1234
+  height: 1280
+  width: 768
   every_n_steps: -1
   every_n_epochs: 1
   save_dir: "samples"
