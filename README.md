@@ -88,7 +88,6 @@ python trainer.py config/train_pixart.yaml
 Train SDXL-LCM model  
 Paper: Latent Consistency Models: Synthesizing High-Resolution Images with Few-Step Inference ([arxiv:2310.04378](https://arxiv.org/abs/2310.04378))
 ```bash
-# PixArt-alpha/PixArt-XL-2-1024-MS
 python trainer.py config/train_lcm.yaml
 ```
 

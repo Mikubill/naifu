@@ -34,7 +34,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         pin_memory=True,
     )
 
-    params_to_optim = [{"params": model.unet.parameters()}]
+    params_to_optim = [{"params": model.lcm_unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]
     if config.advanced.get("train_text_encoder_1"):
         lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
@@ -59,6 +59,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
+
 
 def append_dims(x, target_dims):
     """Appends dimensions to the end of a tensor until it has target_dims dimensions."""
@@ -122,11 +123,14 @@ def get_w_embedding(w, embedding_dim=512, dtype=torch.float32):
     assert emb.shape == (w.shape[0], embedding_dim)
     return emb
 
+
 class DDIMSolver:
     def __init__(self, alpha_cumprods, timesteps=1000, ddim_timesteps=50):
         # DDIM sampling parameters
         step_ratio = timesteps // ddim_timesteps
-        self.ddim_timesteps = (np.arange(1, ddim_timesteps + 1) * step_ratio).round().astype(np.int64) - 1
+        self.ddim_timesteps = (
+            np.arange(1, ddim_timesteps + 1) * step_ratio
+        ).round().astype(np.int64) - 1
         self.ddim_alpha_cumprods = alpha_cumprods[self.ddim_timesteps]
         self.ddim_alpha_cumprods_prev = np.asarray(
             [alpha_cumprods[0]] + alpha_cumprods[self.ddim_timesteps[:-1]].tolist()
@@ -143,7 +147,9 @@ class DDIMSolver:
         return self
 
     def ddim_step(self, pred_x0, pred_noise, timestep_index):
-        alpha_cumprod_prev = extract_into_tensor(self.ddim_alpha_cumprods_prev, timestep_index, pred_x0.shape)
+        alpha_cumprod_prev = extract_into_tensor(
+            self.ddim_alpha_cumprods_prev, timestep_index, pred_x0.shape
+        )
         dir_xt = (1.0 - alpha_cumprod_prev).sqrt() * pred_noise
         x_prev = alpha_cumprod_prev.sqrt() * pred_x0 + dir_xt
         return x_prev
@@ -158,16 +164,19 @@ class SupervisedFineTune(StableDiffusionModel):
         self.lcm_unet = UNet2DConditionModel(**teacher_unet_config)
         self.lcm_unet.load_state_dict(self.unet.state_dict(), strict=False)
         self.lcm_unet.train().requires_grad_(True)
-        
+
         self.unet.eval().requires_grad_(False)
         self.unet.to(torch.float16)
         # Initialize the DDIM ODE solver for distillation.
-        solver = DDIMSolver(
+        self.solver = DDIMSolver(
             self.noise_scheduler.alphas_cumprod.numpy(),
             timesteps=self.noise_scheduler.config.num_train_timesteps,
-            ddim_timesteps=50
+            ddim_timesteps=50,
         )
-        
+        alpha_cumprods = self.noise_scheduler.alphas_cumprod
+        self.alphas = torch.sqrt(alpha_cumprods).to(self.target_device)
+        self.sigmas = torch.sqrt(1 - alpha_cumprods).to(self.target_device)
+
     def forward(self, batch):
         advanced = self.config.get("advanced", {})
         if not batch["is_latent"]:
@@ -201,11 +210,13 @@ class SupervisedFineTune(StableDiffusionModel):
         noise = torch.randn_like(latents, dtype=model_dtype)
         bsz = latents.shape[0]
         num_ddim_timesteps = 50
-        
+
         self.solver.to(latents.device)
         topk = self.noise_scheduler.config.num_train_timesteps // num_ddim_timesteps
-        index = torch.randint(0, num_ddim_timesteps, (bsz,), device=latents.device).long()
-        
+        index = torch.randint(
+            0, num_ddim_timesteps, (bsz,), device=latents.device
+        ).long()
+
         start_timesteps = self.solver.ddim_timesteps[index]
         timesteps = start_timesteps - topk
         timesteps = torch.where(timesteps < 0, torch.zeros_like(timesteps), timesteps)
@@ -216,7 +227,7 @@ class SupervisedFineTune(StableDiffusionModel):
         ]
         c_skip, c_out = scalings_for_boundary_conditions(timesteps)
         c_skip, c_out = [append_dims(x, latents.ndim) for x in [c_skip, c_out]]
-        
+
         # w_max, w_min = 14, 2
         # w = (w_max - w_min) * torch.rand((bsz,)) + w_min
         w = torch.tensor([6.0] * bsz)
@@ -230,14 +241,14 @@ class SupervisedFineTune(StableDiffusionModel):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
-        noise_pred = self.unet(
+        noise_pred = self.lcm_unet(
             sample=noisy_latents,
             timestep=timesteps,
             timestep_cond=w_embedding,
             encoder_hidden_states=text_embedding,
             added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids},
         ).sample
-        
+
         pred_x_0 = predicted_origin(
             noise_pred,
             start_timesteps,
@@ -247,7 +258,7 @@ class SupervisedFineTune(StableDiffusionModel):
             self.sigmas,
         )
         model_pred = c_skip_start * noisy_latents + c_out_start * pred_x_0
-        
+
         with torch.no_grad(), torch.autocast("cuda"):
             # teacher unet (frozen)
             cond_teacher_output = self.unet(
@@ -287,7 +298,7 @@ class SupervisedFineTune(StableDiffusionModel):
                 cond_teacher_output - uncond_teacher_output
             )
             x_prev = self.solver.ddim_step(pred_x0, pred_noise, index)
-            
+
         with torch.no_grad(), torch.autocast("cuda"):
             # algo.1 step.3 alternative - same as above
             # with self.ema.average_parameters():
@@ -307,19 +318,18 @@ class SupervisedFineTune(StableDiffusionModel):
             )
             target = c_skip * x_prev + c_out * pred_x_0
 
-        # Get the target for loss depending on the prediction type
-        is_v = advanced.get("v_parameterization", False)
-        target = noise if not is_v \
-            else self.noise_scheduler.get_velocity(latents, noise, timesteps)
-
-        loss = torch.nn.functional.mse_loss(model_pred.float(), target.float(), reduction="mean")
+        loss = torch.nn.functional.mse_loss(
+            model_pred.float(), target.float(), reduction="mean"
+        )
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")
 
         return loss
 
     def save_checkpoint(self, model_path):
-        lcm_scheduler = LCMScheduler.from_pretrained("SimianLuo/LCM_Dreamshaper_v7", subfolder="scheduler")
+        lcm_scheduler = LCMScheduler.from_pretrained(
+            "SimianLuo/LCM_Dreamshaper_v7", subfolder="scheduler"
+        )
         pipeline = StableDiffusionXLPipeline(
             vae=self.vae,
             text_encoder=self.text_encoder,

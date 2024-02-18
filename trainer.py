@@ -35,7 +35,7 @@ class Trainer:
 
     def prepare_logger(self):
         fabric = self.fabric
-        if fabric.logger:
+        if fabric.logger and fabric.logger.__class__.__name__ != "CSVLogger":
             config = OmegaConf.to_container(self.model.config, resolve=True)
             fabric.logger.log_hyperparams(config)
             
@@ -265,7 +265,14 @@ class LossRecorder:
         return self.loss_total / len(self.loss_list)
 
 
-def main(args):
+def main():
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--config', type=str)
+    group.add_argument('config', nargs='?', type=str)
+    parser.add_argument("--resume", action="store_true")
+    args = parser.parse_args()
+    
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
     plugins = []
@@ -298,10 +305,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--config', type=str)
-    group.add_argument('config', nargs='?', type=str)
-    parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
-    main(args)
+    main()

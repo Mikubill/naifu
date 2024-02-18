@@ -1,17 +1,16 @@
 name: test-run
-target: modules.sdxl_dpo_hfdataset.setup
-beta_dpo: 5000
+target: modules.train_lcm.setup
 
 trainer:
-  model_path: sd_xl_base_1.0_0.9vae.safetensors
-  batch_size: 16
+  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
+  batch_size: 4
   resolution: 1024
   seed: 1138
-  wandb_id: "dpo-test"
+  wandb_id: ""
   use_ema: false
   use_compile: false
   use_xformers: false
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 4
   gradient_clip_val: 0.0
 
   save_format: safetensors
@@ -35,11 +34,8 @@ lightning:
   devices: -1
   precision: 16-mixed
 
-# dataset format
-# dpo requires paired-image dataset
 dataset:
-  name: "kashif/pickascore" # "yuvalkirstain/pickapic_v2"
-  dataset_split: "validation"
+  img_path: "/notebooks/BA_latents"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:
