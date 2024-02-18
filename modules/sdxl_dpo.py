@@ -119,11 +119,11 @@ class SupervisedFineTune(StableDiffusionModel):
             ref_diff = ref_losses_w - ref_losses_l
             raw_ref_loss = ref_loss.mean()
         
-        logits = -1 * (model_diff - ref_diff)
-        loss = -1 * F.logsigmoid(self.config.dpo_beta * logits).mean()
+        inside_term = -1 * self.config.dpo_beta * (model_diff - ref_diff)
+        loss = -1 * F.logsigmoid(inside_term).mean()
 
-        implicit_acc = (logits > 0).sum().float() / logits.size(0)
-        implicit_acc += 0.5 * (logits == 0).sum().float() / logits.size(0)
+        implicit_acc = (inside_term > 0).sum().float() / inside_term.size(0)
+        implicit_acc += 0.5 * (inside_term == 0).sum().float() / inside_term.size(0)
         self.fabric.log_dict(
             {
                 "loss": loss.detach().item(),
