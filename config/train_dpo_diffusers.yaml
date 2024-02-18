@@ -1,6 +1,6 @@
 name: test-run
-target: modules.sdxl_dpo_sgm.setup
-beta_dpo: 5000
+target: modules.sdxl_dpo_diffusers.setup
+dpo_beta: 2500
 
 trainer:
   model_path: ../sd_xl_base_1.0_0.9vae.safetensors

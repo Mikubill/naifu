@@ -75,7 +75,8 @@ Paper: Diffusion Model Alignment Using Direct Preference Optimization ([arxiv:23
 # dataset: yuvalkirstain/pickapic_v2
 # Be careful tuning the resolution and dpo_betas!
 # will save in diffusers format
-python trainer.py config/train_dpo_hfdataset.yaml
+python trainer.py config/train_dpo_hfdataset.yaml # diffusers backend
+python trainer.py config/train_dpo_sgm.yaml # sgm backend
 ```
 
 Train Pixart-Alpha model  
