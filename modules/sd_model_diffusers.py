@@ -103,9 +103,9 @@ class StableDiffusionModel(pl.LightningModule):
         input_ids = oids.reshape((-1, tokenizer_max_length))
         
         state = self.text_encoder(input_ids.to(self.device), output_hidden_states=True)
-        enc = state['hidden_states'][-self.config.trainer.clip_skip]
+        encoder_hidden_states = state['hidden_states'][-self.config.trainer.clip_skip]
         if self.config.trainer.clip_skip > 1:
-            encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(enc)
+            encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states)
         
         encoder_hidden_states = encoder_hidden_states.reshape((bs, -1, encoder_hidden_states.shape[-1]))
         states_list = [encoder_hidden_states[:, 0].unsqueeze(1)]  # <BOS>

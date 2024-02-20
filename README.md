@@ -11,7 +11,7 @@ Other branches in the repository include:
 To install the necessary dependencies, simply run:
 
 ```bash
-git clone https://github.com/mikubill/naifu-diffusion
+git clone --depth 1 https://github.com/mikubill/naifu-diffusion
 pip install -r requirements.txt
 ```
 

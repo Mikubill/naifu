@@ -5,7 +5,7 @@ dpo_beta: 2500
 trainer:
   model_path: runwayml/stable-diffusion-v1-5
   batch_size: 8
-  resolution: 1024
+  resolution: 512
   seed: 1138
   wandb_id: "dpo-test"
   use_ema: false

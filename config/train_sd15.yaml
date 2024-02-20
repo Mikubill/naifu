@@ -2,7 +2,7 @@ name: test-run
 target: modules.train_sd_diffusers.setup
 
 trainer:
-  model_path: sd-v15.safetensors
+  model_path: runwayml/stable-diffusion-v1-5
   batch_size: 4
   resolution: 512
   seed: 1138

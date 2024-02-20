@@ -49,6 +49,9 @@ class SupervisedFineTune(StableDiffusionModel):
         self.unet_ref.eval().requires_grad_(False)
         # since we're in dpo, unet_ref in 16bit is ok
         self.unet_ref.to(torch.float16)
+       
+        alphas_cumprod = self.noise_scheduler.alphas_cumprod
+        self.a = alphas_cumprod.clone().to(self.target_device)
 
     def forward(self, batch):
         advanced = self.config.get("advanced", {})
@@ -74,7 +77,7 @@ class SupervisedFineTune(StableDiffusionModel):
 
         # Sample a random timestep for each image
         timesteps = torch.randint(
-            advanced.get("timestep_start", 0),
+            advanced.get("timestep_start", 1),
             advanced.get("timestep_end", 1000),
             (bsz,),
             dtype=torch.int64,
@@ -122,8 +125,12 @@ class SupervisedFineTune(StableDiffusionModel):
             ref_losses_w, ref_losses_l = ref_loss.chunk(2)
             ref_diff = ref_losses_w - ref_losses_l
             raw_ref_loss = ref_loss.mean()
+            
+        gt = timesteps.chunk(2)[0]
+        alphas_curr, alphas_prev = self.a[gt], self.a[gt - 1]
+        scale = (1.0 - alphas_prev).sqrt() * (1.0 - alphas_prev.div_(alphas_curr))
 
-        inside_term = -1 * self.config.dpo_beta * (model_diff - ref_diff)
+        inside_term = -1 * self.config.dpo_beta * scale * (model_diff - ref_diff)
         loss = -1 * F.logsigmoid(inside_term).mean()
 
         implicit_acc = (inside_term > 0).sum().float() / inside_term.size(0)
