@@ -223,8 +223,10 @@ class StableCascadeModel(pl.LightningModule):
     def save_checkpoint(self, model_path):
         cfg = self.config.trainer
         string_cfg = OmegaConf.to_yaml(self.config)
+        if self.config.advanced.get("train_text_encoder"):
+            self.text_encoder.save_pretrained(f"{model_path}_text_encoder")
+            
         if cfg.get("save_format") == "safetensors":
-
             model_path += ".safetensors"
             state_dict = self.stage_c.state_dict()
             # check if any keys startswith modules. if so, remove the modules. prefix
