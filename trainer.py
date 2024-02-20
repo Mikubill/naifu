@@ -130,7 +130,7 @@ class Trainer:
         for j, image in enumerate(images):
             image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
 
-        if config.use_wandb and logger:
+        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
             logger.log_image(
                 key="samples", 
                 images=images, 

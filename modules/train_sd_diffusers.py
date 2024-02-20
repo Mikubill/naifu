@@ -60,8 +60,7 @@ class SupervisedFineTune(StableDiffusionModel):
         advanced = self.config.get("advanced", {})
         if not batch["is_latent"]:
             self.vae.to(self.target_device)
-            latents = self.vae.encode(batch["pixels"]).latent_dist.sample()
-            latents = latents * self.scale_factor
+            latents = self.encode_pixels(batch["pixels"])
             if torch.any(torch.isnan(latents)):
                 rank_zero_print("NaN found in latents, replacing with zeros")
                 latents = torch.where(

@@ -1,15 +1,14 @@
+import copy
 import torch
 import os
 import lightning as pl
-from omegaconf import OmegaConf
-
-import copy
 import torch.nn.functional as F
-from modules.data_utils import setup_hf_dataloader
-from common.utils import rank_zero_print, get_class
-from modules.sdxl_model_diffusers import StableDiffusionModel
-from lightning.pytorch.utilities.model_summary import ModelSummary
 
+from omegaconf import OmegaConf
+from common.utils import rank_zero_print, get_class
+from modules.sd_model_diffusers import StableDiffusionModel
+from lightning.pytorch.utilities.model_summary import ModelSummary
+from modules.data_utils import setup_hf_dataloader
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -17,17 +16,13 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
-
     dataset, dataloader = setup_hf_dataloader(config)
+
     params_to_optim = [{"params": model.unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]
-    if config.advanced.get("train_text_encoder_1"):
-        lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.text_encoder_1.parameters(), "lr": lr})
-
-    if config.advanced.get("train_text_encoder_2"):
-        lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.text_encoder_2.parameters(), "lr": lr})
+    if config.advanced.get("train_text_encoder"):
+        lr = config.advanced.get("text_encoder_lr", config.optimizer.params.lr)
+        params_to_optim.append({"params": model.text_encoder.parameters(), "lr": lr})
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)
@@ -54,11 +49,11 @@ class SupervisedFineTune(StableDiffusionModel):
         self.unet_ref.eval().requires_grad_(False)
         # since we're in dpo, unet_ref in 16bit is ok
         self.unet_ref.to(torch.float16)
-        
+
     def forward(self, batch):
         advanced = self.config.get("advanced", {})
+        
         self.vae.to(self.target_device)
-
         feed_pixel_values = torch.cat(batch["pixels"].chunk(2, dim=1))
         latents = self.encode_pixels(feed_pixel_values)
         if torch.any(torch.isnan(latents)):
@@ -67,23 +62,14 @@ class SupervisedFineTune(StableDiffusionModel):
                 torch.isnan(latents), torch.zeros_like(latents), latents
             )
 
-        self.text_encoder_1.to(self.target_device)
-        self.text_encoder_2.to(self.target_device)
-
+        self.text_encoder.to(self.target_device)
         model_dtype = next(self.unet.parameters()).dtype
-        text_embedding, pooled = self.encode_prompt(batch)
-        text_embedding = text_embedding.to(model_dtype).repeat(2, 1, 1)
-        pooled = pooled.to(model_dtype).repeat(2, 1)
-
-        bs = batch["original_size_as_tuple"]
-        bc = batch["crop_coords_top_left"]
-        bt = batch["target_size_as_tuple"]
-        add_time_ids = torch.cat(
-            [self.compute_time_ids(s, c, t) for s, c, t in zip(bs, bc, bt)]
-        ).repeat(2, 1)
+        hidden_states = self.encode_prompts(batch["prompts"]).repeat(2, 1, 1)
 
         # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents, dtype=model_dtype).chunk(2)[0].repeat(2, 1, 1, 1)
+        noise = (
+            torch.randn_like(latents, dtype=model_dtype).chunk(2)[0].repeat(2, 1, 1, 1)
+        )
         bsz = latents.shape[0] // 2
 
         # Sample a random timestep for each image
@@ -103,13 +89,16 @@ class SupervisedFineTune(StableDiffusionModel):
         noise_pred = self.unet(
             sample=noisy_latents,
             timestep=timesteps,
-            encoder_hidden_states=text_embedding,
-            added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids},
+            encoder_hidden_states=hidden_states,
         ).sample
 
         # Get the target for loss depending on the prediction type
         is_v = advanced.get("v_parameterization", False)
-        target = noise if not is_v else self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        target = (
+            noise
+            if not is_v
+            else self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        )
 
         # Compute losses.
         model_losses = F.mse_loss(noise_pred.float(), target.float(), reduction="none")
@@ -124,8 +113,7 @@ class SupervisedFineTune(StableDiffusionModel):
             ref_preds = self.unet_ref(
                 sample=noisy_latents,
                 timestep=timesteps,
-                encoder_hidden_states=text_embedding,
-                added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids},
+                encoder_hidden_states=hidden_states,
             ).sample
 
             ref_loss = F.mse_loss(ref_preds.float(), target.float(), reduction="none")

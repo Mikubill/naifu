@@ -94,17 +94,10 @@ class StableDiffusionModel(pl.LightningModule):
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
-            
-    def encode_pixels(self, inputs):
-        feed_pixel_values = inputs
-        latents = []
-        for i in range(0, feed_pixel_values.shape[0], self.vae_encode_bsz):
-            latents.append(
-                self.vae.encode(feed_pixel_values[i : i + self.vae_encode_bsz]).latent_dist.sample()
-            )
-        latents = torch.cat(latents, dim=0)
-        latents = latents * self.vae.config.scaling_factor
-        return latents
+        
+    def encode_batch(self, batch):
+        self.conditioner.to(self.target_device)
+        return self.conditioner(batch)
 
     @torch.no_grad()
     def decode_first_stage(self, z):
@@ -162,6 +155,10 @@ class StableDiffusionModel(pl.LightningModule):
             "vector": vector.cuda().to(model_dtype),
         }
 
+        height, width = size
+        height = max(64, height - height % 8)  # round to divisible by 8
+        width = max(64, width - width % 8) 
+        size = (height, width)
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
         latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
         latents = latents * scheduler.init_noise_sigma

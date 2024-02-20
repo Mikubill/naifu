@@ -25,10 +25,10 @@ class StableDiffusionModel(pl.LightningModule):
         
         rank_zero_print(f"Loading model from {self.model_path}")
         p = StableDiffusionPipeline
-        if Path(self.model_path).is_dir():
-            self.pipeline = pipeline = p.from_pretrained(self.model_path)
-        else:
+        if Path(self.model_path).is_file():
             self.pipeline = pipeline = p.from_single_file(self.model_path)
+        else:
+            self.pipeline = pipeline = p.from_pretrained(self.model_path)
             
         self.vae, self.unet = pipeline.vae, pipeline.unet
         self.text_encoder, self.tokenizer = (
@@ -55,39 +55,65 @@ class StableDiffusionModel(pl.LightningModule):
             num_train_timesteps=1000,
             clip_sample=False,
         )
-        if advanced.zero_terminal_snr:
+        self.max_token_length = self.config.dataset.get("max_token_length", 75) + 2
+        self.batch_size = self.config.trainer.batch_size
+        self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
+        if self.vae_encode_bsz < 0:
+            self.vae_encode_bsz = self.batch_size
+        
+        if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
+        
+    def encode_pixels(self, inputs):
+        feed_pixel_values = inputs
+        latents = []
+        for i in range(0, feed_pixel_values.shape[0], self.vae_encode_bsz):
+            with torch.autocast("cuda", enabled=False):
+                lat = self.vae.encode(feed_pixel_values[i : i + self.vae_encode_bsz]).latent_dist.sample()
+            latents.append(lat)
+        latents = torch.cat(latents, dim=0)
+        latents = latents * self.vae.config.scaling_factor
+        return latents
 
     def encode_prompts(self, prompts):            
-        input_ids = self.tokenizer(prompts, padding="do_not_pad", truncation=True, max_length=225).input_ids 
-        input_ids = self.tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+        input_ids = self.tokenizer(
+            prompts, 
+            padding="max_length", 
+            truncation=True, 
+            max_length=self.max_token_length,
+            return_tensors="pt"
+        ).input_ids 
+        tokenizer_max_length = self.tokenizer.model_max_length
+        oids = []
+        for iids in input_ids:
+            z = []
+            for i in range(1, self.max_token_length - tokenizer_max_length + 2, tokenizer_max_length - 2):  # (1, 152, 75)
+                ids_chunk = (
+                    iids[0].unsqueeze(0),
+                    iids[i : i + tokenizer_max_length - 2],
+                    iids[-1].unsqueeze(0),
+                )
+                ids_chunk = torch.cat(ids_chunk)
+                z.append(ids_chunk)
+            oids.append(torch.stack(z))
             
-        z = []
-        if input_ids.shape[1] > 77:
-            # todo: Handle end-of-sentence truncation
-            while max(map(len, input_ids)) != 0:
-                rem_tokens = [x[75:] for x in input_ids]
-                tokens = []
-                for j in range(len(input_ids)):
-                    tokens.append(input_ids[j][:75] if len(input_ids[j]) > 0 else [self.tokenizer.eos_token_id] * 75)
-
-                rebuild = [[self.tokenizer.bos_token_id] + list(x[:75]) + [self.tokenizer.eos_token_id] for x in tokens]
-                if hasattr(torch, "asarray"):
-                    z.append(torch.asarray(rebuild))
-                else:
-                    z.append(torch.IntTensor(rebuild))
-                input_ids = rem_tokens
-        else:
-            z.append(input_ids)
-
-        # Get the text embedding for conditioning
-        encoder_hidden_states = None
-        for tokens in z:
-            state = self.text_encoder(tokens.to(self.device), output_hidden_states=True)
-            state = self.text_encoder.text_model.final_layer_norm(state['hidden_states'][-self.config.trainer.clip_skip])
-            encoder_hidden_states = state if encoder_hidden_states is None else torch.cat((encoder_hidden_states, state), axis=-2)
-
+        oids = torch.stack(oids)
+        bs = oids.size(0)
+        input_ids = oids.reshape((-1, tokenizer_max_length))
+        
+        state = self.text_encoder(input_ids.to(self.device), output_hidden_states=True)
+        enc = state['hidden_states'][-self.config.trainer.clip_skip]
+        if self.config.trainer.clip_skip > 1:
+            encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(enc)
+        
+        encoder_hidden_states = encoder_hidden_states.reshape((bs, -1, encoder_hidden_states.shape[-1]))
+        states_list = [encoder_hidden_states[:, 0].unsqueeze(1)]  # <BOS>
+        for i in range(1, self.max_token_length, tokenizer_max_length):
+            states_list.append(encoder_hidden_states[:, i : i + tokenizer_max_length - 2])  
+            
+        states_list.append(encoder_hidden_states[:, -1].unsqueeze(1))  # <EOS>
+        encoder_hidden_states = torch.cat(states_list, dim=1)
         return encoder_hidden_states
 
     @torch.inference_mode()
@@ -101,6 +127,10 @@ class StableDiffusionModel(pl.LightningModule):
         steps=20,
         guidance_scale=6.5,
     ):
+        height, width = size
+        height = max(64, height - height % 8)  # round to divisible by 8
+        width = max(64, width - width % 8) 
+        size = (height, width)
         self.vae.to(self.target_device)
         scheduler = DDIMScheduler(
             beta_start=0.00085,

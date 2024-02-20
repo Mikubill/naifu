@@ -33,7 +33,7 @@ Choose the appropriate configuration file based on training objectives and envir
 Train SDXL (Stable Diffusion XL) model
 ```bash
 # stabilityai/stable-diffusion-xl-base-1.0
-python trainer.py config/train.yaml
+python trainer.py config/train_sdxl.yaml
 ```
 
 Train SDXL refiner (Stable Diffusion XL refiner) model
@@ -75,8 +75,8 @@ Paper: Diffusion Model Alignment Using Direct Preference Optimization ([arxiv:23
 # dataset: yuvalkirstain/pickapic_v2
 # Be careful tuning the resolution and dpo_betas!
 # will save in diffusers format
-python trainer.py config/train_dpo_hfdataset.yaml # diffusers backend
-python trainer.py config/train_dpo_sgm.yaml # sgm backend
+python trainer.py config/train_dpo_diffusers.yaml # diffusers backend
+python trainer.py config/train_dpo.yaml # sgm backend
 ```
 
 Train Pixart-Alpha model  
@@ -90,6 +90,12 @@ Train SDXL-LCM model
 Paper: Latent Consistency Models: Synthesizing High-Resolution Images with Few-Step Inference ([arxiv:2310.04378](https://arxiv.org/abs/2310.04378))
 ```bash
 python trainer.py config/train_lcm.yaml
+```
+
+Train StableCascade model ([Sai](https://github.com/Stability-AI/StableCascade/))
+```bash
+# currently only stage_c (w/ or w/o text encoder)
+python trainer.py config/train_cascade_stage_c.yaml
 ```
 
 ## Preparing Datasets

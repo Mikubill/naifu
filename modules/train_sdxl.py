@@ -64,11 +64,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
-class SupervisedFineTune(StableDiffusionModel):
-    def encode_batch(self, batch):
-        self.conditioner.to(self.target_device)
-        return self.conditioner(batch)
-    
+class SupervisedFineTune(StableDiffusionModel):    
     def forward(self, batch):
         advanced = self.config.get("advanced", {})
         if not batch["is_latent"]:

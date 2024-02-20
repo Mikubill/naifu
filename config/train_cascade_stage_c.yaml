@@ -1,8 +1,17 @@
 name: test-run
-target: modules.train.setup
+target: modules.train_cascade_stage_c.setup
+adaptive_loss_weight: True
+clip_text_model_name: "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
+
+model_path: 
+  # stage_a: /notebooks/sc/stage_a.safetensors
+  # stage_b: /notebooks/sc/stage_b_bf16.safetensors
+  stage_c: /notebooks/sc/stage_c_bf16.safetensors
+  previewer: /notebooks/sc/previewer.safetensors
+  effnet: /notebooks/sc/effnet_encoder.safetensors
 
 trainer:
-  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
+  model_path: ${model_path}
   batch_size: 4
   resolution: 1024
   seed: 1138
@@ -22,27 +31,17 @@ trainer:
   max_steps: -1
 
 advanced:
-  vae_encode_batch_size: -1 # same as batch_size
-  train_text_encoder_1: false
-  train_text_encoder_2: false
-  text_encoder_1_lr: 3e-6
-  text_encoder_2_lr: 3e-6
-  offset_noise: true
-  offset_noise_val: 0.0375
-  min_snr: false
-  min_snr_val: 5
-  timestep_start: 0
-  timestep_end: 1000
-  v_parameterization: false
-  zero_terminal_snr: false
+  vae_encode_batch_size: 4 # same as batch_size
+  train_text_encoder: false
+  text_encoder_lr: 3e-6
   
 lightning:
   accelerator: gpu
   devices: -1
-  precision: 16-mixed
+  precision: bf16-mixed
 
 dataset:
-  img_path: "/notebooks/BA_latents"
+  img_path: "/notebooks/BA"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:
@@ -54,11 +53,11 @@ optimizer:
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 0
+    num_warmup_steps: 20
     last_epoch: -1
 
 sampling:
-  enabled: false
+  enabled: true
   use_wandb: true
   seed: 1234
   height: 1280

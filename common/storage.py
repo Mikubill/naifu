@@ -157,8 +157,9 @@ class StoreBase(Dataset):
         original_sizes = []
         cropped_sizes = []
         extras = []
-
+        
         for e, i in zip(entries, indices):
+            e = self.process_batch(e)
             e, dh, dw = self.crop(e, i)
             pixels.append(e.pixel)
             original_size = torch.asarray(e.original_size)
@@ -175,7 +176,7 @@ class StoreBase(Dataset):
             cropped_pos = torch.asarray(cropped_pos)
             crop_pos.append(cropped_pos)
             prompts.append(e.prompt)
-            extras.append(self.process_batch_extras(e.extras))
+            extras.append(e.extras)
             
         is_latent = entries[0].is_latent
         shape = entries[0].pixel.shape
@@ -208,7 +209,7 @@ class StoreBase(Dataset):
     def get_batch_extras(self, path):
         return None
     
-    def process_batch_extras(self, inputs):
+    def process_batch(self, inputs):
         return inputs
 
     def _get_entry(self, index) -> Entry:
@@ -263,6 +264,7 @@ class LatentStore(StoreBase):
         
         self.keys = list(self.h5_keymap.keys())
         self.length = len(self.keys)
+        self.scale_factor = 0.13025
         rank_zero_debug(f"Loaded {self.length} latent codes from {self.root_path}")
         
         self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
@@ -284,7 +286,7 @@ class LatentStore(StoreBase):
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
         scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
         dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
-        latent = latent * 0.13025 if not scaled else latent
+        latent = latent * self.scale_factor if not scaled else latent
         
         extras = self.get_batch_extras(self.paths[index])
         return True, latent, prompt, original_size, dhdw, extras
@@ -296,6 +298,7 @@ class DirectoryImageStore(StoreBase):
         label_ext = self.kwargs.get("label_ext", ".txt")
         self.paths = list(dirwalk(self.root_path, is_img))
         self.length = len(self.paths)
+        self.transforms = IMAGE_TRANSFORMS
         rank_zero_debug(f"Found {self.length} images in {self.root_path}")
 
         remove_paths = []
@@ -354,7 +357,7 @@ class DirectoryImageStore(StoreBase):
         else:
             img = np.array(_img.convert("RGB"))
             
-        img = IMAGE_TRANSFORMS(img)
+        img = self.transforms(img)
         h, w = img.shape[-2:]
         dhdw = (0, 0)
         extras = self.get_batch_extras(p)

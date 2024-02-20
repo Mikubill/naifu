@@ -8,6 +8,7 @@ from diffusers import StableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 from modules.sdxl_utils import get_hidden_states_sdxl
+from modules.utils import apply_zero_terminal_snr, cache_snr_values
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -25,11 +26,11 @@ class StableDiffusionModel(pl.LightningModule):
         
         rank_zero_print(f"Loading model from {self.model_path}")
         p = StableDiffusionXLPipeline
-        if Path(self.model_path).is_dir():
-            self.pipeline = pipeline = p.from_pretrained(self.model_path)
-        else:
+        if Path(self.model_path).is_file():
             self.pipeline = pipeline = p.from_single_file(self.model_path)
-            
+        else:
+            self.pipeline = pipeline = p.from_pretrained(self.model_path)
+          
         self.vae, self.unet = pipeline.vae, pipeline.unet
         self.text_encoder_1, self.text_encoder_2, self.tokenizer_1, self.tokenizer_2 = (
             pipeline.text_encoder,
@@ -66,7 +67,11 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
         if self.vae_encode_bsz < 0:
             self.vae_encode_bsz = self.batch_size
-            
+        
+        if advanced.get("zero_terminal_snr", False):
+            apply_zero_terminal_snr(self.noise_scheduler)
+        cache_snr_values(self.noise_scheduler, self.target_device)
+             
     def encode_pixels(self, inputs):
         feed_pixel_values = inputs
         latents = []
