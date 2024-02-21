@@ -2,7 +2,7 @@ import torch
 import os
 import json
 import lightning as pl
-from common.utils import apply_snr_weight
+
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
 from common.dataset import AspectRatioDataset, worker_init_fn
@@ -10,6 +10,7 @@ from modules.sdxl_model import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
 from models.sgm import GeneralConditioner
+from modules.scheduler_utils import apply_snr_weight
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
 from common.utils import rank_zero_print, EmptyInitWrapper
     
