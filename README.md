@@ -34,6 +34,9 @@ Train SDXL (Stable Diffusion XL) model
 ```bash
 # stabilityai/stable-diffusion-xl-base-1.0
 python trainer.py config/train_sdxl.yaml
+
+# use original sgm denoiser and loss weighting
+python trainer.py config/train_sdxl_original.yaml
 ```
 
 Train SDXL refiner (Stable Diffusion XL refiner) model

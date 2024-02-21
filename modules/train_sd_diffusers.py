@@ -4,7 +4,7 @@ import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
 from common.dataset import AspectRatioDataset, worker_init_fn
-from modules.utils import apply_snr_weight
+from modules.scheduler_utils import apply_snr_weight
 from modules.sd_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
 

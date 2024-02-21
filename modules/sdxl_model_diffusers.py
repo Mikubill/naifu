@@ -8,7 +8,7 @@ from diffusers import StableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 from modules.sdxl_utils import get_hidden_states_sdxl
-from modules.utils import apply_zero_terminal_snr, cache_snr_values
+from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):

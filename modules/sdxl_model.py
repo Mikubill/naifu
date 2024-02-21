@@ -8,7 +8,7 @@ import torch
 
 from models.sgm import GeneralConditioner
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
-from modules.utils import apply_zero_terminal_snr, cache_snr_values   
+from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values   
 from common.utils import load_torch_file, rank_zero_print, EmptyInitWrapper
 
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
