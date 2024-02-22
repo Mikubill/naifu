@@ -305,6 +305,7 @@ def main():
         **config.lightning
     )
     fabric.launch()
+    fabric.barrier()
     fabric.seed_everything(config.trainer.seed)
     Trainer(fabric, config).train()
 
