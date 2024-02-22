@@ -267,14 +267,17 @@ class LossRecorder:
         return self.loss_total / len(self.loss_list)
 
 
-def main():
+def main():   
     parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--config', type=str)
-    group.add_argument('config', nargs='?', type=str)
+    parser.add_argument('--config', type=str)
     parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
-    
+    first_args = sys.argv[1]
+    if first_args.startswith("--"):
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(sys.argv[2:])
+        args.config = first_args
+        
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
     plugins = []
