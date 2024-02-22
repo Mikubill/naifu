@@ -4,10 +4,10 @@ import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import load_torch_file, get_class, EmptyInitWrapper, rank_zero_print
 from common.dataset import AspectRatioDataset, worker_init_fn
-from modules.train import SupervisedFineTune
+from modules.train_sdxl import SupervisedFineTune
 from modules.sdxl_utils import get_hidden_states_sdxl, convert_sdxl_text_encoder_2_checkpoint
 from modules.sdxl_utils import get_size_embeddings
-from modules.utils import apply_zero_terminal_snr, cache_snr_values
+from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from safetensors.torch import save_file
 

@@ -90,8 +90,7 @@ def setup_smddp(config):
     env.global_rank = lambda: int(os.environ["RANK"])
     strategy = DDPShardedStrategy(
         cluster_environment=env,
-        accelerator="gpu",
-        static_graph=True,
+        accelerator="gpu"
     )
 
     world_size = int(os.environ["WORLD_SIZE"])

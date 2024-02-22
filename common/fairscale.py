@@ -26,15 +26,8 @@ from lightning.fabric.plugins import CheckpointIO, ClusterEnvironment, Precision
 from lightning.fabric.plugins.collectives.torch_collective import default_pg_timeout
 from lightning.fabric.strategies.ddp import DDPStrategy
 from lightning.fabric.strategies.strategy import _BackwardSyncControl
-from lightning.fabric.utilities.imports import _IS_WINDOWS
-
-_FAIRSCALE_AVAILABLE = not _IS_WINDOWS and module_available("fairscale.nn")
-
-if _FAIRSCALE_AVAILABLE:
-    from fairscale.nn.data_parallel.sharded_ddp import ShardedDataParallel
-    from fairscale.optim import OSS
-else:
-    OSS = ShardedDataParallel = object
+from fairscale.nn.data_parallel.sharded_ddp import ShardedDataParallel
+from fairscale.optim import OSS
 
 
 class DDPShardedStrategy(DDPStrategy):

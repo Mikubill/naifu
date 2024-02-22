@@ -19,8 +19,8 @@ sagemaker_launch.ipynb
 *.json
 *.safetensors
 *special.yaml
-setup.py
 build
 *egg-info
 dist
 sagemaker*
+.ipynb_checkpoints
