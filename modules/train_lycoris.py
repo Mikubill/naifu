@@ -121,7 +121,12 @@ class StableDiffusionModel(SupervisedFineTune):
             num_train_timesteps=1000,
             clip_sample=False,
         )
-        if advanced.zero_terminal_snr:
+        self.batch_size = self.config.trainer.batch_size
+        self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
+        if self.vae_encode_bsz < 0:
+            self.vae_encode_bsz = self.batch_size
+            
+        if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
         self.init_lycoris()
