@@ -198,5 +198,5 @@ class StableDiffusionModel(SupervisedFineTune):
             save_file(state_dict, model_path, metadata={"trainer_config": string_cfg})
         else:
             model_path += ".ckpt"
-            torch.save(model_path, {"state_dict": self.model.state_dict()})
+            torch.save(model_path, {"state_dict": state_dict})
         rank_zero_print(f"Saved model to {model_path}")
