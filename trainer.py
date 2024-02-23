@@ -286,7 +286,7 @@ def main():
     if "." in strategy:
         strategy = get_class(strategy)
 
-    if os.environ.get("SM_TRAINING", False):
+    if os.environ.get("SM_TRAINING", False) or os.environ.get("SM_HOSTS", False):
         strategy, config = setup_smddp(config)
 
     target_precision = config.lightning.precision
