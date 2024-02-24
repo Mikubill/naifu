@@ -2,7 +2,7 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import load_torch_file, get_class, EmptyInitWrapper, rank_zero_print
+from common.utils import load_torch_file, get_class, EmptyInitWrapper, rank_zero_print, rank_zero_only
 from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.train_sdxl import SupervisedFineTune
 from modules.sdxl_utils import get_hidden_states_sdxl, convert_sdxl_text_encoder_2_checkpoint
@@ -172,7 +172,8 @@ class StableDiffusionModel(SupervisedFineTune):
             "vector": torch.cat([pooled, emb], dim=1),
         }
         return cond
-        
+       
+    @rank_zero_only 
     def save_checkpoint(self, model_path):
         cfg = self.config.trainer
         string_cfg = OmegaConf.to_yaml(self.config)

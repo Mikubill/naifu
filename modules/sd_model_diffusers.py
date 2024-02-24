@@ -7,7 +7,8 @@ from common.utils import rank_zero_print
 from diffusers import StableDiffusionPipeline
 from diffusers import DDIMScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
-from modules.utils import apply_zero_terminal_snr, cache_snr_values
+from tqdm import tqdm
+from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -116,8 +117,23 @@ class StableDiffusionModel(pl.LightningModule):
         encoder_hidden_states = torch.cat(states_list, dim=1)
         return encoder_hidden_states
 
-    @torch.inference_mode()
     @rank_zero_only
+    def sample_images(self, logger, current_epoch, global_step):
+        config = self.config.sampling
+        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        prompts = list(config.prompts)
+        images = []
+        size = (config.get("height", 1024), config.get("width", 1024))
+
+        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False):
+            image = self.sample(prompt, size=size, generator=generator)
+            image[0].save(Path(config.save_dir) / f"sample_e{current_epoch}_s{global_step}_{idx}.png")
+            images.extend(image)
+
+        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
+            logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
+            
+    @torch.inference_mode()
     def sample(
         self,
         prompt,
@@ -157,6 +173,7 @@ class StableDiffusionModel(pl.LightningModule):
         )[0]
         return image
 
+    @rank_zero_only
     def save_checkpoint(self, model_path):
         self.pipeline.save_pretrained(model_path)
         rank_zero_print(f"Saved model to {model_path}")

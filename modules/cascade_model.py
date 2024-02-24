@@ -165,8 +165,23 @@ class StableCascadeModel(pl.LightningModule):
         pooled_states = pooled_states[::group_size]
         return encoder_hidden_states, pooled_states
 
-    @torch.inference_mode()
     @rank_zero_only
+    def sample_images(self, logger, current_epoch, global_step):
+        config = self.config.sampling
+        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        prompts = list(config.prompts)
+        images = []
+        size = (config.get("height", 1024), config.get("width", 1024))
+
+        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False):
+            image = self.sample(prompt, size=size, generator=generator)
+            image[0].save(Path(config.save_dir) / f"sample_e{current_epoch}_s{global_step}_{idx}.png")
+            images.extend(image)
+
+        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
+            logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
+            
+    @torch.inference_mode()
     def sample(
         self,
         prompt,
@@ -219,7 +234,8 @@ class StableCascadeModel(pl.LightningModule):
         image = torch.clamp(previewer(sampled_c)[0], 0, 1).cpu().numpy().transpose(1, 2, 0)
         image = Image.fromarray((image * 255).astype(np.uint8))
         return [image]
-        
+    
+    @rank_zero_only
     def save_checkpoint(self, model_path):
         cfg = self.config.trainer
         string_cfg = OmegaConf.to_yaml(self.config)

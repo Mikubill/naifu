@@ -4,12 +4,14 @@ import lightning as pl
 
 from omegaconf import OmegaConf
 from PIL import Image
+from pathlib import Path
+from tqdm import tqdm
 from safetensors.torch import save_file
 from transformers import T5EncoderModel, T5Tokenizer
 from diffusers import AutoencoderKL, DPMSolverMultistepScheduler
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
-from common.utils import load_torch_file, rank_zero_print, get_class
+from common.utils import load_torch_file, rank_zero_print, get_class, rank_zero_only
 from common.dataset import AspectRatioDataset, worker_init_fn
 
 from models.pixart.dit import DiT_XL_2, get_model_kwargs
@@ -171,6 +173,22 @@ class DiffusionModel(pl.LightningModule):
             raise FloatingPointError("Error infinite or NaN loss detected")
         
         return loss
+    
+    @rank_zero_only
+    def sample_images(self, logger, current_epoch, global_step):
+        config = self.config.sampling
+        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        prompts = list(config.prompts)
+        images = []
+        size = (config.get("height", 1024), config.get("width", 1024))
+
+        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False):
+            image = self.sample(prompt, size=size, generator=generator)
+            image[0].save(Path(config.save_dir) / f"sample_e{current_epoch}_s{global_step}_{idx}.png")
+            images.extend(image)
+
+        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
+            logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
 
     @torch.no_grad()
     def sample(
@@ -222,7 +240,8 @@ class DiffusionModel(pl.LightningModule):
         
         self.model.train()
         return image
-    
+
+    @rank_zero_only
     def save_checkpoint(self, model_path):
         cfg = self.config.trainer
         string_cfg = OmegaConf.to_yaml(self.config)

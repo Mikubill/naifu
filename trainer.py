@@ -1,6 +1,6 @@
 # python trainer.py --model_path=/tmp/model --config config/test.yaml
-import copy
-import os, sys
+import os
+import sys
 
 # Hide welcome message from bitsandbytes
 os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
@@ -14,7 +14,6 @@ from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.utilities import rank_zero_only
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -38,24 +37,21 @@ class Trainer:
         if fabric.logger and fabric.logger.__class__.__name__ != "CSVLogger":
             config = OmegaConf.to_container(self.model.config, resolve=True)
             fabric.logger.log_hyperparams(config)
-            
-    def on_post_training_batch(self, global_step, current_epoch, state):
-        config = self.model.config
-        fabric = self.fabric
 
-        if fabric.logger:
-            self.log_lr_values(global_step, fabric)
+    def on_post_training_batch(self, global_step, current_epoch, state):
+        if self.fabric.logger:
+            self.log_lr_values(global_step)
 
         self.perform_sampling(global_step, current_epoch)
         self.save_model(global_step, current_epoch, state)
 
-    def log_lr_values(self, global_step, fabric):
+    def log_lr_values(self, global_step):
         optimizer_name = self.model.config.optimizer.name
         last_lr = [group.get("lr", 0) for group in self.optimizer.param_groups]
         ocls = self.optimizer.__class__.__name__
 
         for i, lr in enumerate(last_lr):
-            fabric.log(f"lr-{ocls}-{i}", lr, step=global_step)
+            self.fabric.log(f"lr-{ocls}-{i}", lr, step=global_step)
 
         is_da = optimizer_name.startswith("DAdapt")
         is_prodigy = optimizer_name.startswith("prodigyopt")
@@ -64,83 +60,60 @@ class Trainer:
 
         last_d_lr = [(g["d"] * g["lr"]) for g in self.optimizer.param_groups]
         for i, lr in enumerate(last_d_lr):
-            fabric.log(f"d*lr-{ocls}-{i}", lr, step=global_step)
+            self.fabric.log(f"d*lr-{ocls}-{i}", lr, step=global_step)
 
     def save_model(self, global_step, current_epoch, state, is_last=False):
         config = self.model.config
         cfg = config.trainer
-        fabric = self.fabric
         ckpt_st = cfg.checkpoint_steps
         ckpt_fq = cfg.checkpoint_freq
         ckpt_dir = cfg.checkpoint_dir
-
+        
         is_ckpt_step = ckpt_st > 0 and global_step % ckpt_st == 0
         is_ckpt_epoch = ckpt_fq > 0 and current_epoch % ckpt_fq == 0
-        to_save = (is_last and is_ckpt_epoch) or is_ckpt_step
-
-        if not (fabric.is_global_zero and to_save):
+        should_save = (is_last and is_ckpt_epoch) or is_ckpt_step
+        if not should_save:
             return
 
-        model_path = os.path.join(ckpt_dir, f"nd-checkpoint-e{current_epoch:02d}")
-        if is_ckpt_step:
-            model_path = os.path.join(ckpt_dir, f"nd-checkpoint-s{global_step:02d}")
-            
-        self.model.save_checkpoint(model_path)
+        postfix = f"e{current_epoch}_s{global_step}"
+        model_path = os.path.join(ckpt_dir, f"checkpoint-{postfix}")
+        use_fabric_save = (
+            cfg.get("save_weights_only") is False
+            or cfg.get("use_fabric_save", False) is True
+        )
+        if use_fabric_save:
+            self.fabric.save(model_path + ".ckpt", state)
+        else:
+            self.fabric.call("save_checkpoint", model_path)
 
     def perform_sampling(self, global_step, current_epoch, is_last=False):
         config = self.model.config
         enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled
-        if not enabled_sampling:
-            return
-
+        
         sampling_cfg = config.sampling
         sampling_steps = sampling_cfg.every_n_steps
         sample_by_step = sampling_steps > 0 and global_step % sampling_steps == 0
         sampling_epochs = sampling_cfg.every_n_epochs
         sample_by_epoch = sampling_epochs > 0 and current_epoch % sampling_epochs == 0
 
-        if (is_last and sample_by_epoch) or sample_by_step:
-            self.sampler(
-                logger=self.fabric.logger, 
-                config=sampling_cfg, 
-                model=self.model, 
-                current_epoch=current_epoch, 
-                global_step=global_step
-            )
-
-    @rank_zero_only
-    def sampler(self, logger, config, model, current_epoch, global_step):
-        if not any(config.prompts):
+        if not enabled_sampling or len(sampling_cfg.prompts) == 0:
             return
 
-        rng_state = torch.get_rng_state()
-        cuda_rng_state = torch.cuda.get_rng_state()
+        if (is_last and sample_by_epoch) or sample_by_step:
+            rng_state = torch.get_rng_state()
+            cuda_rng_state = torch.cuda.get_rng_state()
+            os.makedirs(sampling_cfg.save_dir, exist_ok=True)
 
-        save_dir = Path(config.save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        generator = torch.Generator(device="cpu").manual_seed(config.seed)
-        prompts = list(config.prompts)
-        prompt_to_gen = copy.deepcopy(prompts)
-        images = []
-        height, width = config.get("height", 1024), config.get("width", 1024)
-        size = (height, width)
-        for prompt in zip(prompt_to_gen):
-            images.extend(model.sample(prompt, size=size, generator=generator))
-
-        for j, image in enumerate(images):
-            image.save(save_dir / f"nd_sample_e{current_epoch}_s{global_step}_{j}.png")
-
-        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
-            logger.log_image(
-                key="samples", 
-                images=images, 
-                caption=prompts, 
-                step=global_step
+            self.fabric.call(
+                "sample_images",
+                logger=self.fabric.logger,
+                current_epoch=current_epoch,
+                global_step=global_step,
             )
 
-        torch.cuda.empty_cache()
-        torch.set_rng_state(rng_state)
-        torch.cuda.set_rng_state(cuda_rng_state)
+            torch.cuda.empty_cache()
+            torch.set_rng_state(rng_state)
+            torch.cuda.set_rng_state(cuda_rng_state)
 
     def train(self):
         config = self.model.config
@@ -153,11 +126,8 @@ class Trainer:
         current_epoch = 0
         should_stop = False
 
-        state = {"state_dict": self.model}
+        state = {"state_dict": self.model, "optimizer": self.optimizer}
         os.makedirs(cfg.checkpoint_dir, exist_ok=True)
-        
-        if not cfg.get("save_weights_only", False):
-            state.update({"optimizer": self.optimizer})
 
         if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
             latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
@@ -235,8 +205,8 @@ class Trainer:
             state.update(global_step=global_step, current_epoch=current_epoch)
             self.perform_sampling(global_step, current_epoch, is_last=True)
             self.save_model(global_step, current_epoch, state, is_last=True)
-            
-            
+
+
 class NonAutocastMixedPrecision(pl.fabric.plugins.precision.amp.MixedPrecision):
     """Mixed precision training without automatic casting inputs and outputs."""
 
@@ -267,9 +237,9 @@ class LossRecorder:
         return self.loss_total / len(self.loss_list)
 
 
-def main():   
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str)
+    parser.add_argument("--config", type=str)
     parser.add_argument("--resume", action="store_true")
     first_args = sys.argv[1]
     if first_args.startswith("--"):
@@ -277,14 +247,17 @@ def main():
     else:
         args = parser.parse_args(sys.argv[2:])
         args.config = first_args
-        
+
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
     plugins = []
-    
+
     strategy = config.lightning.get("strategy", "auto")
     if "." in strategy:
         strategy = get_class(strategy)
+        
+    if 'strategy' in config.lightning:
+        del config.lightning.strategy
 
     if os.environ.get("SM_TRAINING", False) or os.environ.get("SM_HOSTS", False):
         strategy, config = setup_smddp(config)
@@ -297,7 +270,7 @@ def main():
     loggers = pl.fabric.loggers.CSVLogger(".")
     if config.trainer.wandb_id != "":
         loggers = WandbLogger(project=config.trainer.wandb_id)
-        
+
     fabric = pl.Fabric(
         loggers=[loggers], 
         plugins=plugins, 

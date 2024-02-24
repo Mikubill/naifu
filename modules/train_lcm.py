@@ -4,7 +4,7 @@ import os
 import lightning as pl
 import numpy as np
 from omegaconf import OmegaConf
-from common.utils import rank_zero_print, get_class
+from common.utils import rank_zero_print, get_class, rank_zero_only
 from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -326,6 +326,7 @@ class SupervisedFineTune(StableDiffusionModel):
 
         return loss
 
+    @rank_zero_only
     def save_checkpoint(self, model_path):
         lcm_scheduler = LCMScheduler.from_pretrained(
             "SimianLuo/LCM_Dreamshaper_v7", subfolder="scheduler"
