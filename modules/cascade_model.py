@@ -255,8 +255,8 @@ class StableCascadeModel(pl.LightningModule):
         else:
             model_path += ".ckpt"
             torch.save(
-                model_path,
                 {"state_dict": self.stage_c.state_dict(), "trainer_config": string_cfg},
+                model_path,
             )
         rank_zero_print(f"Saved model to {model_path}")
 

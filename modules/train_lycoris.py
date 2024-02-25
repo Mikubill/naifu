@@ -186,10 +186,10 @@ class StableDiffusionModel(SupervisedFineTune):
             for k, v in module_state_dict.items():
                 k = k.replace("module.", "")
                 if key == "unet":
-                    k = k.replace("lycoris_diffusion_model_", "lycoris_unet_")
+                    k = k.replace("lycoris_diffusion_model_", "lora_unet_")
                 elif key in ["te1", "te2"]:
                     k = k.replace("lycoris_", "")
-                    k = f"lycoris_{key}_{k}"
+                    k = f"lora_{key}_{k}"
                 new_state_dict[k] = v
                 
             state_dict.update(new_state_dict)
@@ -199,5 +199,5 @@ class StableDiffusionModel(SupervisedFineTune):
             save_file(state_dict, model_path, metadata={"trainer_config": string_cfg})
         else:
             model_path += ".ckpt"
-            torch.save(model_path, {"state_dict": state_dict})
+            torch.save(state_dict, model_path)
         rank_zero_print(f"Saved model to {model_path}")
