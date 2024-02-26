@@ -215,7 +215,7 @@ class StableDiffusionModel(pl.LightningModule):
         if cfg.get("save_format") == "safetensors":
 
             model_path += ".safetensors"
-            state_dict = self.model.state_dict()
+            state_dict = self.state_dict()
             # check if any keys startswith modules. if so, remove the modules. prefix
             if any([key.startswith("module.") for key in state_dict.keys()]):
                 state_dict = {
@@ -226,7 +226,7 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             model_path += ".ckpt"
             torch.save(
-                {"state_dict": self.model.state_dict(), "trainer_config": string_cfg},
+                {"state_dict": self.state_dict(), "trainer_config": string_cfg},
                 model_path,
             )
         rank_zero_print(f"Saved model to {model_path}")
