@@ -135,8 +135,12 @@ class StableDiffusionModel(SupervisedFineTune):
         cfg = self.config 
         default_cfg = cfg.lycoris    
         lycoris_mapping = {}
-        LycorisNetwork.apply_preset({"target_name": ".*diffusion_model.*"})
-        self.lycoris_unet = create_lycoris(self.model, **cfg.get("lycoris_unet", default_cfg))
+        self.model.requires_grad_(False)
+        self.text_encoder_1.requires_grad_(False)
+        self.text_encoder_2.requires_grad_(False)
+        
+        LycorisNetwork.apply_preset({"target_name": ".*"})
+        self.lycoris_unet = create_lycoris(self.model.diffusion_model, **cfg.get("lycoris_unet", default_cfg))
         self.lycoris_unet.to(self.target_device).apply_to()
         lycoris_mapping["unet"] = self.lycoris_unet
                 
@@ -149,7 +153,6 @@ class StableDiffusionModel(SupervisedFineTune):
         self.lycoris_te2 = create_lycoris(self.text_encoder_2, **cfg.get("lycoris_te2", default_cfg))
         self.lycoris_te2.to(self.target_device).apply_to()
         lycoris_mapping["te2"] = self.lycoris_te2
-        
         self.lycoris_mapping = lycoris_mapping
         
     def encode_batch(self, batch):
@@ -185,11 +188,8 @@ class StableDiffusionModel(SupervisedFineTune):
             new_state_dict = {}
             for k, v in module_state_dict.items():
                 k = k.replace("module.", "")
-                if key == "unet":
-                    k = k.replace("lycoris_diffusion_model_", "lora_unet_")
-                elif key in ["te1", "te2"]:
-                    k = k.replace("lycoris_", "")
-                    k = f"lora_{key}_{k}"
+                k = k.replace("lycoris_", "")
+                k = f"lora_{key}_{k}"
                 new_state_dict[k] = v
                 
             state_dict.update(new_state_dict)

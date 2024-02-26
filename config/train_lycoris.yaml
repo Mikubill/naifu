@@ -2,7 +2,7 @@ name: test-run
 target: modules.train_lycoris.setup
 
 trainer:
-  model_path: sd_xl_base_1.0_0.9vae.safetensors
+  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
   resolution: 1024
   seed: 1138
@@ -25,6 +25,8 @@ lycoris:
   linear_dim: 32
   linear_alpha: 16
   algo: lokr
+  # factor: -1
+  # preset: full
   multiplier: 1.0
 
 advanced:
