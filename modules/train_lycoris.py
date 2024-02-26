@@ -134,26 +134,29 @@ class StableDiffusionModel(SupervisedFineTune):
     def init_lycoris(self):
         cfg = self.config 
         default_cfg = cfg.lycoris    
-        lycoris_mapping = {}
+        self.lycoris_mapping = lycoris_mapping = {}
         self.model.requires_grad_(False)
         self.text_encoder_1.requires_grad_(False)
         self.text_encoder_2.requires_grad_(False)
+        LycorisNetwork.apply_preset({"target_name": ".*"})
         
-        LycorisNetwork.apply_preset({"target_name": ".*"})
         self.lycoris_unet = create_lycoris(self.model.diffusion_model, **cfg.get("lycoris_unet", default_cfg))
-        self.lycoris_unet.to(self.target_device).apply_to()
-        lycoris_mapping["unet"] = self.lycoris_unet
-                
-        LycorisNetwork.apply_preset({"target_name": ".*"})
         self.lycoris_te1 = create_lycoris(self.text_encoder_1, **cfg.get("lycoris_te1", default_cfg))
-        self.lycoris_te1.to(self.target_device).apply_to()
-        lycoris_mapping["te1"] = self.lycoris_te1
-
-        LycorisNetwork.apply_preset({"target_name": ".*"})
         self.lycoris_te2 = create_lycoris(self.text_encoder_2, **cfg.get("lycoris_te2", default_cfg))
-        self.lycoris_te2.to(self.target_device).apply_to()
+        lycoris_mapping["unet"] = self.lycoris_unet
+        lycoris_mapping["te1"] = self.lycoris_te1
         lycoris_mapping["te2"] = self.lycoris_te2
-        self.lycoris_mapping = lycoris_mapping
+        
+        self.lycoris_unet.to(self.target_device).apply_to()
+        self.lycoris_unet.requires_grad_(True)
+        
+        if not self.config.advanced.get("train_text_encoder_1"):
+            self.lycoris_te1.to(self.target_device).apply_to()
+            self.lycoris_te1.requires_grad_(True)
+            
+        if not self.config.advanced.get("train_text_encoder_2"):
+            self.lycoris_te2.to(self.target_device).apply_to()
+            self.lycoris_te2.requires_grad_(True)
         
     def encode_batch(self, batch):
         hidden1, hidden2, pooled = get_hidden_states_sdxl(
