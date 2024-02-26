@@ -235,6 +235,11 @@ class StableCascadeModel(pl.LightningModule):
         image = Image.fromarray((image * 255).astype(np.uint8))
         return [image]
     
+    def load_checkpoint(self, model_path):
+        sd = load_torch_file(model_path, self.target_device)
+        self.stage_c.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
+        rank_zero_print(f"Loaded model from {model_path}")
+    
     @rank_zero_only
     def save_checkpoint(self, model_path):
         cfg = self.config.trainer

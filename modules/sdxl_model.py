@@ -207,6 +207,11 @@ class StableDiffusionModel(pl.LightningModule):
 
         self.model.train()
         return image
+    
+    def load_checkpoint(self, model_path):
+        sd = load_torch_file(model_path, self.target_device)
+        self.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
+        rank_zero_print(f"Loaded model from {model_path}")
 
     @rank_zero_only
     def save_checkpoint(self, model_path):

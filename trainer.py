@@ -118,7 +118,7 @@ class Trainer:
     def train(self):
         config = self.model.config
         cfg = config.trainer
-        fabric = self.fabric
+        fabric : pl.Fabric = self.fabric
         grad_accum_steps = cfg.accumulate_grad_batches
         grad_clip_val = cfg.gradient_clip_val
 
@@ -131,9 +131,14 @@ class Trainer:
 
         if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
             latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
-            remainder = self.fabric.load(latest_checkpoint_path, state)
-            global_step = remainder.pop("global_step")
-            current_epoch = remainder.pop("current_epoch")
+            
+            if not cfg.save_weights_only: # use normal fabric save
+                remainder = fabric.load(latest_checkpoint_path, state)
+                global_step = remainder.pop("global_step")
+                current_epoch = remainder.pop("current_epoch")
+            else:
+                fabric.call('load_checkpoint', latest_checkpoint_path)
+                
             rank_zero_print(f"Resuming from checkpoint {latest_checkpoint_path}")
 
         if cfg.max_epochs > 0 and current_epoch >= cfg.max_epochs:

@@ -178,6 +178,21 @@ class StableDiffusionModel(SupervisedFineTune):
             "vector": torch.cat([pooled, emb], dim=1),
         }
         return cond
+    
+    def load_checkpoint(self, model_path):
+        sd = load_torch_file(model_path, self.target_device)
+        te, te2, unet = {}, {}, {}
+        for key in list(sd.keys()):
+            if key.startswith("lora_unet"):
+                unet[key.replace("lora_unet", "lycoris_")] = sd.pop(key)
+            elif key.startswith("lora_te1"):
+                te[key.replace("lora_te1", "lycoris_")] = sd.pop(key)
+            elif key.startswith("lora_te2"):
+                te2[key.replace("lora_te2", "lycoris_")] = sd.pop(key)
+                
+        self.lycoris_te1.load_state_dict(te)
+        self.lycoris_te2.load_state_dict(te2)
+        self.lycoris_unet.load_state_dict(unet)
        
     @rank_zero_only 
     def save_checkpoint(self, model_path):
