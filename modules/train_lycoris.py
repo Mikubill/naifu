@@ -150,11 +150,11 @@ class StableDiffusionModel(SupervisedFineTune):
         self.lycoris_unet.to(self.target_device).apply_to()
         self.lycoris_unet.requires_grad_(True)
         
-        if not self.config.advanced.get("train_text_encoder_1"):
+        if self.config.advanced.get("train_text_encoder_1"):
             self.lycoris_te1.to(self.target_device).apply_to()
             self.lycoris_te1.requires_grad_(True)
             
-        if not self.config.advanced.get("train_text_encoder_2"):
+        if self.config.advanced.get("train_text_encoder_2"):
             self.lycoris_te2.to(self.target_device).apply_to()
             self.lycoris_te2.requires_grad_(True)
         
