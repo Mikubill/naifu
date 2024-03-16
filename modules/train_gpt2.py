@@ -58,6 +58,7 @@ class GPT2Model(pl.LightningModule):
         )
         bsz = config.trainer.batch_size
         train_dataloader = train_dataset.build_dataloader(batch_size=bsz)
+        self.val_dataset = val_dataset
         self.val_dataloader = val_dataset.build_dataloader(batch_size=bsz)
         return train_dataset, train_dataloader
 
@@ -104,7 +105,7 @@ class GPT2Model(pl.LightningModule):
             generated_output = self.model.generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                max_length=20,
+                max_length=self.val_dataset.max_length,
                 pad_token_id=50256,
             )
             generated_text = self.tokenizer.decode(

@@ -26,7 +26,7 @@ class StreamingTextDataset(IterableDataset):
         with open(self.dataset_path, 'r', encoding='utf-8') as file:
             buffer = []
             for line in file:
-                input_ids = self.tokenizer.encode(line.strip())
+                input_ids = self.tokenizer.encode(line.strip())[:self.max_length - 1]
                 input_ids.append(self.eot_token_id)  # Ensure the end token is added
                 
                 input_ids = torch.tensor(input_ids, dtype=torch.long)
