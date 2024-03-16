@@ -29,7 +29,8 @@ dataset:
   name: data.text_dataset.StreamingTextDataset
   train_dataset_path: /notebooks/prompts_0.txt
   val_dataset_path: /notebooks/prompts_0.txt
-  max_length: 32
+  max_length: 32 
+  block_len: 300
   eot_token_id: 50256
 
 optimizer:

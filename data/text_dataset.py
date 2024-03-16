@@ -11,6 +11,7 @@ class StreamingTextDataset(IterableDataset):
         tokenizer: str,
         batch_size: int = 16, 
         max_length = 32,
+        block_len = 300,
         eot_token_id = 50256, # gpt2
         rank: int = 0,
         **kwargs
@@ -21,14 +22,14 @@ class StreamingTextDataset(IterableDataset):
         self.max_length = max_length
         self.eot_token_id = eot_token_id
         self.batch_size = batch_size
-            
+        self.block_len = block_len
 
     def __iter__(self):
         with open(self.dataset_path, 'r', encoding='utf-8') as file:
             buffer = []
             for line in file:
                 input_ids = self.tokenizer.encode(line.strip())
-                input_ids = input_ids[:self.max_length-1] if self.max_length > 0 else input_ids
+                input_ids = input_ids[:self.block_len-1] if self.block_len > 0 else input_ids
                 input_ids.append(self.eot_token_id)  # Ensure the end token is added
                 
                 input_ids = torch.tensor(input_ids, dtype=torch.long)

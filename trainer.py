@@ -205,8 +205,9 @@ class Trainer:
                 self.current_epoch = remainder.pop("self.current_epoch")
             else:
                 fabric.call("load_checkpoint", latest_checkpoint_path)
-                ckpt_stem = Path(latest_checkpoint_path).stem
-                opt_path = Path(ckpt_stem + "_optimizer.pt")
+                ckpt_path = Path(latest_checkpoint_path)
+                parent, ckpt_stem = ckpt_path.parent, ckpt_path.stem
+                opt_path = parent / (ckpt_stem + "_optimizer.pt")
                 if opt_path.is_file():
                     fabric.load(opt_path, {"optimizer": self.optimizer})
 

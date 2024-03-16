@@ -1,10 +1,11 @@
 import gradio as gr
+import torch
 import transformers
 
 # Assuming DEVICE is already defined (e.g., 'cuda' or 'cpu')
 DEVICE = 'cuda'  # or 'cpu' if you are not using CUDA
 
-MODEL_DIR = './trained_model/epoch_6/'
+MODEL_DIR = '/notebooks/naifu/checkopint/checkpoint-e4_s12500'
 
 model = transformers.GPT2LMHeadModel.from_pretrained(MODEL_DIR)
 tokenizer = transformers.AutoTokenizer.from_pretrained(MODEL_DIR)
