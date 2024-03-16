@@ -105,7 +105,7 @@ class GPT2Model(pl.LightningModule):
             generated_output = self.model.generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                max_length=self.val_dataset.max_length,
+                max_length=config.max_length,
                 pad_token_id=50256,
             )
             generated_text = self.tokenizer.decode(

@@ -10,7 +10,6 @@ class StreamingTextDataset(IterableDataset):
         dataset_path: str, 
         tokenizer: str,
         batch_size: int = 16, 
-        max_length = 32,
         block_len = 300,
         eot_token_id = 50256, # gpt2
         rank: int = 0,
@@ -19,7 +18,6 @@ class StreamingTextDataset(IterableDataset):
         self.data = []
         self.dataset_path = dataset_path
         self.tokenizer = tokenizer
-        self.max_length = max_length
         self.eot_token_id = eot_token_id
         self.batch_size = batch_size
         self.block_len = block_len
