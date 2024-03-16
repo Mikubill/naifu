@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, Dataset
 from transformers import AutoTokenizer
 from torch.nn.utils.rnn import pad_sequence
 
@@ -21,10 +21,11 @@ class StreamingTextDataset(IterableDataset):
         self.eot_token_id = eot_token_id
         self.batch_size = batch_size
         self.block_len = block_len
+        with open(self.dataset_path, 'r', encoding='utf-8') as file:
+            self.length = sum(1 for line in file)
 
     def __iter__(self):
         with open(self.dataset_path, 'r', encoding='utf-8') as file:
-            buffer = []
             for line in file:
                 input_ids = self.tokenizer.encode(line.strip())
                 input_ids = input_ids[:self.block_len-1] if self.block_len > 0 else input_ids
@@ -35,9 +36,7 @@ class StreamingTextDataset(IterableDataset):
                 yield {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': input_ids}
         
     def __len__(self):
-        # get line count
-        with open(self.dataset_path, 'r', encoding='utf-8') as file:
-            return sum(1 for line in file)
+        return self.length
                 
     def collate_fn(self, batch):
         input_ids = pad_sequence([x['input_ids'] for x in batch], batch_first=True, padding_value=0)
@@ -47,3 +46,6 @@ class StreamingTextDataset(IterableDataset):
     
     def build_dataloader(self, batch_size: int, shuffle: bool = False):
         return torch.utils.data.DataLoader(self, batch_size=batch_size, shuffle=shuffle, collate_fn=self.collate_fn)
+    
+class ChatMLTextDataset(Dataset):
+    pass

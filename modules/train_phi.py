@@ -23,7 +23,8 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
 
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
-    
+
+    fabric.barrier()
     model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
