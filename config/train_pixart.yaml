@@ -4,7 +4,6 @@ target: modules.train_pixart.setup
 trainer:
   model_path: PixArt-XL-2-1024-MS.pth
   batch_size: 4
-  resolution: 1024
   seed: 1138
   wandb_id: ""
   accumulate_grad_batches: 1
@@ -24,6 +23,10 @@ lightning:
   precision: 16-mixed
 
 dataset:
+  name: data.arb_dataset.AspectRatioDataset 
+  # target_area: 1_048_576 # 1024*1024
+  # min_size: 512
+  # max_size: 2048
   img_path: "/notebooks/BA"
   max_token_length: 225 # [75, 150, 225]
 

@@ -4,11 +4,8 @@ target: modules.train_lcm.setup
 trainer:
   model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
-  resolution: 1024
   seed: 1138
   wandb_id: ""
-  use_ema: false
-  use_compile: false
   use_xformers: false
   accumulate_grad_batches: 4
   gradient_clip_val: 0.0
@@ -35,6 +32,10 @@ lightning:
   precision: 16-mixed
 
 dataset:
+  name: data.arb_dataset.AspectRatioDataset 
+  # target_area: 1_048_576 # 1024*1024
+  # min_size: 512
+  # max_size: 2048
   img_path: "/notebooks/BA_latents"
   max_token_length: 225 # [75, 150, 225]
 

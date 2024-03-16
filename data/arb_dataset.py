@@ -4,7 +4,7 @@ import torch
 
 from pathlib import Path
 from torch.utils.data import Dataset, get_worker_info
-from common.storage import DirectoryImageStore, LatentStore
+from data.image_storage import DirectoryImageStore, LatentStore
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
 
@@ -35,6 +35,7 @@ class AspectRatioDataset(Dataset):
     ):
         self.rng = np.random.default_rng(seed)
         self.batch_size = batch_size
+        self.num_workers = kwargs.get("num_workers", 4)
 
         root_path = Path(img_path)
         assert root_path.exists()
@@ -60,6 +61,20 @@ class AspectRatioDataset(Dataset):
         self.assign_buckets()
         self.assign_batches()
 
+    def init_dataloader(self, **kwargs):
+        dataloader = torch.utils.data.DataLoader(
+            self,
+            sampler=None,
+            batch_size=None,
+            persistent_workers=False,
+            num_workers=self.num_workers,
+            worker_init_fn=worker_init_fn,
+            shuffle=False,
+            pin_memory=True,
+            **kwargs,
+        )
+        return dataloader
+
     def __len__(self):
         return len(self.batch_idxs)
 
@@ -68,15 +83,22 @@ class AspectRatioDataset(Dataset):
             self.target_area % 4096 == 0
         ), "target area (h * w) must be divisible by 64"
         width = np.arange(self.min_size, self.max_size + 1, self.divisible)
-        height = np.minimum(self.max_size, ((self.target_area // width) // self.divisible) * self.divisible,)
+        height = np.minimum(
+            self.max_size,
+            ((self.target_area // width) // self.divisible) * self.divisible,
+        )
         valid_mask = height >= self.min_size
 
         resos = set(zip(width[valid_mask], height[valid_mask]))
         resos.update(zip(height[valid_mask], width[valid_mask]))
-        resos.add(((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2)
+        resos.add(
+            ((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2
+        )
         self.buckets_sizes = np.array(sorted(resos))
         self.bucket_ratios = self.buckets_sizes[:, 0] / self.buckets_sizes[:, 1]
-        self.store.ratio_to_bucket = {ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)}
+        self.store.ratio_to_bucket = {
+            ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)
+        }
 
     def assign_buckets(self):
         img_res = np.array(self.store.raw_res)

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
-from typing import Callable, Generator, Optional# type: ignore
+from typing import Callable, Generator, Optional  # type: ignore
 from torchvision import transforms
 from common.utils import rank_zero_debug, rank_zero_warn
 from torchvision.transforms import Resize, InterpolationMode
@@ -49,16 +49,14 @@ class Entry:
     is_latent: bool
     pixel: torch.Tensor
     prompt: str
-    original_size: tuple[int, int] # h, w
-    cropped_size: Optional[tuple[int, int]] # h, w
-    dhdw: Optional[tuple[int, int]] # dh, dw
+    original_size: tuple[int, int]  # h, w
+    cropped_size: Optional[tuple[int, int]]  # h, w
+    dhdw: Optional[tuple[int, int]]  # dh, dw
     extras: dict = None
     # mask: torch.Tensor | None = None
 
 
-def dirwalk(
-    path: Path, cond: Optional[Callable] = None
-) -> Generator[Path, None, None]:
+def dirwalk(path: Path, cond: Optional[Callable] = None) -> Generator[Path, None, None]:
     for p in path.iterdir():
         if p.is_dir():
             yield from dirwalk(p, cond)
@@ -94,7 +92,7 @@ class StoreBase(Dataset):
         self.to_ratio: None | np.ndarray = None
         self.raw_res: list[tuple[int, int]] = []
         self.curr_res: list[tuple[int, int]] = []
-        
+
         assert self.root_path.exists()
 
     def get_raw_entry(self, index) -> tuple[bool, np.ndarray, str, (int, int)]:
@@ -102,18 +100,18 @@ class StoreBase(Dataset):
 
     def fix_aspect_randomness(self, rng: np.random.Generator):
         raise NotImplementedError
-    
+
     @staticmethod
     @functools.cache
     def fit_dimensions(target_ratio, min_h, min_w):
         min_area = min_h * min_w
         h = max(min_h, math.ceil(math.sqrt(min_area * target_ratio)))
         w = max(min_w, math.ceil(h / target_ratio))
-        
+
         if w < min_w:
             w = min_w
             h = max(min_h, math.ceil(w * target_ratio))
-        
+
         while h * w < min_area:
             increment = 8
             if target_ratio >= 1:
@@ -133,18 +131,24 @@ class StoreBase(Dataset):
         h, w = self.ratio_to_bucket[target_ratio]
         if not entry.is_latent:
             resize_h, resize_w = self.fit_dimensions(base_ratio, h, w)
-            interp = InterpolationMode.BILINEAR if resize_h < H else InterpolationMode.BICUBIC
-            entry.pixel = Resize((resize_h, resize_w), interpolation=interp, antialias=None)(entry.pixel)
+            interp = (
+                InterpolationMode.BILINEAR
+                if resize_h < H
+                else InterpolationMode.BICUBIC
+            )
+            entry.pixel = Resize(
+                (resize_h, resize_w), interpolation=interp, antialias=None
+            )(entry.pixel)
         else:
-            h, w = h // 8 , w // 8 
-        
+            h, w = h // 8, w // 8
+
         H, W = entry.pixel.shape[-2:]
         if self.use_central_crop:
             dh, dw = (H - h) // 2, (W - w) // 2
         else:
             assert H >= h and W >= w, f"{H}<{h} or {W}<{w}"
             dh, dw = random.randint(0, H - h), random.randint(0, W - w)
-            
+
         entry.pixel = entry.pixel[:, dh : dh + h, dw : dw + w]
         return entry, dh, dw
 
@@ -157,7 +161,7 @@ class StoreBase(Dataset):
         original_sizes = []
         cropped_sizes = []
         extras = []
-        
+
         for e, i in zip(entries, indices):
             e = self.process_batch(e)
             e, dh, dw = self.crop(e, i)
@@ -166,24 +170,32 @@ class StoreBase(Dataset):
             original_sizes.append(original_size)
 
             cropped_size = e.pixel.shape[-2:]
-            cropped_size = (cropped_size[0] * 8, cropped_size[1] * 8) if e.is_latent else cropped_size
+            cropped_size = (
+                (cropped_size[0] * 8, cropped_size[1] * 8)
+                if e.is_latent
+                else cropped_size
+            )
             cropped_size = torch.asarray(cropped_size)
             cropped_sizes.append(cropped_size)
-            
+
             cropped_pos = (dh, dw)
-            cropped_pos = (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            cropped_pos = (
+                (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            )
             cropped_pos = (cropped_pos[0] + e.dhdw[0], cropped_pos[1] + e.dhdw[1])
             cropped_pos = torch.asarray(cropped_pos)
             crop_pos.append(cropped_pos)
             prompts.append(e.prompt)
             extras.append(e.extras)
-            
+
         is_latent = entries[0].is_latent
         shape = entries[0].pixel.shape
 
         for e in entries[1:]:
             assert e.is_latent == is_latent
-            assert e.pixel.shape == shape, f"{e.pixel.shape} != {shape} for the same batch"
+            assert (
+                e.pixel.shape == shape
+            ), f"{e.pixel.shape} != {shape} for the same batch"
 
         pixel = torch.stack(pixels, dim=0).contiguous()
         cropped_sizes = torch.stack(cropped_sizes)
@@ -205,22 +217,24 @@ class StoreBase(Dataset):
 
     def __getitem__(self, index):
         raise NotImplementedError
-    
+
     def get_batch_extras(self, path):
         return None
-    
+
     def process_batch(self, inputs):
         return inputs
 
     def _get_entry(self, index) -> Entry:
-        is_latent, pixel, prompt, original_size, dhdw, extras = self.get_raw_entry(index)   
+        is_latent, pixel, prompt, original_size, dhdw, extras = self.get_raw_entry(
+            index
+        )
         pixel = pixel.to(dtype=self.dtype)
         shape = pixel.shape
-        if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:  
-            pixel = pixel.permute(2, 0, 1) # HWC -> CHW
-            
+        if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:
+            pixel = pixel.permute(2, 0, 1)  # HWC -> CHW
+
         return Entry(is_latent, pixel, prompt, original_size, None, dhdw, extras)
-    
+
     def repeat_entries(self, k, res, index=None):
         repeat_strategy = self.kwargs.get("repeat_strategy", None)
         if repeat_strategy is not None:
@@ -229,9 +243,9 @@ class StoreBase(Dataset):
             for i, ent in enumerate(index):
                 for strategy, mult in repeat_strategy:
                     if strategy in str(ent):
-                        k.extend([k[i]] * (mult-1))
-                        res.extend([res[i]] * (mult-1))
-                        index_new.extend([index_new[i]] * (mult-1))
+                        k.extend([k[i]] * (mult - 1))
+                        res.extend([res[i]] * (mult - 1))
+                        index_new.extend([index_new[i]] * (mult - 1))
                         break
         else:
             index_new = index
@@ -243,36 +257,52 @@ class LatentStore(StoreBase):
         super().__init__(*args, **kwargs)
         prompt_mapping = next(dirwalk(self.root_path, lambda p: p.suffix == ".json"))
         prompt_mapping = json.loads(Path(prompt_mapping).read_text())
-        
-        self.h5_paths = list(dirwalk(self.root_path, lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem))
+
+        self.h5_paths = list(
+            dirwalk(
+                self.root_path,
+                lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem,
+            )
+        )
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
         total_latents = len(self.h5_paths)
         for idx, h5_path in enumerate(self.h5_paths):
             fs = h5.File(h5_path, "r", libver="latest")
-            for k in tqdm(fs.keys(), desc=f"Loading latents {idx+1}/{total_latents}", disable=self.rank != 0, leave=False, ascii=True):
-                hashkey = k[:-8] # ".latents"
+            for k in tqdm(
+                fs.keys(),
+                desc=f"Loading latents {idx+1}/{total_latents}",
+                disable=self.rank != 0,
+                leave=False,
+                ascii=True,
+            ):
+                hashkey = k[:-8]  # ".latents"
                 assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
                 it = prompt_mapping[hashkey]
-                if not it["train_use"]: continue
+                if not it["train_use"]:
+                    continue
                 prompt, it_path = it["train_caption"], it["file_path"]
                 height, width = it["train_height"], it["train_width"]
                 self.paths.append(it_path)
                 self.raw_res.append((height, width))
                 self.h5_keymap[k] = (h5_path, prompt, (height, width))
-        
+
         self.keys = list(self.h5_keymap.keys())
         self.length = len(self.keys)
         self.scale_factor = 0.13025
         rank_zero_debug(f"Loaded {self.length} latent codes from {self.root_path}")
-        
-        self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
+
+        self.keys, self.raw_res, self.paths = self.repeat_entries(
+            self.keys, self.raw_res, index=self.paths
+        )
         new_length = len(self.paths)
         if new_length != self.length:
             self.length = new_length
-            rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
-        
+            rank_zero_debug(
+                f"Using {self.length} entries after applied repeat strategy"
+            )
+
     def setup_filehandles(self):
         self.h5_filehandles = {}
         for h5_path in self.h5_paths:
@@ -287,7 +317,7 @@ class LatentStore(StoreBase):
         scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
         dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
         latent = latent * self.scale_factor if not scaled else latent
-        
+
         extras = self.get_batch_extras(self.paths[index])
         return True, latent, prompt, original_size, dhdw, extras
 
@@ -303,7 +333,10 @@ class DirectoryImageStore(StoreBase):
 
         remove_paths = []
         for p in tqdm(
-            self.paths, desc="Loading image sizes", leave=False, ascii=True,
+            self.paths,
+            desc="Loading image sizes",
+            leave=False,
+            ascii=True,
         ):
             try:
                 w, h = Image.open(p).size
@@ -313,9 +346,9 @@ class DirectoryImageStore(StoreBase):
                 remove_paths.append(p)
 
         remove_paths = set(remove_paths)
-        self.paths = [p for p in self.paths if p not in remove_paths]  
+        self.paths = [p for p in self.paths if p not in remove_paths]
         self.length = len(self.raw_res)
-        
+
         self.length = len(self.paths)
         self.prompts: list[str] = []
         for path in tqdm(
@@ -332,15 +365,19 @@ class DirectoryImageStore(StoreBase):
             except Exception as e:
                 rank_zero_warn(f"Skipped: error processing {p}: {e}")
                 self.prompts.append("")
-            
-        self.base_len = self.kwargs["base_len"]
-        rank_zero_debug(f"Loaded {len(self.prompts)} prompts, {self.length} image sizes")
-        
-        self.prompts, self.raw_res, self.paths = self.repeat_entries(self.prompts, self.raw_res, index=self.paths)
+                
+        rank_zero_debug(
+            f"Loaded {len(self.prompts)} prompts, {self.length} image sizes"
+        )
+        self.prompts, self.raw_res, self.paths = self.repeat_entries(
+            self.prompts, self.raw_res, index=self.paths
+        )
         new_length = len(self.paths)
         if new_length != self.length:
             self.length = new_length
-            rank_zero_debug(f"Using {self.length} entries after applied repeat strategy")
+            rank_zero_debug(
+                f"Using {self.length} entries after applied repeat strategy"
+            )
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         p = self.paths[index]
@@ -356,7 +393,7 @@ class DirectoryImageStore(StoreBase):
             img = rgb
         else:
             img = np.array(_img.convert("RGB"))
-            
+
         img = self.transforms(img)
         h, w = img.shape[-2:]
         dhdw = (0, 0)

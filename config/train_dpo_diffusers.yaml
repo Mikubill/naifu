@@ -5,11 +5,8 @@ dpo_beta: 2500
 trainer:
   model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 8
-  resolution: 1024
   seed: 1138
   wandb_id: "dpo-test"
-  use_ema: false
-  use_compile: false
   use_xformers: false
   accumulate_grad_batches: 16
   gradient_clip_val: 0.0
@@ -39,6 +36,7 @@ lightning:
 # dpo requires paired-image dataset
 dataset:
   name: "kashif/pickascore" # "yuvalkirstain/pickapic_v2"
+  resolution: 1024
   dataset_split: "validation"
   max_token_length: 225 # [75, 150, 225]
 

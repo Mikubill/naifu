@@ -3,7 +3,6 @@ import os
 import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
-from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.scheduler_utils import apply_snr_weight
 from modules.sd_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -14,23 +13,14 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
-    dataset = AspectRatioDataset(
+    dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
+    dataset = dataset_class(
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
-        base_len=config.trainer.resolution,
         **config.dataset,
     )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=None,
-        batch_size=None,
-        persistent_workers=False,
-        num_workers=config.dataset.get("num_workers", 4),
-        worker_init_fn=worker_init_fn,
-        shuffle=False,
-        pin_memory=True,
-    )
+    dataloader = dataset.init_dataloader()
 
     params_to_optim = [{"params": model.unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]

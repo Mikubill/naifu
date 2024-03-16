@@ -1,23 +1,30 @@
 # Naifu
 
-naifu-diffusion (or naifu) is designed for training generative models with various configurations and features. The code in the main branch of this repository is under development and subject to change as new features are added.
-
-Other branches in the repository include:
-* sgm - Uses the [sgm](https://github.com/Stability-AI/generative-models) to train SDXL models. 
-* main-archived - Contains the original naifu-diffusion code for training Stable Diffusion 1.x models.
+naifu (or naifu-diffusion) is designed for training generative models with various configurations and features. The code in the main branch of this repository is under development and subject to change as new features are added.
 
 ## Installation
 
-To install the necessary dependencies, simply run:
-
+To get started with Naifu, follow these steps to install the necessary dependencies:
+Clone the Naifu repository:
 ```bash
-git clone --depth 1 https://github.com/mikubill/naifu-diffusion
+git clone --depth 1 https://github.com/mikubill/naifu
+```
+
+Navigate to the cloned repository:
+```bash
+cd naifu
+```
+
+Install the required Python packages:
+```bash
 pip install -r requirements.txt
 ```
 
+Make sure you have a compatible version of Python installed (Python 3.6 or above) before running the installation command.
+
 ## Usage
 
-You can train the image model using different configurations by running the `trainer.py` script with the appropriate configuration file.
+Naifu provides a flexible and intuitive way to train models using various configurations. To train a model, use the trainer.py script and provide the desired configuration file as an argument.
 
 ```bash
 python trainer.py --config config/<config_file>
@@ -26,7 +33,7 @@ python trainer.py config/<config_file>
 
 Replace `<config_file>` with one of the available configuration files listed below.
 
-## Available Configurations
+## Configurations
 
 Choose the appropriate configuration file based on training objectives and environment.
 
@@ -101,6 +108,12 @@ Train StableCascade model ([Sai](https://github.com/Stability-AI/StableCascade/)
 python trainer.py config/train_cascade_stage_c.yaml
 ```
 
+Train GPT2 model
+```bash
+# currently only stage_c (w/ or w/o text encoder)
+python trainer.py config/train_gpt2.yaml
+```
+
 ## Preparing Datasets
 
 Each configuration file may have different dataset requirements. Make sure to check the specific configuration file for any dataset specifications or requirements.
@@ -111,3 +124,8 @@ You can use your dataset directly for training. Simply point the configuration f
 # prepare images in input_path
 python encode_latents.py -i <input_path> -o <encoded_path>
 ```
+
+## Other branches
+
+* sgm - Uses the [sgm](https://github.com/Stability-AI/generative-models) to train SDXL models. 
+* main-archived - Contains the original naifu-diffusion code for training Stable Diffusion 1.x models.

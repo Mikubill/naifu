@@ -5,7 +5,7 @@ from omegaconf import OmegaConf
 
 import copy
 import torch.nn.functional as F
-from modules.data_utils import setup_hf_dataloader
+from data.paired_wds import setup_hf_dataloader
 from common.utils import rank_zero_print, get_class
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary

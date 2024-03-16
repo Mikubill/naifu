@@ -3,7 +3,6 @@ import os
 import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
-from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from modules.scheduler_utils import apply_snr_weight
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -14,23 +13,15 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
-    dataset = AspectRatioDataset(
+
+    dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
+    dataset = dataset_class(
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
-        base_len=config.trainer.resolution,
         **config.dataset,
     )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=None,
-        batch_size=None,
-        persistent_workers=False,
-        num_workers=config.dataset.get("num_workers", 4),
-        worker_init_fn=worker_init_fn,
-        shuffle=False,
-        pin_memory=True,
-    )
+    dataloader = dataset.init_dataloader()
 
     params_to_optim = [{"params": model.unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]
@@ -97,7 +88,6 @@ class SupervisedFineTune(StableDiffusionModel):
             )
             noise_scale = float(advanced.get("offset_noise_val"))
             noise = torch.randn_like(latents) + noise_scale * offset
-            
 
         # https://arxiv.org/abs/2301.11706
         if advanced.get("input_perturbation"):
@@ -129,20 +119,30 @@ class SupervisedFineTune(StableDiffusionModel):
 
         # Get the target for loss depending on the prediction type
         is_v = advanced.get("v_parameterization", False)
-        target = noise if not is_v else self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        target = (
+            noise
+            if not is_v
+            else self.noise_scheduler.get_velocity(latents, noise, timesteps)
+        )
 
         min_snr_gamma = advanced.get("min_snr", False)
         if min_snr_gamma:
             # do not mean over batch dimension for snr weight or scale v-pred loss
-            loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
+            loss = torch.nn.functional.mse_loss(
+                noise_pred.float(), target.float(), reduction="none"
+            )
             loss = loss.mean([1, 2, 3])
 
             if min_snr_gamma:
-                loss = apply_snr_weight(loss, timesteps, self.noise_scheduler, advanced.min_snr_val, is_v)
-                
+                loss = apply_snr_weight(
+                    loss, timesteps, self.noise_scheduler, advanced.min_snr_val, is_v
+                )
+
             loss = loss.mean()  # mean over batch dimension
         else:
-            loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="mean")
+            loss = torch.nn.functional.mse_loss(
+                noise_pred.float(), target.float(), reduction="mean"
+            )
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")

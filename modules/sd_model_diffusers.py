@@ -118,7 +118,7 @@ class StableDiffusionModel(pl.LightningModule):
         return encoder_hidden_states
 
     @rank_zero_only
-    def sample_images(self, logger, current_epoch, global_step):
+    def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
         generator = torch.Generator(device="cpu").manual_seed(config.seed)
         prompts = list(config.prompts)

@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
 from modules.sd_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
-from modules.data_utils import setup_hf_dataloader
+from data.paired_wds import setup_hf_dataloader
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:

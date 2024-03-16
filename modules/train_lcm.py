@@ -5,7 +5,6 @@ import lightning as pl
 import numpy as np
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class, rank_zero_only
-from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from diffusers import UNet2DConditionModel, LCMScheduler, StableDiffusionXLPipeline
@@ -16,23 +15,14 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
-    dataset = AspectRatioDataset(
+    dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
+    dataset = dataset_class(
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
-        base_len=config.trainer.resolution,
         **config.dataset,
     )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=None,
-        batch_size=None,
-        persistent_workers=False,
-        num_workers=config.dataset.get("num_workers", 4),
-        worker_init_fn=worker_init_fn,
-        shuffle=False,
-        pin_memory=True,
-    )
+    dataloader = dataset.init_dataloader()
 
     params_to_optim = [{"params": model.lcm_unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]

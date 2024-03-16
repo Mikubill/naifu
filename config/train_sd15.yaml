@@ -4,11 +4,8 @@ target: modules.train_sd_diffusers.setup
 trainer:
   model_path: runwayml/stable-diffusion-v1-5
   batch_size: 4
-  resolution: 512
   seed: 1138
   wandb_id: ""
-  use_ema: false
-  use_compile: false
   use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
@@ -41,6 +38,10 @@ lightning:
   precision: 16-mixed
 
 dataset:
+  name: data.arb_dataset.AspectRatioDataset 
+  # target_area: 262144 # 512*512
+  # min_size: 256
+  # max_size: 1024
   img_path: "/notebooks/BA"
   max_token_length: 225 # [75, 150, 225]
 

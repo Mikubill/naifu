@@ -1,0 +1,55 @@
+name: test-run
+target: modules.train_gpt2.setup
+
+trainer:
+  model_path: gpt2
+  batch_size: 16
+  seed: 1138
+  wandb_id: "gpt2"
+  use_xformers: false
+  accumulate_grad_batches: 1
+  gradient_clip_val: 0.0
+
+  save_format: diffusers
+  checkpoint_dir: checkopint
+  checkpoint_freq: 1
+  checkpoint_steps: 2500
+  eval_samples: 100
+  eval_steps: 300
+  eval_epoch: 1
+  max_epochs: 60
+  max_steps: -1
+  
+lightning:
+  accelerator: gpu
+  devices: -1
+  precision: 16-mixed
+
+dataset:
+  name: data.text_dataset.StreamingTextDataset
+  train_dataset_path: /notebooks/prompts_0.txt
+  val_dataset_path: /notebooks/prompts_0.txt
+  max_length: 32
+  eot_token_id: 50256
+
+optimizer:
+  name: bitsandbytes.optim.AdamW
+  params:
+    lr: 1e-3
+    weight_decay: 1e-2
+
+scheduler:
+  name: transformers.get_constant_schedule_with_warmup
+  params:
+    num_warmup_steps: 100
+    last_epoch: -1
+
+sampling:
+  enabled: true
+  every_n_steps: 500
+  every_n_epochs: 1
+  prompts:
+    - "1girl, long hair, white hair"
+    - "1girl, purple hair"
+    - "gothic lolita"
+    - "hatsune miku"

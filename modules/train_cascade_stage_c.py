@@ -4,7 +4,6 @@ import lightning as pl
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 from common.utils import rank_zero_print, get_class
-from common.dataset import AspectRatioDataset, worker_init_fn
 from modules.cascade_model import StableCascadeModel, EFFNET_PREPROCESS
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
@@ -14,28 +13,20 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
-    dataset = AspectRatioDataset(
+
+    dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
+    dataset = dataset_class(
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
-        base_len=config.trainer.resolution,
         **config.dataset,
     )
+    dataloader = dataset.init_dataloader()
+
     if dataset.store.__class__.__name__ == "DirectoryImageStore":
         dataset.store.transforms = EFFNET_PREPROCESS
     else:
         dataset.store.scale_factor = 1.0
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=None,
-        batch_size=None,
-        persistent_workers=False,
-        num_workers=config.dataset.get("num_workers", 4),
-        worker_init_fn=worker_init_fn,
-        shuffle=False,
-        pin_memory=True,
-    )
 
     params_to_optim = [{"params": model.stage_c.parameters()}]
     if config.advanced.get("train_text_encoder"):
@@ -75,18 +66,16 @@ class SupervisedFineTune(StableCascadeModel):
 
         model_dtype = next(self.stage_c.parameters()).dtype
         batch_size = latents.size(0)
-        
+
         hidden, pooled = self.encode_prompts(batch["prompts"])
         hidden = hidden.to(model_dtype)
         pooled = pooled.unsqueeze(1).to(model_dtype)
-        
+
         image_embed = torch.zeros(1, 768, device=self.target_device)
         image_embed = image_embed.repeat(batch_size, 1, 1)
         with torch.no_grad():
             noised, noise, target, logSNR, noise_cond, loss_weight = self.gdf.diffuse(
-                x0=latents,
-                shift=1,
-                loss_shift=1
+                x0=latents, shift=1, loss_shift=1
             )
 
         pred = self.stage_c.forward(
