@@ -3,14 +3,14 @@ target: modules.train_phi.setup
 
 use_neftune: true
 neft_alpha: 50
-use_compile: true
+use_compile: false 
 
 trainer:
   model_path: microsoft/phi-2
   batch_size: 8
   seed: 1138
   wandb_id: "phi2"
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 2
   gradient_clip_val: 1.0
 
   save_format: diffusers
@@ -45,7 +45,7 @@ dataset:
 optimizer:
   name: bitsandbytes.optim.AdamW8bit
   params:
-    lr: 4e-4
+    lr: 4e-5
     weight_decay: 1e-2
 
 scheduler:

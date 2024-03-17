@@ -42,6 +42,7 @@ class PhiModel(pl.LightningModule):
         self.model = PhiForCausalLM.from_pretrained(
             model_path,
             attn_implementation="flash_attention_2" if is_flash_attn_2_available() else None,
+            torch_dtype=torch.bfloat16 if is_flash_attn_2_available() else torch.float32,
             **config.get("model_params", {})
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -52,7 +53,6 @@ class PhiModel(pl.LightningModule):
         self.model.neft_alpha = config.neft_alpha
         self.logger_samples = []
         
-
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
         train_dataset = dataset_class(
