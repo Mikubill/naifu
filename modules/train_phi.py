@@ -42,13 +42,16 @@ class PhiModel(pl.LightningModule):
         self.model = PhiForCausalLM.from_pretrained(
             model_path,
             attn_implementation="flash_attention_2" if is_flash_attn_2_available() else None,
+            **config.get("model_params", {})
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.gradient_checkpointing_enable()
         self.model.train()
-        if config.get("use_compile"):
-            self.model = torch.compile(self.model)
+        self.model = torch.compile(self.model) if config.use_compile else self.model
+        self.model.use_neftune = config.use_neftune
+        self.model.neft_alpha = config.neft_alpha
         self.logger_samples = []
+        
 
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)

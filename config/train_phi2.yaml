@@ -1,12 +1,15 @@
 name: test-run
 target: modules.train_phi.setup
 
+use_neftune: true
+neft_alpha: 50
+use_compile: true
+
 trainer:
   model_path: microsoft/phi-2
   batch_size: 8
   seed: 1138
   wandb_id: "phi2"
-  use_compile: false
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
 
@@ -29,7 +32,7 @@ dataset:
   name: data.text_dataset.TextDataset
   cutoff_len: 1024
   prompt_style: 
-    name: "data.prompt_style.Phi2QAStyle"
+    name: "data.prompt_style.Phi2QAStyle2"
     prompt_field: question
     output_field: answer
   train_dataset: 

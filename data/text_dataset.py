@@ -120,7 +120,7 @@ class TextDataset(Dataset):
             prompt_len = len(encoded_prompt["input_ids"])
             encoded_prompt_and_response["labels"] = \
                 [-100] * prompt_len + encoded_prompt_and_response["labels"][prompt_len:]
-        
+
         for k in encoded_prompt_and_response.keys():
             encoded_prompt_and_response[k] = torch.LongTensor(encoded_prompt_and_response[k])
         
