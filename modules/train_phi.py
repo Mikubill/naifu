@@ -8,13 +8,14 @@ from common.utils import (
     rank_zero_only,
 )
 from lightning.pytorch.utilities.model_summary import ModelSummary
-from transformers import GPT2LMHeadModel, AutoTokenizer
+from transformers import AutoTokenizer
+from models.llm.modeling_phi import PhiForCausalLM
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
-    model = GPT2Model(model_path, config, fabric.device)
-    dataset, dataloader = model.prepare_dataset(fabric, config)
+    model = PhiModel(model_path, config, fabric.device)
+    dataset, dataloader = model.prepare_dataset(config)
 
     params_to_optim = [{"params": model.parameters()}]
     optim_param = config.optimizer.params
@@ -31,30 +32,27 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
 
 
 # define the LightningModule
-class GPT2Model(pl.LightningModule):
+class PhiModel(pl.LightningModule):
     def __init__(self, model_path, config, device):
         super().__init__()
         self.config = config
         self.model_path = model_path
         self.target_device = device
-        self.model = GPT2LMHeadModel.from_pretrained(model_path)
+        self.model = PhiForCausalLM.from_pretrained(model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.model.gradient_checkpointing_enable()
         self.model.train()
 
-    def prepare_dataset(self, fabric, config):
+    def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
         train_dataset = dataset_class(
-            dataset_path=config.dataset.train_dataset_path,
+            dataset_args=config.dataset.train_dataset,
             tokenizer=self.tokenizer,
-            batch_size=config.trainer.batch_size,
-            rank=fabric.global_rank,
             **config.dataset,
         )
         val_dataset = dataset_class(
-            dataset_path=config.dataset.val_dataset_path,
+            dataset_args=config.dataset.val_dataset,
             tokenizer=self.tokenizer,
-            batch_size=config.trainer.batch_size,
-            rank=fabric.global_rank,
             **config.dataset,
         )
         bsz = config.trainer.batch_size

@@ -12,7 +12,7 @@ trainer:
   clip_skip: 2
 
   save_format: safetensors
-  checkpoint_dir: checkopint
+  checkpoint_dir: checkpoint
   checkpoint_freq: 1
   checkpoint_steps: -1
   save_weights_only: true

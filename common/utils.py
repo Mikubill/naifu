@@ -19,6 +19,10 @@ def rank_zero_warn(*args, **kwargs):
 @rank_zero_only
 def rank_zero_debug(*args, **kwargs):
     logger.debug(*args, **kwargs)
+    
+    
+def get_world_size():
+    return int(os.environ.get("WORLD_SIZE", 1))
 
 
 class EmptyInitWrapper(torch.overrides.TorchFunctionMode):

@@ -1,17 +1,16 @@
 name: test-run
-target: modules.train_phi2.setup
+target: modules.train_phi.setup
 
 trainer:
-  model_path: phi2
+  model_path: microsoft/phi-2
   batch_size: 16
   seed: 1138
   wandb_id: "phi2"
-  use_xformers: false
   accumulate_grad_batches: 1
-  gradient_clip_val: 0.0
+  gradient_clip_val: 1.0
 
   save_format: diffusers
-  checkpoint_dir: checkopint
+  checkpoint_dir: checkpoint
   checkpoint_freq: 1
   checkpoint_steps: 2500
   eval_samples: 100
@@ -23,29 +22,36 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: 16-mixed
+  precision: bf16-mixed
 
 dataset:
-  name: data.text_dataset.StreamingTextDataset
-  train_dataset_path: /notebooks/prompts_0.txt
-  val_dataset_path: /notebooks/prompts_0.txt
-  block_len: 300
-  eot_token_id: 50256
-
+  name: data.text_dataset.TextDataset
+  cutoff_len: 2048
+  prompt_style: 
+    name: "data.prompt_style.Phi2QAStyle"
+    prompt_field: question
+    output_field: answer
+  train_dataset: 
+    path: 'microsoft/orca-math-word-problems-200k'
+    split: 'train[:90%]'
+  val_dataset: 
+    path: 'microsoft/orca-math-word-problems-200k'
+    split: 'train[90%:]'
+  
 optimizer:
-  name: bitsandbytes.optim.AdamW
+  name: bitsandbytes.optim.AdamW8bit
   params:
-    lr: 1e-3
+    lr: 4e-4
     weight_decay: 1e-2
 
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 100
+    num_warmup_steps: 0
     last_epoch: -1
 
 sampling:
-  enabled: true
+  enabled: false
   max_length: 50
   every_n_steps: 500
   every_n_epochs: 1

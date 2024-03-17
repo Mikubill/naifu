@@ -23,4 +23,5 @@ build
 *egg-info
 dist
 sagemaker*
+checkpoint
 .ipynb_checkpoints

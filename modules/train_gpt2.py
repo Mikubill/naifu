@@ -14,7 +14,7 @@ from transformers import GPT2LMHeadModel, AutoTokenizer
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
     model = GPT2Model(model_path, config, fabric.device)
-    dataset, dataloader = model.prepare_dataset(fabric, config)
+    dataset, dataloader = model.prepare_dataset(config)
 
     params_to_optim = [{"params": model.parameters()}]
     optim_param = config.optimizer.params
@@ -40,26 +40,22 @@ class GPT2Model(pl.LightningModule):
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.train()
 
-    def prepare_dataset(self, fabric, config):
+    def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
         train_dataset = dataset_class(
             dataset_path=config.dataset.train_dataset_path,
             tokenizer=self.tokenizer,
-            batch_size=config.trainer.batch_size,
-            rank=fabric.global_rank,
             **config.dataset,
         )
         val_dataset = dataset_class(
             dataset_path=config.dataset.val_dataset_path,
             tokenizer=self.tokenizer,
-            batch_size=config.trainer.batch_size,
-            rank=fabric.global_rank,
             **config.dataset,
         )
         bsz = config.trainer.batch_size
         train_dataloader = train_dataset.build_dataloader(batch_size=bsz)
         self.val_dataset = val_dataset
-        self.val_dataloader = val_dataset.build_dataloader(batch_size=bsz)
+        self.val_dataloader = val_dataset.build_dataloader(batch_size=bsz)  
         return train_dataset, train_dataloader
 
     def forward(self, batch):

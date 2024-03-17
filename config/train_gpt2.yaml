@@ -6,12 +6,11 @@ trainer:
   batch_size: 16
   seed: 1138
   wandb_id: "gpt2"
-  use_xformers: false
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0
 
   save_format: diffusers
-  checkpoint_dir: checkopint
+  checkpoint_dir: checkpoint
   checkpoint_freq: 1
   checkpoint_steps: 2500
   eval_samples: 100
@@ -23,10 +22,10 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: 16-mixed
+  precision: bf16-mixed
 
 dataset:
-  name: data.text_dataset.StreamingTextDataset
+  name: data.text_dataset.SimpleTextDataset
   train_dataset_path: /notebooks/prompts_0.txt
   val_dataset_path: /notebooks/prompts_0.txt
   block_len: 300
