@@ -9,6 +9,7 @@ from common.utils import (
 )
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer
+from transformers.utils import is_flash_attn_2_available
 from models.llm.modeling_phi import PhiForCausalLM
 
 
@@ -40,12 +41,13 @@ class PhiModel(pl.LightningModule):
         self.target_device = device
         self.model = PhiForCausalLM.from_pretrained(
             model_path,
-            attn_implementation="flash_attention_2",
+            attn_implementation="flash_attention_2" if is_flash_attn_2_available() else None,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.gradient_checkpointing_enable()
         self.model.train()
-        self.model = torch.compile(self.model)
+        if config.get("use_compile"):
+            self.model = torch.compile(self.model)
         self.logger_samples = []
 
     def prepare_dataset(self, config):

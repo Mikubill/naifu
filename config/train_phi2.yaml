@@ -6,6 +6,7 @@ trainer:
   batch_size: 8
   seed: 1138
   wandb_id: "phi2"
+  use_compile: false
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
 
