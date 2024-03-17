@@ -7,7 +7,7 @@ trainer:
   seed: 1138
   wandb_id: "gpt2"
   accumulate_grad_batches: 1
-  gradient_clip_val: 0.0
+  gradient_clip_val: 1.0
 
   save_format: diffusers
   checkpoint_dir: checkpoint

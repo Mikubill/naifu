@@ -41,7 +41,6 @@ class PhiModel(pl.LightningModule):
         self.model = PhiForCausalLM.from_pretrained(
             model_path,
             attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.gradient_checkpointing_enable()
@@ -111,6 +110,7 @@ class PhiModel(pl.LightningModule):
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 max_length=config.max_length,
+                pad_token_id=50256,
             )
             generated_text = self.tokenizer.decode(
                 generated_output[0], skip_special_tokens=True
