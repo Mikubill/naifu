@@ -3,18 +3,18 @@ target: modules.train_phi.setup
 
 trainer:
   model_path: microsoft/phi-2
-  batch_size: 16
+  batch_size: 8
   seed: 1138
   wandb_id: "phi2"
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 2
   gradient_clip_val: 1.0
 
   save_format: diffusers
   checkpoint_dir: checkpoint
   checkpoint_freq: 1
-  checkpoint_steps: 2500
-  eval_samples: 100
-  eval_steps: 300
+  checkpoint_steps: 200
+  eval_samples: 1000
+  eval_steps: 1000
   eval_epoch: 1
   max_epochs: 60
   max_steps: -1
@@ -26,7 +26,7 @@ lightning:
 
 dataset:
   name: data.text_dataset.TextDataset
-  cutoff_len: 2048
+  cutoff_len: 1024
   prompt_style: 
     name: "data.prompt_style.Phi2QAStyle"
     prompt_field: question
@@ -47,16 +47,16 @@ optimizer:
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
   params:
-    num_warmup_steps: 0
+    num_warmup_steps: 50
     last_epoch: -1
 
 sampling:
-  enabled: false
-  max_length: 50
-  every_n_steps: 500
+  enabled: true
+  max_length: 200
+  every_n_steps: 50
   every_n_epochs: 1
   prompts:
-    - "1girl, long hair, white hair"
-    - "1girl, purple hair"
-    - "gothic lolita"
-    - "hatsune miku"
+    - "what is the result of 1+1"
+    - "what is the result of 2*591"
+    - "what is the result of 3^2"
+    - "what is the result of sqrt(128)"

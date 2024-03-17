@@ -39,6 +39,7 @@ class GPT2Model(pl.LightningModule):
         self.model = GPT2LMHeadModel.from_pretrained(model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.train()
+        self.logger_samples = []
 
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
@@ -91,7 +92,6 @@ class GPT2Model(pl.LightningModule):
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
         prompts = list(config.prompts)
-        samples = []
         self.model.eval()
         for curr_prompt in prompts:
             batch = self.tokenizer([curr_prompt], return_tensors="pt")
@@ -107,10 +107,11 @@ class GPT2Model(pl.LightningModule):
             generated_text = self.tokenizer.decode(
                 generated_output[0], skip_special_tokens=True
             )
-            samples.append([global_step, curr_prompt, generated_text])
+            self.logger_samples.append([global_step, curr_prompt, generated_text])
 
         columns = ["global_step", "inputs", "predictions"]
-        logger.log_text(key="generated_samples", columns=columns, data=samples, step=global_step)
+        logger.log_text(key="generated_samples", columns=columns, data=self.logger_samples)
+        self.model.train()
 
     @rank_zero_only
     def save_checkpoint(self, model_path):

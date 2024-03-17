@@ -33,3 +33,7 @@ class Phi2QAStyle(PromptStyleBase):
         inputs = f"""Instruct: {data[self.input_field]}\nOutput: """
         outputs = data[self.output_field]
         return inputs, outputs
+    
+    def build_instruct(self, prompt: str) -> str:
+        "Build the instructions for the prompt."
+        return f"Instruct: {prompt}\nOutput: "

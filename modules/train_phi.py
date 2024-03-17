@@ -38,10 +38,16 @@ class PhiModel(pl.LightningModule):
         self.config = config
         self.model_path = model_path
         self.target_device = device
-        self.model = PhiForCausalLM.from_pretrained(model_path)
+        self.model = PhiForCausalLM.from_pretrained(
+            model_path,
+            attn_implementation="flash_attention_2",
+            torch_dtype=torch.bfloat16
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model.gradient_checkpointing_enable()
         self.model.train()
+        self.model = torch.compile(self.model)
+        self.logger_samples = []
 
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
@@ -94,9 +100,9 @@ class PhiModel(pl.LightningModule):
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
         prompts = list(config.prompts)
-        samples = []
         self.model.eval()
         for curr_prompt in prompts:
+            curr_prompt = self.val_dataset.prompt_style.build_instruct(curr_prompt)
             batch = self.tokenizer([curr_prompt], return_tensors="pt")
             for k, v in batch.items():
                 batch[k] = v.to(self.target_device)
@@ -105,15 +111,15 @@ class PhiModel(pl.LightningModule):
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 max_length=config.max_length,
-                pad_token_id=50256,
             )
             generated_text = self.tokenizer.decode(
                 generated_output[0], skip_special_tokens=True
             )
-            samples.append([global_step, curr_prompt, generated_text])
+            self.logger_samples.append([global_step, curr_prompt, generated_text])
 
         columns = ["global_step", "inputs", "predictions"]
-        logger.log_text(key="generated_samples", columns=columns, data=samples, step=global_step)
+        logger.log_text(key="generated_samples", columns=columns, data=self.logger_samples)
+        self.model.train()
 
     @rank_zero_only
     def save_checkpoint(self, model_path):
