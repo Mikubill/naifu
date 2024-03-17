@@ -146,6 +146,9 @@ class StableDiffusionModel(SupervisedFineTune):
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
+        self.model.diffusion_model.train()
+        self.text_encoder_1.train()
+        self.text_encoder_2.train()
         self.init_lycoris()
 
     def init_lycoris(self):
@@ -170,10 +173,15 @@ class StableDiffusionModel(SupervisedFineTune):
         if self.config.advanced.get("train_text_encoder_1"):
             self.lycoris_te1.to(self.target_device).apply_to()
             self.lycoris_te1.requires_grad_(True)
+            self.text_encoder_1.text_model.embeddings.requires_grad_(True)
+            self.text_encoder_2.text_model.embeddings.requires_grad_(True)
 
         if self.config.advanced.get("train_text_encoder_2"):
             self.lycoris_te2.to(self.target_device).apply_to()
             self.lycoris_te2.requires_grad_(True)
+            self.text_encoder_1.text_model.embeddings.requires_grad_(True)
+            self.text_encoder_2.text_model.embeddings.requires_grad_(True)
+            
 
     def encode_batch(self, batch):
         hidden1, hidden2, pooled = get_hidden_states_sdxl(

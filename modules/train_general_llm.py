@@ -9,6 +9,12 @@ from common.utils import (
 )
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import BitsAndBytesConfig
+
+try:
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+except ImportError:
+    pass
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -37,18 +43,39 @@ class LLMModel(pl.LightningModule):
         self.config = config
         self.model_path = model_path
         self.target_device = device
-        self.model = AutoModelForCausalLM.from_pretrained(
+        use_q_lora = config.get("q_lora", False)
+        use_lora = config.get("use_lora", False) or use_q_lora
+        q_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        ) if use_q_lora else None
+        model = AutoModelForCausalLM.from_pretrained(
             model_path, 
             torch_dtype=torch.bfloat16,
+            quantization_config=q_config,
             **config.model_params
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model.gradient_checkpointing_enable()
-        self.model.train()
-        self.model = torch.compile(self.model) if config.use_compile else self.model
-        self.model.use_neftune = config.use_neftune
-        self.model.neft_alpha = config.neft_alpha            
+        model.gradient_checkpointing_enable()
+        model.train()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)      
         self.logger_samples = []
+        if use_lora:
+            rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
+            lora_config = LoraConfig(**config.lora_params)
+            if use_q_lora:
+                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+
+            self.model = get_peft_model(model, lora_config)
+            self.model.enable_input_require_grads()
+            self.model.print_trainable_parameters()
+            self.tokenizer.padding_side  = 'left'
+        else:
+            self.model = model
+            self.model = torch.compile(self.model) if config.use_compile else self.model
+            self.model.use_neftune = config.use_neftune
+            self.model.neft_alpha = config.neft_alpha  
         
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
