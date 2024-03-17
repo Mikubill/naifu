@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from datasets import load_dataset
 from common.utils import get_class
-from typing import List, Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any
 
 def padding_collate_fn(batch):
     input_ids = pad_sequence([x['input_ids'] for x in batch], batch_first=True, padding_value=0)
@@ -58,7 +58,6 @@ class TextDataset(Dataset):
         dataset_args: Dict[str, Any],
         tokenizer: object, 
         prompt_style: Dict[str, Any],
-        max_seq_length: int = -1,
         mask_prompt: bool = True,
         ignore_index: int = -100,
         cutoff_len: int = 2048,
@@ -67,7 +66,6 @@ class TextDataset(Dataset):
     ):
         self.data = load_dataset(**dataset_args)
         self.tokenizer = tokenizer
-        self.max_seq_length = max_seq_length
         self.mask_prompt = mask_prompt
         self.ignore_index = ignore_index
         self.transform = transform
@@ -125,3 +123,114 @@ class TextDataset(Dataset):
             encoded_prompt_and_response[k] = torch.LongTensor(encoded_prompt_and_response[k])
         
         return encoded_prompt_and_response
+
+# https://github.com/OpenAccess-AI-Collective/axolotl/raw/d485a083938e995979d1a566bb6a2f876075c667/src/axolotl/utils/chat_templates.py
+def build_chat_template(user_choice: str):
+    """
+    Finds the correct chat_template for the tokenizer_config.
+
+    Args:
+        user_choice (str): The user's choice of template.
+
+    Returns:
+        str: The chosen template string.
+
+    Raises:
+        ValueError: If the user_choice is not found in the templates.
+    """
+
+    templates = {
+        "alpaca": "{% for message in messages %}{% if message['role'] == 'user' %}{{ '### Instruction: ' + message['content'] + '\n\n' }}{% elif message['role'] == 'assistant' %}{{ '### Response: ' + message['content'] + eos_token}}{% endif %}{% endfor %}",
+        "inst": "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token}}{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}{% endif %}{% endfor %}",  # I don't know what this one is called. Used by Mistral/Mixtral.
+        "chatml": "{% if messages[0]['role'] == 'system' %}{% set loop_messages = messages[1:] %}{% set system_message = messages[0]['content'] %}{% else %}{% set loop_messages = messages %}{% set system_message = 'You are a helpful assistant.' %}{% endif %}{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in loop_messages %}{% if loop.index0 == 0 %}{{'<|im_start|>system\n' + system_message + '<|im_end|>\n'}}{% endif %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}",
+        "gemma": "{{ bos_token }}{% if messages[0]['role'] == 'system' %}{{ raise_exception('System role not supported') }}{% endif %}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if (message['role'] == 'assistant') %}{% set role = 'model' %}{% else %}{% set role = message['role'] %}{% endif %}{{ '<start_of_turn>' + role + '\n' + message['content'] | trim + '<end_of_turn>\n' }}{% endfor %}{% if add_generation_prompt %}{{'<start_of_turn>model\n'}}{% endif %}",
+    }
+
+    if user_choice in templates:
+        return templates[user_choice]
+
+    raise ValueError(f"Template '{user_choice}' not found.")
+
+class ChatMLDataset(Dataset):
+    def __init__(
+        self, 
+        dataset_args: Dict[str, Any],
+        tokenizer: object, 
+        max_seq_length: int = -1,
+        ignore_index: int = -100,
+        chat_template: str = "chatml",
+        mask_inputs: str = False,
+        **kwargs,
+    ):
+        self.data = load_dataset(**dataset_args)
+        self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
+        self.ignore_index = ignore_index
+        self.cached_data_dict = {}
+        self.chat_templates = build_chat_template(chat_template)
+        self.mask_inputs = mask_inputs
+        
+    def get_conversation_thread(self, prompt):
+        conversations = prompt[0]["conversations"]
+        # remap roles - allow for assistant turn
+        role_map = {
+            "human": "user",
+            "user": "user",
+            "assistant": "assistant",
+            "gpt": "assistant",
+            "system": "system",
+            "function_response": "function_response",
+        }
+        turns = [
+            {"role": role_map[t["from"]], "content": t["value"]} for t in conversations
+        ]
+        return turns
+
+    def preprocess(self, prompts) -> Dict:
+        """Preprocesses the data for supervised fine-tuning."""
+        build_prompt = lambda turn, **kwargs: self.tokenizer.apply_chat_template(
+            turn,
+            truncation=True,
+            max_length=self.max_seq_length,
+            chat_template=self.chat_templates,
+            **kwargs
+        )
+        turns = self.get_conversation_thread(prompts)
+        prompt_ids = build_prompt([turns[0]], add_generation_prompt=True)
+        input_ids = build_prompt(turns)
+
+        if self.mask_inputs:
+            user_prompt_len = len(prompt_ids)
+            labels = [-100] * user_prompt_len + input_ids[user_prompt_len:]
+        else:
+            labels = input_ids
+            
+        input_ids = torch.tensor(input_ids, dtype=torch.int)
+        labels[labels == self.tokenizer.pad_token_id] = self.ignore_index
+        attention_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        return dict(
+            input_ids=torch.tensor(input_ids, dtype=torch.long),
+            labels=torch.tensor(labels, dtype=torch.long),
+            attention_mask=attention_mask
+        )
+
+    def build_dataloader(self, batch_size: int, shuffle: bool = False):
+        dataloader = torch.utils.data.DataLoader(
+            self, 
+            batch_size=batch_size, 
+            shuffle=shuffle, 
+            collate_fn=padding_collate_fn
+        )
+        return dataloader
+    
+    def __len__(self):
+        return len(self.data)
+    
+    # https://github.com/QwenLM/Qwen/blob/3ad0c83bb9a31fb3ccb8b70b6ec5a92caa4f7170/finetune.py#L204
+    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+        if i in self.cached_data_dict:
+            return self.cached_data_dict[i]
+
+        ret = self.preprocess([self.data[i]])
+        self.cached_data_dict[i] = ret
+        return ret
