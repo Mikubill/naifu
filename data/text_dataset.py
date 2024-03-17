@@ -205,9 +205,8 @@ class ChatMLDataset(Dataset):
         else:
             labels = input_ids
             
-        input_ids = torch.tensor(input_ids, dtype=torch.int)
-        labels[labels == self.tokenizer.pad_token_id] = self.ignore_index
-        attention_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        input_ids = torch.tensor(input_ids, dtype=torch.long)
+        attention_mask = torch.ones(len(input_ids), dtype=torch.long)
         return dict(
             input_ids=torch.tensor(input_ids, dtype=torch.long),
             labels=torch.tensor(labels, dtype=torch.long),

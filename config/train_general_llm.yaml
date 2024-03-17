@@ -19,6 +19,7 @@ lora_params:
   task_type: "CAUSAL_LM"
 
 trainer:
+  # model_path: mistralai/Mixtral-8x7B-v0.1
   model_path: Qwen/Qwen1.5-7B-Chat
   batch_size: 16
   seed: 1138
