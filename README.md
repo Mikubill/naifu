@@ -5,22 +5,16 @@ naifu (or naifu-diffusion) is designed for training generative models with vario
 ## Installation
 
 To get started with Naifu, follow these steps to install the necessary dependencies:
-Clone the Naifu repository:
+
 ```bash
+# Clone the Naifu repository:
 git clone --depth 1 https://github.com/mikubill/naifu
+
+# Install the required Python packages:
+cd naifu && pip install -r requirements.txt
 ```
 
-Navigate to the cloned repository:
-```bash
-cd naifu
-```
-
-Install the required Python packages:
-```bash
-pip install -r requirements.txt
-```
-
-Make sure you have a compatible version of Python installed (Python 3.6 or above) before running the installation command.
+Make sure you have a compatible version of Python installed (Python 3.9 or above).
 
 ## Usage
 
