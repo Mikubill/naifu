@@ -144,7 +144,12 @@ class Trainer:
         else:
             self.fabric.call("save_checkpoint", model_path)
             if not save_weights_only:
-                self.fabric.save(model_path + "_optimizer.pt", {"optimizer": self.optimizer})
+                optimizer_state = {
+                    "optimizer": self.optimizer,
+                    "global_step": self.global_step,
+                    "current_epoch": self.current_epoch,
+                }
+                self.fabric.save(model_path + "_optimizer.pt", optimizer_state)
 
     def perform_sampling(self, is_last: bool = False):
         """
@@ -199,17 +204,21 @@ class Trainer:
         if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
             latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
 
+            remainder = {}
             if not cfg.save_weights_only:  # use normal fabric save
                 remainder = self.fabric.load(latest_checkpoint_path, state)
-                self.global_step = remainder.pop("self.global_step")
-                self.current_epoch = remainder.pop("self.current_epoch")
             else:
                 fabric.call("load_checkpoint", latest_checkpoint_path)
                 ckpt_path = Path(latest_checkpoint_path)
                 parent, ckpt_stem = ckpt_path.parent, ckpt_path.stem
                 opt_path = parent / (ckpt_stem + "_optimizer.pt")
                 if opt_path.is_file():
-                    fabric.load(opt_path, {"optimizer": self.optimizer})
+                    remainder = fabric.load(opt_path, {"optimizer": self.optimizer})
+                    rank_zero_print(f"Loaded optimizer state from {opt_path}")
+
+            if remainder:
+                self.global_step = remainder.pop("self.global_step")
+                self.current_epoch = remainder.pop("self.current_epoch")
 
             rank_zero_print(f"Resuming from checkpoint {latest_checkpoint_path}")
 

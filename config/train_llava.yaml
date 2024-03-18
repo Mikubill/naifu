@@ -8,7 +8,20 @@ model_params:
   trust_remote_code: true
   attn_implementation: sdpa
 
-use_lora: true
+vision_model_params:
+  version: v0
+  freeze_backbone: false
+  tune_mm_mlp_adapter: false
+  vision_tower: None
+  mm_vision_select_layer: -1
+  pretrain_mm_mlp_adapter: None
+  mm_projector_type: linear
+  mm_use_im_start_end: false
+  mm_use_im_patch_token: true
+  mm_patch_merge_type: 'flat'
+  mm_vision_select_feature: 'patch'
+
+use_lora: false
 q_lora: false
 lora_params:
   r: 64
@@ -30,7 +43,7 @@ trainer:
   save_format: diffusers
   checkpoint_dir: checkpoint
   checkpoint_freq: 1
-  checkpoint_steps: 10000
+  checkpoint_steps: 5000
   eval_samples: 1000
   eval_steps: 1000
   eval_epoch: 1

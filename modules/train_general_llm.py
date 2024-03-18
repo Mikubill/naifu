@@ -11,12 +11,6 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
 
-try:
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-except ImportError:
-    pass
-
-
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
     model = LLMModel(model_path, config, fabric.device)
@@ -62,8 +56,9 @@ class LLMModel(pl.LightningModule):
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)      
         self.logger_samples = []
         if use_lora:
+            from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
             rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
-            lora_config = LoraConfig(**config.lora_params)
+            lora_config = LoraConfig(**OmegaConf.to_container(config.lora_params))
             if use_q_lora:
                 model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 
