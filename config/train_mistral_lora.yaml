@@ -44,7 +44,7 @@ lightning:
 dataset:
   name: data.text_dataset.ChatMLDataset
   max_seq_length: 1024
-  chat_templates: chatml
+  cache_prompts: true
   train_dataset: 
     path: hypervariance/function-calling-sharegpt
     split: 'train[:90%]'

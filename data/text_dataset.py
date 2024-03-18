@@ -158,8 +158,8 @@ class ChatMLDataset(Dataset):
         tokenizer: object, 
         max_seq_length: int = -1,
         ignore_index: int = -100,
-        chat_template: str = "chatml",
         mask_inputs: str = True,
+        cache_prompts: bool = True,
         **kwargs,
     ):
         self.data = load_dataset(**dataset_args)
@@ -167,7 +167,7 @@ class ChatMLDataset(Dataset):
         self.max_seq_length = max_seq_length
         self.ignore_index = ignore_index
         self.cached_data_dict = {}
-        self.chat_templates = build_chat_template(chat_template)
+        self.cache_prompts = cache_prompts
         self.mask_inputs = mask_inputs
         
     def get_conversation_thread(self, prompt):
@@ -192,13 +192,12 @@ class ChatMLDataset(Dataset):
             turn,
             truncation=True,
             max_length=self.max_seq_length,
-            chat_template=self.chat_templates,
             **kwargs
         )
         turns = self.get_conversation_thread(prompts)
         prompt_ids = build_prompt([turns[0]], add_generation_prompt=True)
         input_ids = build_prompt(turns)
-
+        
         if self.mask_inputs:
             user_prompt_len = len(prompt_ids)
             labels = [-100] * user_prompt_len + input_ids[user_prompt_len:]
@@ -225,11 +224,11 @@ class ChatMLDataset(Dataset):
     def __len__(self):
         return len(self.data)
     
-    # https://github.com/QwenLM/Qwen/blob/3ad0c83bb9a31fb3ccb8b70b6ec5a92caa4f7170/finetune.py#L204
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
         ret = self.preprocess([self.data[i]])
-        self.cached_data_dict[i] = ret
+        if self.cache_prompts:
+            self.cached_data_dict[i] = ret
         return ret

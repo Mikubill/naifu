@@ -3,7 +3,7 @@ target: modules.train_general_llm.setup
 
 use_neftune: true
 neft_alpha: 50
-use_compile: true 
+use_compile: false
 model_params:
   trust_remote_code: true
   attn_implementation: sdpa
@@ -45,7 +45,7 @@ lightning:
 dataset:
   name: data.text_dataset.ChatMLDataset
   max_seq_length: 1024
-  chat_templates: chatml
+  cache_ids: true
   train_dataset: 
     path: hypervariance/function-calling-sharegpt
     split: 'train[:90%]'
