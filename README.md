@@ -114,6 +114,23 @@ Train GPT2 model
 python trainer.py config/train_gpt2.yaml
 ```
 
+Train with [Phi-1.5/2](https://huggingface.co/microsoft) model
+```bash
+python trainer.py config/train_phi2.yaml
+```
+
+Train language models ([LLaMA](https://github.com/facebookresearch/llama), [Qwen](https://huggingface.co/Qwen), [Gemma](https://huggingface.co/google) etc)
+```bash
+# Note that prepare data in sharegpt/chatml format, or define your own dataset in data/text_dataset.py
+# See example dataset for reference: function-calling-sharegpt
+python trainer.py config/train_general_llm.yaml
+```
+
+Train language models with lora or qlora (For example, [Mistral](https://huggingface.co/mistralai))
+```bash
+python trainer.py config/train_mistral_lora.yaml
+```
+
 ## Preparing Datasets
 
 Each configuration file may have different dataset requirements. Make sure to check the specific configuration file for any dataset specifications or requirements.

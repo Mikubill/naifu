@@ -1,8 +1,9 @@
 name: test-run
-target: modules.train.setup
+target: modules.train_sdxl.setup
+precision_hook: true
 
 trainer:
-  model_path: sd_xl_base_1.0_0.9vae.safetensors
+  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
   seed: 1138
   wandb_id: ""
@@ -41,10 +42,10 @@ lightning:
 
 dataset:
   name: data.arb_dataset.AspectRatioDataset 
-  # target_area: 1_048_576 # 1024*1024
-  # min_size: 512
-  # max_size: 2048
-  img_path: "/notebooks/BA"
+  target_area: 1_048_576 # 1024*1024
+  min_size: 512
+  max_size: 2048
+  img_path: "../hanekoto"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:

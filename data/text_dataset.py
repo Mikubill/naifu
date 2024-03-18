@@ -159,7 +159,7 @@ class ChatMLDataset(Dataset):
         max_seq_length: int = -1,
         ignore_index: int = -100,
         chat_template: str = "chatml",
-        mask_inputs: str = False,
+        mask_inputs: str = True,
         **kwargs,
     ):
         self.data = load_dataset(**dataset_args)

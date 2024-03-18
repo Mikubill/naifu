@@ -70,6 +70,7 @@ class LLMModel(pl.LightningModule):
             self.model = get_peft_model(model, lora_config)
             self.model.enable_input_require_grads()
             self.model.print_trainable_parameters()
+            self.tokenizer.padding_side  = 'left'
         else:
             self.model = model
             self.model = torch.compile(self.model) if config.use_compile else self.model

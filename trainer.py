@@ -1,4 +1,4 @@
-# python trainer.py --model_path=/tmp/model --config config/test.yaml
+# python trainer.py --config config/test.yaml
 import os
 import sys
 from typing import Dict, Tuple
@@ -333,18 +333,17 @@ def main():
     config.trainer.resume = args.resume
     plugins = []
 
-    strategy = config.lightning.get("strategy", "auto")
+    strategy = config.lightning.pop("strategy", "auto")
+    _compatible = strategy in ["auto", "ddp"] or config.get("precision_hook", False)
     if "." in strategy:
-        strategy = get_class(strategy)
-
-    if "strategy" in config.lightning:
-        del config.lightning.strategy
+        _params = config.lightning.pop("strategy_params", {})
+        strategy = get_class(strategy)(**_params)
 
     if os.environ.get("SM_TRAINING", False) or os.environ.get("SM_HOSTS", False):
         strategy, config = setup_smddp(config)
 
     target_precision = config.lightning.precision
-    if target_precision in ["16-mixed", "bf16-mixed"]:
+    if target_precision in ["16-mixed", "bf16-mixed"] and _compatible:
         config.lightning.precision = None
         plugins.append(NonAutocastMixedPrecision(target_precision, "cuda"))
 

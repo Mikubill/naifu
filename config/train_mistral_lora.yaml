@@ -3,24 +3,23 @@ target: modules.train_general_llm.setup
 
 use_neftune: true
 neft_alpha: 50
-use_compile: true 
+use_compile: false 
 model_params:
   trust_remote_code: true
   attn_implementation: sdpa
 
-use_lora: false
+use_lora: true
 q_lora: false
 lora_params:
   r: 64
-  lora_alpha: 16
-  target_modules: ["q_proj","k_proj","v_proj","o_proj","up_proj","gate_proj","down_proj"]
+  lora_alpha: 128
+  target_modules: ["embed_tokens", "lm_head", "q_proj", "v_proj"]
   lora_dropout: 0.05
   bias: "none"
   task_type: "CAUSAL_LM"
 
 trainer:
-  # model_path: mistralai/Mixtral-8x7B-v0.1
-  model_path: Qwen/Qwen1.5-7B-Chat
+  model_path: mistralai/Mistral-7B-v0.1
   batch_size: 16
   seed: 1138
   wandb_id: "qwen"
