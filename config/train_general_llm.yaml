@@ -8,7 +8,7 @@ model_params:
   trust_remote_code: true
   attn_implementation: sdpa
 
-use_lora: true
+use_lora: false
 q_lora: false
 lora_params:
   r: 64
