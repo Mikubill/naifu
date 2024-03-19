@@ -173,15 +173,13 @@ class StableDiffusionModel(SupervisedFineTune):
         if self.config.advanced.get("train_text_encoder_1"):
             self.lycoris_te1.to(self.target_device).apply_to()
             self.lycoris_te1.requires_grad_(True)
-            self.text_encoder_1.text_model.embeddings.requires_grad_(True)
-            self.text_encoder_2.text_model.embeddings.requires_grad_(True)
 
         if self.config.advanced.get("train_text_encoder_2"):
             self.lycoris_te2.to(self.target_device).apply_to()
             self.lycoris_te2.requires_grad_(True)
-            self.text_encoder_1.text_model.embeddings.requires_grad_(True)
-            self.text_encoder_2.text_model.embeddings.requires_grad_(True)
-            
+    
+        self.text_encoder_1.text_model.embeddings.requires_grad_(True)
+        self.text_encoder_2.text_model.embeddings.requires_grad_(True)        
 
     def encode_batch(self, batch):
         hidden1, hidden2, pooled = get_hidden_states_sdxl(
