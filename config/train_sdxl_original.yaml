@@ -1,5 +1,5 @@
 name: test-run
-target: modules.train_sdxl.setup
+target: modules.train_sdxl_original.setup
 
 denoiser:
   target: models.sgm.denoiser.DiscreteDenoiser

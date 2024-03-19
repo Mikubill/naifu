@@ -13,7 +13,7 @@ from transformers import AutoTokenizer, AutoConfig
 from transformers import BitsAndBytesConfig
 from models.llava.llava_llama import LlavaLlamaForCausalLM
 from models.llava.llava_mpt import LlavaMptForCausalLM
-from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+
 
 ALL_LAYERNORM_LAYERS = [nn.LayerNorm]
 def get_parameter_names(model, forbidden_layer_types):
@@ -30,6 +30,21 @@ def get_parameter_names(model, forbidden_layer_types):
     # Add model specific parameters (defined with nn.Parameter) since they are not in any child.
     result += list(model._parameters.keys())
     return result
+
+def find_all_linear_names(model):
+    cls = torch.nn.Linear
+    lora_module_names = set()
+    multimodal_keywords = ['mm_projector', 'vision_tower', 'vision_resampler']
+    for name, module in model.named_modules():
+        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
+            continue
+        if isinstance(module, cls):
+            names = name.split('.')
+            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+
+    if 'lm_head' in lora_module_names: # needed for 16-bit
+        lora_module_names.remove('lm_head')
+    return list(lora_module_names)
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     try:
@@ -54,6 +69,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     dataset, dataloader = model.prepare_dataset(config)
 
     opt_model = model
+    optim_param = config.optimizer.params
     mm_projector_lr = config.vision_model_params.mm_projector_lr
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -103,7 +119,6 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
             },
         ]
 
-    optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
     scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
 
@@ -149,14 +164,18 @@ class LLaVAModel(pl.LightningModule):
                 quantization_config=q_config,
                 **config.model_params
             )
-        
+
         mm_config = config.vision_model_params
-        model.get_model().initialize_vision_modules(
-            model_args=mm_config,
-            fsdp=config.lightning.get("strategy", None) is "fsdp"
-        )
+        if isinstance(mm_config.pretrain_mm_mlp_adapter, str) and \
+            mm_config.pretrain_mm_mlp_adapter.startswith('https://'):
+            # download the adapter
+            torch.hub.download_url_to_file(mm_config.pretrain_mm_mlp_adapter, "pretrain_mm_projector.pt")
+            mm_config.pretrain_mm_mlp_adapter = "pretrain_mm_projector.pt"
+        
+        model.get_model().initialize_vision_modules(model_args=mm_config)
         vision_tower = model.get_vision_tower().to(dtype=next(model.parameters()).dtype)
         self.image_processor = vision_tower.image_processor
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)     
         
         # update model config?
         model.config.image_aspect_ratio = mm_config.image_aspect_ratio
@@ -164,7 +183,6 @@ class LLaVAModel(pl.LightningModule):
         model.config.tokenizer_padding_side = self.tokenizer.padding_side
         model.config.tokenizer_model_max_length = self.tokenizer.model_max_length
         model.config.freeze_mm_mlp_adapter = not mm_config.tune_mm_mlp_adapter
-        
         
         if mm_config.tune_mm_mlp_adapter:
             model.requires_grad_(False)
@@ -177,44 +195,36 @@ class LLaVAModel(pl.LightningModule):
         model.config.mm_use_im_start_end = mm_config.mm_use_im_start_end
         model.config.mm_projector_lr = mm_config.mm_projector_lr
         model.config.mm_use_im_patch_token = mm_config.mm_use_im_patch_token
+        config.dataset.update({"model_version": mm_config.version})
         
         model.gradient_checkpointing_enable()
-        model.train()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)      
+        model.train() 
         self.logger_samples = []
-        # if use_lora:
-        #     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-        #     rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
-        #     lora_config = LoraConfig(**config.lora_params)
-        #     if use_q_lora:
-        #         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        if use_lora:
+            from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+            rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
+            config.lora_params.update({"target_modules": find_all_linear_names(model)})
+            lora_config = LoraConfig(**config.lora_params)
+            if use_q_lora:
+                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 
-        #     self.model = get_peft_model(model, lora_config)
-        #     self.model.enable_input_require_grads()
-        #     self.model.print_trainable_parameters()
-        #     self.tokenizer.padding_side  = 'left'
-        # else:
-        self.model = model
-        self.model = torch.compile(self.model) if config.use_compile else self.model
-        self.model.use_neftune = config.use_neftune
-        self.model.neft_alpha = config.neft_alpha  
+            self.model = get_peft_model(model, lora_config)
+            self.model.enable_input_require_grads()
+            self.model.print_trainable_parameters()
+            self.tokenizer.padding_side  = 'left'
+        else:
+            self.model = model
         
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name)
         train_dataset = dataset_class(
-            dataset_args=config.dataset.train_dataset,
             tokenizer=self.tokenizer,
-            **config.dataset,
-        )
-        val_dataset = dataset_class(
-            dataset_args=config.dataset.val_dataset,
-            tokenizer=self.tokenizer,
+            image_processor=self.image_processor,
+            mm_config=self.config.vision_model_params,
             **config.dataset,
         )
         bsz = config.trainer.batch_size
-        train_dataloader = train_dataset.build_dataloader(batch_size=bsz)
-        self.val_dataset = val_dataset
-        self.val_dataloader = val_dataset.build_dataloader(batch_size=bsz)
+        self.dataset = train_dataloader = train_dataset.build_dataloader(batch_size=bsz)
         return train_dataset, train_dataloader
 
     def forward(self, batch):
@@ -224,51 +234,6 @@ class LLaVAModel(pl.LightningModule):
         out = self.model(**batch)
         loss = out["loss"]
         return loss
-
-    @torch.no_grad()
-    def eval_model(self, logger, current_epoch, global_step):
-        self.model.eval()
-        val_loss = 0
-        total_val_steps = 0
-        val_steps = self.config.trainer.get("eval_samples", 100)
-        for batch in self.val_dataloader:
-            for k, v in batch.items():
-                batch[k] = v.to(self.target_device)
-                
-            loss = self.model(**batch)["loss"]
-            val_loss += loss.item()
-            if val_steps < 0:
-                break
-            val_steps -= 1
-            total_val_steps += 1
-
-        val_loss /= total_val_steps
-        logger.log_metrics({"val_loss": val_loss}, step=global_step)
-        self.model.train()
-
-    @rank_zero_only
-    def generate_samples(self, logger, current_epoch, global_step):
-        config = self.config.sampling
-        prompts = list(config.prompts)
-        self.model.eval()
-        for curr_prompt in prompts:
-            ret = self.val_dataset.preprocess(curr_prompt)
-            for k, v in ret.items():
-                ret[k] = v.to(self.target_device)
-                
-            generated_output = self.model.generate(
-                input_ids=ret["input_ids"][0],
-                attention_mask=ret["attention_mask"][0],
-                max_length=config.max_length,
-            )
-            generated_text = self.tokenizer.decode(
-                generated_output[0], skip_special_tokens=True
-            )
-            self.logger_samples.append([global_step, curr_prompt, generated_text])
-
-        columns = ["global_step", "inputs", "predictions"]
-        logger.log_text(key="generated_samples", columns=columns, data=self.logger_samples)
-        self.model.train()
 
     @rank_zero_only
     def save_checkpoint(self, model_path):

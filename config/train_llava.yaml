@@ -1,39 +1,52 @@
 name: test-run
-target: modules.train_general_llm.setup
+target: modules.train_llava.setup
 
-use_neftune: true
-neft_alpha: 50
-use_compile: false
 model_params:
   trust_remote_code: true
   attn_implementation: sdpa
 
+# LLaVA v1.5 pretrain config
+# vision_model_params:
+#   version: plain # v1
+#   vision_tower: openai/clip-vit-large-patch14-336
+#   mm_projector_type: mlp2x_gelu
+#   tune_mm_mlp_adapter: true
+#   mm_vision_select_layer: -2
+#   mm_use_im_start_end: false
+#   mm_use_im_patch_token: false
+#   pretrain_mm_mlp_adapter: null
+#   mm_patch_merge_type: 'flat'
+#   mm_vision_select_feature: 'patch'
+#   image_aspect_ratio: 'square'
+#   mm_projector_lr: null
+
+# LLaVA v1.5 finetune config
 vision_model_params:
-  version: v0
-  freeze_backbone: false
+  version: v1
+  vision_tower: openai/clip-vit-large-patch14-336
+  mm_projector_type: mlp2x_gelu
   tune_mm_mlp_adapter: false
-  vision_tower: None
-  mm_vision_select_layer: -1
-  pretrain_mm_mlp_adapter: None
-  mm_projector_type: linear
+  mm_vision_select_layer: -2
   mm_use_im_start_end: false
-  mm_use_im_patch_token: true
+  mm_use_im_patch_token: false
+  pretrain_mm_mlp_adapter: https://huggingface.co/liuhaotian/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/resolve/main/mm_projector.bin
   mm_patch_merge_type: 'flat'
   mm_vision_select_feature: 'patch'
+  image_aspect_ratio: 'pad'
+  mm_projector_lr: 2e-5
 
-use_lora: false
+use_lora: true
 q_lora: false
 lora_params:
-  r: 64
-  lora_alpha: 16
-  target_modules: ["q_proj","k_proj","v_proj","o_proj","up_proj","gate_proj","down_proj"]
+  r: 128
+  lora_alpha: 256
+  target_modules: ... # will inherit from the model_params
   lora_dropout: 0.05
   bias: "none"
   task_type: "CAUSAL_LM"
 
 trainer:
-  # model_path: mistralai/Mixtral-8x7B-v0.1
-  model_path: Qwen/Qwen1.5-7B-Chat
+  model_path: liuhaotian/llava-v1.6-vicuna-7b
   batch_size: 16
   seed: 1138
   wandb_id: "qwen"
@@ -56,15 +69,10 @@ lightning:
   precision: bf16-mixed
 
 dataset:
-  name: data.text_dataset.ChatMLDataset
-  max_seq_length: 1024
-  cache_ids: true
-  train_dataset: 
-    path: hypervariance/function-calling-sharegpt
-    split: 'train[:90%]'
-  val_dataset: 
-    path: hypervariance/function-calling-sharegpt
-    split: 'train[90%:]'
+  name: data.llava_dataset.LazySupervisedDataset
+  model_max_length: 2048
+  data_path: /home/ubuntu/llava/blip_laion_cc_sbu_558k.json
+  image_folder: /home/ubuntu/llava/
   
 optimizer:
   name: bitsandbytes.optim.AdamW8bit

@@ -125,6 +125,11 @@ Train language models with lora or qlora (For example, [Mistral](https://hugging
 python trainer.py config/train_mistral_lora.yaml
 ```
 
+Train [LLaVA](https://github.com/haotian-liu/LLaVA/tree/main)
+```bash
+python trainer.py config/train_llava.yaml
+```
+
 ## Preparing Datasets
 
 Each configuration file may have different dataset requirements. Make sure to check the specific configuration file for any dataset specifications or requirements.
