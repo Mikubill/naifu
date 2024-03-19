@@ -28,8 +28,9 @@ class LazySupervisedDataset(Dataset):
         tokenizer, 
         mm_config, 
         image_processor, 
-        version="v1", 
+        version: str = "v1", 
         model_max_length: int = 512,
+        is_multimodel: bool = True,
         **kwargs
     ):
         super(LazySupervisedDataset, self).__init__()
@@ -40,6 +41,7 @@ class LazySupervisedDataset(Dataset):
         self.list_data_dict = list_data_dict
         self.image_folder = image_folder
         self.image_processor = image_processor
+        self.is_multimodal = is_multimodel
         self.model_max_length = model_max_length
 
     def __len__(self):
@@ -111,8 +113,7 @@ class LazySupervisedDataset(Dataset):
         return data_dict
     
     def preprocess_multimodal(self, sources) -> Dict:
-        is_multimodal = True
-        if not is_multimodal:
+        if not self.is_multimodal:
             return sources
 
         for source in sources:

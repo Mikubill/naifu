@@ -165,9 +165,7 @@ class Trainer:
         sampling_steps = sampling_cfg.every_n_steps
         sample_by_step = sampling_steps > 0 and self.global_step % sampling_steps == 0
         sampling_epochs = sampling_cfg.every_n_epochs
-        sample_by_epoch = (
-            sampling_epochs > 0 and self.current_epoch % sampling_epochs == 0
-        )
+        sample_by_epoch = sampling_epochs > 0 and self.current_epoch % sampling_epochs == 0
 
         if not enabled_sampling or len(sampling_cfg.prompts) == 0:
             return

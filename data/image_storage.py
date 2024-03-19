@@ -137,7 +137,9 @@ class StoreBase(Dataset):
                 else InterpolationMode.BICUBIC
             )
             entry.pixel = Resize(
-                (resize_h, resize_w), interpolation=interp, antialias=None
+                size=(resize_h, resize_w), 
+                interpolation=interp, 
+                antialias=None
             )(entry.pixel)
         else:
             h, w = h // 8, w // 8
@@ -385,12 +387,6 @@ class DirectoryImageStore(StoreBase):
         _img = Image.open(p)
         if _img.mode == "RGB":
             img = np.array(_img)
-        elif _img.mode == "RGBA":
-            img = np.array(_img)
-            rgb, alpha = img[:, :, :3], img[:, :, 3:]
-            fp_alpha = alpha / 255
-            rgb[:] = rgb * fp_alpha + (255 - alpha)
-            img = rgb
         else:
             img = np.array(_img.convert("RGB"))
 

@@ -22,6 +22,8 @@ Naifu provides a flexible and intuitive way to train models using various config
 
 ```bash
 python trainer.py --config config/<config_file>
+
+# or (same as --config)
 python trainer.py config/<config_file>
 ```
 
@@ -33,10 +35,17 @@ Choose the appropriate configuration file based on training objectives and envir
 
 Train SDXL (Stable Diffusion XL) model
 ```bash
-# stabilityai/stable-diffusion-xl-base-1.0
+# prepare image data (to latents)
+python scripts/encode_latents_xl.py -i <input_path> -o <encoded_path>
+
+# ssd_xl_base_1.0_0.9vae.safetensors
 python trainer.py config/train_sdxl.yaml
 
-# use original sgm denoiser and loss weighting
+# For huggingface model support
+# stabilityai/stable-diffusion-xl-base-1.0
+python trainer.py config/train_diffusers.yaml
+
+# use original sgm loss module
 python trainer.py config/train_sdxl_original.yaml
 ```
 
@@ -51,13 +60,6 @@ Train original Stable Diffusion 1.4 or 1.5 model
 # runwayml/stable-diffusion-v1-5
 # Note: will save in diffusers format
 python trainer.py config/train_sd15.yaml
-```
-
-Train SDXL model with diffusers backbone
-```bash
-# stabilityai/stable-diffusion-xl-base-1.0
-# Note: will save in diffusers format
-python trainer.py config/train_diffusers.yaml
 ```
 
 Train SDXL model with LyCORIS.
@@ -128,17 +130,6 @@ python trainer.py config/train_mistral_lora.yaml
 Train [LLaVA](https://github.com/haotian-liu/LLaVA/tree/main)
 ```bash
 python trainer.py config/train_llava.yaml
-```
-
-## Preparing Datasets
-
-Each configuration file may have different dataset requirements. Make sure to check the specific configuration file for any dataset specifications or requirements.
-
-You can use your dataset directly for training. Simply point the configuration file to the location of your dataset. If you want to reduce the VRAM usage during training, you can encode your dataset to latents using the `encode_latents.py` script.
-
-```bash
-# prepare images in input_path
-python encode_latents.py -i <input_path> -o <encoded_path>
 ```
 
 ## Other branches

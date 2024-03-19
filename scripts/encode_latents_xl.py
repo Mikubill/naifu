@@ -24,12 +24,6 @@ def load_entry(p: Path, label_ext: str = ".txt"):
         prompt = f.read()
     if _img.mode == "RGB":
         img = np.array(_img)
-    elif _img.mode == "RGBA":
-        img = np.array(_img)
-        rgb, alpha = img[:, :, :3], img[:, :, 3:]
-        fp_alpha = alpha / 255
-        rgb[:] = rgb * fp_alpha + (255 - alpha)
-        img = rgb
     else:
         img = np.array(_img.convert("RGB"))
     return img, prompt
