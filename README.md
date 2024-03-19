@@ -38,7 +38,7 @@ Train SDXL (Stable Diffusion XL) model
 # prepare image data (to latents)
 python scripts/encode_latents_xl.py -i <input_path> -o <encoded_path>
 
-# ssd_xl_base_1.0_0.9vae.safetensors
+# sd_xl_base_1.0_0.9vae.safetensors
 python trainer.py config/train_sdxl.yaml
 
 # For huggingface model support
