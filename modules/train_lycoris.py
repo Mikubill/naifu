@@ -204,8 +204,8 @@ class StableDiffusionModel(SupervisedFineTune):
         }
         return cond
 
-    def load_checkpoint(self, model_path):
-        sd = load_torch_file(model_path, self.target_device)
+    def load_checkpoint(self, sd):
+        sd = sd["state_dict"] if "state_dict" in sd else sd
         te, te2, unet = {}, {}, {}
         for key in list(sd.keys()):
             if key.startswith("lora_unet"):
@@ -223,9 +223,8 @@ class StableDiffusionModel(SupervisedFineTune):
             self.lycoris_te2.load_state_dict(te2)
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer
-        string_cfg = OmegaConf.to_yaml(self.config)
         state_dict = {}
 
         # build lycoris state_dict
@@ -242,7 +241,7 @@ class StableDiffusionModel(SupervisedFineTune):
 
         if cfg.get("save_format") == "safetensors":
             model_path += ".safetensors"
-            save_file(state_dict, model_path, metadata={"trainer_config": string_cfg})
+            save_file(state_dict, model_path, metadata=metadata)
         else:
             model_path += ".ckpt"
             torch.save(state_dict, model_path)

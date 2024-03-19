@@ -127,8 +127,7 @@ class PhiModel(pl.LightningModule):
         self.model.train()
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
-        cfg = self.config.trainer
+    def save_checkpoint(self, model_path, metadata):
         self.model.save_pretrained(model_path)
         self.tokenizer.save_pretrained(model_path)
         rank_zero_print(f"Saved model to {model_path}")

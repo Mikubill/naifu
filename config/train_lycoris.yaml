@@ -51,7 +51,7 @@ dataset:
   # target_area: 1_048_576 # 1024*1024
   # min_size: 512
   # max_size: 2048
-  img_path: "/notebooks/BA_latents"
+  img_path: "../hanekoto"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:

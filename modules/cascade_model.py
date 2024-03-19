@@ -235,34 +235,28 @@ class StableCascadeModel(pl.LightningModule):
         image = Image.fromarray((image * 255).astype(np.uint8))
         return [image]
     
-    def load_checkpoint(self, model_path):
-        sd = load_torch_file(model_path, self.target_device)
-        self.stage_c.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
-        rank_zero_print(f"Loaded model from {model_path}")
+    def load_checkpoint(self, sd):
+        self.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
     
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer
-        string_cfg = OmegaConf.to_yaml(self.config)
         if self.config.advanced.get("train_text_encoder"):
             self.text_encoder.save_pretrained(f"{model_path}_text_encoder")
+
+        state_dict = self.stage_c.state_dict()
+        # check if any keys startswith modules. if so, remove the modules. prefix
+        if any([key.startswith("module.") for key in state_dict.keys()]):
+            state_dict = {key.replace("module.", ""): value for key, value in state_dict.items()}
             
         if cfg.get("save_format") == "safetensors":
             model_path += ".safetensors"
-            state_dict = self.stage_c.state_dict()
-            # check if any keys startswith modules. if so, remove the modules. prefix
-            if any([key.startswith("module.") for key in state_dict.keys()]):
-                state_dict = {
-                    key.replace("module.", ""): value
-                    for key, value in state_dict.items()
-                }
-            save_file(state_dict, model_path, metadata={"trainer_config": string_cfg})
+            save_file(state_dict, model_path, metadata=metadata)
         else:
+            state_dict = {"state_dict": state_dict, **metadata}  
             model_path += ".ckpt"
-            torch.save(
-                {"state_dict": self.stage_c.state_dict(), "trainer_config": string_cfg},
-                model_path,
-            )
+            torch.save(state_dict, model_path)
+            
         rank_zero_print(f"Saved model to {model_path}")
 
     def forward(self, batch):

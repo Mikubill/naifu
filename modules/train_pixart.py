@@ -245,24 +245,19 @@ class DiffusionModel(pl.LightningModule):
         return image
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer
-        string_cfg = OmegaConf.to_yaml(self.config)
+        state_dict = self.model.state_dict()
+        # check if any keys startswith modules. if so, remove the modules. prefix
+        if any([key.startswith("module.") for key in state_dict.keys()]):
+            state_dict = {key.replace("module.", ""): value for key, value in state_dict.items()}
+            
         if cfg.get("save_format") == "safetensors":
-
             model_path += ".safetensors"
-            state_dict = self.model.state_dict()
-            # check if any keys startswith modules. if so, remove the modules. prefix
-            if any([key.startswith("module.") for key in state_dict.keys()]):
-                state_dict = {
-                    key.replace("module.", ""): value
-                    for key, value in state_dict.items()
-                }
-            save_file(state_dict, model_path, metadata={"trainer_config": string_cfg})
+            save_file(state_dict, model_path, metadata=metadata)
         else:
             model_path += ".ckpt"
-            torch.save(
-                {"state_dict": self.model.state_dict(), "trainer_config": string_cfg},
-                model_path,
-            )
+            state_dict = {"state_dict": state_dict, **metadata},
+            torch.save(state_dict, model_path)
+            
         rank_zero_print(f"Saved model to {model_path}")

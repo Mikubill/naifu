@@ -114,7 +114,7 @@ class GPT2Model(pl.LightningModule):
         self.model.train()
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer
         self.model.save_pretrained(model_path)
         self.tokenizer.save_pretrained(model_path)

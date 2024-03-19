@@ -317,7 +317,7 @@ class SupervisedFineTune(StableDiffusionModel):
         return loss
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         lcm_scheduler = LCMScheduler.from_pretrained(
             "SimianLuo/LCM_Dreamshaper_v7", subfolder="scheduler"
         )

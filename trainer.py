@@ -142,13 +142,13 @@ class Trainer:
         if use_fabric_save:
             self.fabric.save(model_path + ".ckpt", state)
         else:
-            self.fabric.call("save_checkpoint", model_path)
+            metadata = {
+                "global_step": str(self.global_step),
+                "current_epoch": str(self.current_epoch),
+            }
+            self.fabric.call("save_checkpoint", model_path, metadata)
             if not save_weights_only:
-                optimizer_state = {
-                    "optimizer": self.optimizer,
-                    "global_step": self.global_step,
-                    "current_epoch": self.current_epoch,
-                }
+                optimizer_state = {"optimizer": self.optimizer, **metadata}
                 self.fabric.save(model_path + "_optimizer.pt", optimizer_state)
 
     def perform_sampling(self, is_last: bool = False):
@@ -197,28 +197,35 @@ class Trainer:
 
         local_step = 0
         os.makedirs(cfg.checkpoint_dir, exist_ok=True)
-        state = {"state_dict": self.model, "optimizer": self.optimizer}
+        state = {
+            "state_dict": self.model, 
+            "optimizer": self.optimizer
+        }
 
-        if Path(cfg.checkpoint_dir).is_dir() and cfg.get("resume"):
-            latest_checkpoint_path = get_latest_checkpoint(cfg.checkpoint_dir)
-
+        if Path(cfg.checkpoint_dir).is_dir():
+            latest_ckpt = get_latest_checkpoint(cfg.checkpoint_dir)
+            
+        if cfg.get("resume") and latest_ckpt:
             remainder = {}
-            if not cfg.save_weights_only:  # use normal fabric save
-                remainder = self.fabric.load(latest_checkpoint_path, state)
+            if cfg.get("use_fabric_save", False):
+                remainder = self.fabric.load(latest_ckpt, state)
             else:
-                fabric.call("load_checkpoint", latest_checkpoint_path)
-                ckpt_path = Path(latest_checkpoint_path)
-                parent, ckpt_stem = ckpt_path.parent, ckpt_path.stem
-                opt_path = parent / (ckpt_stem + "_optimizer.pt")
+                remainder = sd = load_torch_file(latest_ckpt, self.model.target_device, extract=False)
+                if latest_ckpt.endswith(".safetensors"):
+                    remainder = safetensors.safe_open(latest_ckpt, "pt").metadata()
+                fabric.call("load_checkpoint", sd)
+                
+                opt = Path(latest_ckpt).stem + "_optimizer"
+                opt_path = Path(latest_ckpt).with_stem(opt)
                 if opt_path.is_file():
                     remainder = fabric.load(opt_path, {"optimizer": self.optimizer})
                     rank_zero_print(f"Loaded optimizer state from {opt_path}")
 
             if remainder:
-                self.global_step = remainder.pop("global_step", 0)
-                self.current_epoch = remainder.pop("current_epoch", 0)
+                self.global_step = int(remainder.pop("global_step", 0))
+                self.current_epoch = int(remainder.pop("current_epoch", 0))
 
-            rank_zero_print(f"Resuming from checkpoint {latest_checkpoint_path}")
+            rank_zero_print(f"Resuming from checkpoint {latest_ckpt}")
 
         should_stop = False
         if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:

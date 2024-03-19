@@ -1,4 +1,5 @@
 import torch
+import json
 import torch.utils.checkpoint
 import lightning as pl
 
@@ -174,7 +175,7 @@ class StableDiffusionModel(pl.LightningModule):
         return image
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         self.pipeline.save_pretrained(model_path)
         rank_zero_print(f"Saved model to {model_path}")
 

@@ -238,7 +238,7 @@ class LLaVAModel(pl.LightningModule):
         return loss
 
     @rank_zero_only
-    def save_checkpoint(self, model_path):
+    def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer
         if self.model.config.tune_mm_mlp_adapter:
             keys_to_match = ['mm_projector', 'vision_resampler']

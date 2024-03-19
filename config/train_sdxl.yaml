@@ -26,7 +26,7 @@ advanced:
   text_encoder_2_lr: 3e-6
   offset_noise: true
   offset_noise_val: 0.0375
-  min_snr: false
+  min_snr: true
   min_snr_val: 5
   timestep_start: 0
   timestep_end: 1000
@@ -43,7 +43,7 @@ dataset:
   target_area: 1_048_576 # 1024*1024
   min_size: 512
   max_size: 2048
-  img_path: "/notebooks/BA_latents"
+  img_path: "../hanekoto"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:

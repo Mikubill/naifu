@@ -45,7 +45,7 @@ class EmptyInitWrapper(torch.overrides.TorchFunctionMode):
         return func(*args, **kwargs)
 
 
-def load_torch_file(ckpt, safe_load=False, device=None):
+def load_torch_file(ckpt, safe_load=False, device=None, extract=True):
     if ckpt.lower().endswith(".safetensors"):
         sd = safetensors.torch.load_file(ckpt, device=device)
     else:
@@ -55,16 +55,19 @@ def load_torch_file(ckpt, safe_load=False, device=None):
                     "Warning torch.load doesn't support weights_only on this pytorch version, loading unsafely."
                 )
                 safe_load = False
+                
         if safe_load:
             pl_sd = torch.load(ckpt, map_location="cpu", weights_only=True)
         else:
             pl_sd = torch.load(ckpt, map_location="cpu")
-        if "global_step" in pl_sd:
-            rank_zero_print(f"Global Step: {pl_sd['global_step']}")
-        if "state_dict" in pl_sd:
-            sd = pl_sd["state_dict"]
-        else:
-            sd = pl_sd
+    
+        sd = pl_sd
+        if extract:
+            if "global_step" in pl_sd:
+                rank_zero_print(f"Global Step: {pl_sd['global_step']}")
+            if "state_dict" in pl_sd:
+                sd = pl_sd["state_dict"]
+                
     return sd
 
 
@@ -122,6 +125,8 @@ def get_latest_checkpoint(checkpoint_dir: str):
     if not os.path.isdir(checkpoint_dir):
         return None
     items = sorted(os.listdir(checkpoint_dir))
+    # remove all _optimizer.pt
+    items = [x for x in items if "_optimizer" not in x]
     if not items:
         return None
     return os.path.join(checkpoint_dir, items[-1])
