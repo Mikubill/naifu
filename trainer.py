@@ -217,8 +217,8 @@ class Trainer:
                     rank_zero_print(f"Loaded optimizer state from {opt_path}")
 
             if remainder:
-                self.global_step = remainder.pop("self.global_step")
-                self.current_epoch = remainder.pop("self.current_epoch")
+                self.global_step = remainder.pop("global_step", 0)
+                self.current_epoch = remainder.pop("current_epoch", 0)
 
             rank_zero_print(f"Resuming from checkpoint {latest_checkpoint_path}")
 
