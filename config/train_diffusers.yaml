@@ -2,7 +2,7 @@ name: test-run
 target: modules.train_diffusers.setup
 
 trainer:
-  model_path: sd_xl_base_1.0_0.9vae.safetensors
+  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 4
   seed: 1138
   wandb_id: ""

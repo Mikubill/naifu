@@ -18,7 +18,9 @@ except:
     # print("no module 'xformers'. Processing without...")
 
 from .attention import LinearAttention, MemoryEfficientCrossAttention
-from .model_util import rank_zero_print
+
+import logging
+logger = logging.getLogger("Trainer")
 
 
 def get_timestep_embedding(timesteps, embedding_dim):
@@ -294,7 +296,7 @@ def make_attn(in_channels, attn_type="vanilla", attn_kwargs=None):
         assert attn_kwargs is None
         return AttnBlock(in_channels)
     elif attn_type == "vanilla-xformers":
-        rank_zero_print(f"building MemoryEfficientAttnBlock with {in_channels} in_channels...")
+        logger.info(f"building MemoryEfficientAttnBlock with {in_channels} in_channels...")
         return MemoryEfficientAttnBlock(in_channels)
     elif type == "memory-efficient-cross-attn":
         attn_kwargs["query_dim"] = in_channels
@@ -634,7 +636,7 @@ class Decoder(nn.Module):
         block_in = ch * ch_mult[self.num_resolutions - 1]
         curr_res = resolution // 2 ** (self.num_resolutions - 1)
         self.z_shape = (1, z_channels, curr_res, curr_res)
-        rank_zero_print(
+        logger.info(
             "Working with z of shape {} = {} dimensions.".format(
                 self.z_shape, np.prod(self.z_shape)
             )

@@ -11,9 +11,9 @@ import lightning as pl
 import argparse
 
 from common.utils import *
+from common.logging import logger
 from omegaconf import OmegaConf
 from pathlib import Path
-from tqdm import tqdm
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -89,9 +89,6 @@ class Trainer:
         Save the model checkpoint.
 
         Args:
-            self.global_step (int): The current global step.
-            self.current_epoch (int): The current epoch.
-            state (Dict): The state dictionary.
             is_last (bool): Indicates if it is the last checkpoint.
         """
         config = self.model.config
@@ -104,7 +101,7 @@ class Trainer:
         should_eval = (is_last and is_eval_epoch) or is_eval_step
         if not should_eval:
             return
-        
+
         self.fabric.call(
             "eval_model",
             logger=self.fabric.logger,
@@ -117,8 +114,6 @@ class Trainer:
         Save the model checkpoint.
 
         Args:
-            self.global_step (int): The current global step.
-            self.current_epoch (int): The current epoch.
             state (Dict): The state dictionary.
             is_last (bool): Indicates if it is the last checkpoint.
         """
@@ -138,7 +133,7 @@ class Trainer:
         model_path = os.path.join(ckpt_dir, f"checkpoint-{postfix}")
         use_fabric_save = cfg.get("use_fabric_save", False)
         save_weights_only = cfg.get("save_weights_only", False)
-        
+
         if use_fabric_save:
             self.fabric.save(model_path + ".ckpt", state)
         else:
@@ -153,7 +148,7 @@ class Trainer:
 
     def perform_sampling(self, is_last: bool = False):
         """
-        Perform image sampling.
+        Perform image/text sampling.
 
         Args:
             is_last (bool): Indicates if it is the last sampling.
@@ -186,7 +181,7 @@ class Trainer:
             torch.cuda.empty_cache()
             torch.set_rng_state(rng_state)
             torch.cuda.set_rng_state(cuda_rng_state)
-
+            
     def train_loop(self):
         """Run the training loop."""
         config = self.model.config
@@ -197,100 +192,99 @@ class Trainer:
 
         local_step = 0
         os.makedirs(cfg.checkpoint_dir, exist_ok=True)
-        state = {
-            "state_dict": self.model, 
-            "optimizer": self.optimizer
-        }
+        state = {"state_dict": self.model, "optimizer": self.optimizer}
 
         if Path(cfg.checkpoint_dir).is_dir():
             latest_ckpt = get_latest_checkpoint(cfg.checkpoint_dir)
-            
+
         if cfg.get("resume") and latest_ckpt:
             remainder = {}
             if cfg.get("use_fabric_save", False):
                 remainder = self.fabric.load(latest_ckpt, state)
             else:
-                remainder = sd = load_torch_file(latest_ckpt, self.model.target_device, extract=False)
+                remainder = sd = load_torch_file(
+                    ckpt=latest_ckpt, 
+                    device=self.model.target_device, 
+                    extract=False
+                )
                 if latest_ckpt.endswith(".safetensors"):
                     remainder = safetensors.safe_open(latest_ckpt, "pt").metadata()
                 fabric.call("load_checkpoint", sd)
-                
+
                 opt = Path(latest_ckpt).stem + "_optimizer"
                 opt_path = Path(latest_ckpt).with_stem(opt)
                 if opt_path.is_file():
                     remainder = fabric.load(opt_path, {"optimizer": self.optimizer})
-                    rank_zero_print(f"Loaded optimizer state from {opt_path}")
+                    logger.info(f"Loaded optimizer state from {opt_path}")
 
             if remainder:
                 self.global_step = int(remainder.pop("global_step", 0))
                 self.current_epoch = int(remainder.pop("current_epoch", 0))
 
-            rank_zero_print(f"Resuming from checkpoint {latest_ckpt}")
+            logger.info(f"Resuming from checkpoint {latest_ckpt}")
 
         should_stop = False
         if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:
             should_stop = True
 
-        rank_zero_print(f"Starting training from epoch {self.current_epoch}")
+        logger.info(f"Starting training from epoch {self.current_epoch}")
         self.prepare_logger()
-        prog_bar = tqdm(
-            self.dataloader,
-            total=len(self.dataloader) // grad_accum_steps - 1,
-            desc=f"Epoch {self.current_epoch}",
-            disable=not fabric.is_global_zero,
-        )
 
         loss_rec = LossRecorder()
+        progress  = ProgressBar(
+            total=len(self.dataloader) // config.trainer.accumulate_grad_batches - 1,
+            disable=not fabric.is_global_zero,
+        )
         assert len(self.dataloader) > 0, "Dataloader is empty"
         while not should_stop:
-            if fabric.is_global_zero:
-                prog_bar.refresh()
-                prog_bar.reset()
-                prog_bar.total = len(self.dataloader) // grad_accum_steps
-                prog_bar.set_description(f"Epoch {self.current_epoch}")
+            desc = f"Epoch {self.current_epoch}"
+            progress.update(desc, 0)
 
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1
+                local_acc_step = batch_idx // grad_accum_steps
                 is_accumulating = local_step % grad_accum_steps != 0
 
-                with fabric.no_backward_sync(self.model, enabled=is_accumulating):
+                fabric_module = getattr(self.model, "model", None)
+                if hasattr(self.model, "get_module"):
+                    fabric_module = self.model.get_module()
+
+                with fabric.no_backward_sync(fabric_module, enabled=is_accumulating):
                     loss = self.model(batch)
                     self.fabric.backward(loss / grad_accum_steps)
 
                 loss_rec.add(epoch=self.current_epoch, step=batch_idx, loss=loss.item())
-                postfix = f"train_loss: {loss:.3f}, avg_loss: {loss_rec.avg:.3f}"
-                prog_bar.set_postfix_str(postfix)
+                status = f"train_loss: {loss:.3f}, avg_loss: {loss_rec.avg:.3f}"
+                progress.update(desc, local_acc_step, status=status)
 
+                # skip here if we are accumulating
                 if is_accumulating:
-                    # skip here if we are accumulating
                     continue
 
                 if grad_clip_val > 0:
-                    val = grad_clip_val
-                    self.fabric.clip_gradients(self.model, self.optimizer, max_norm=val)
+                    self.fabric.clip_gradients(
+                        module=self.model, 
+                        optimizer=self.optimizer, 
+                        max_norm=grad_clip_val
+                    )
 
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none=True)
 
                 if self.scheduler is not None:
+                    is_transformers_sch = "transformers" in config.scheduler.name
                     fp_batch = self.current_epoch + batch_idx / len(self.dataloader)
-                    if "transformers" in config.scheduler.name:
-                        self.scheduler.step(self.global_step)
-                    else:
-                        self.scheduler.step(fp_batch)
+                    actual_step = self.global_step if is_transformers_sch else fp_batch
+                    self.scheduler.step(actual_step)
 
                 if fabric.logger:
                     fabric.log("train_loss", loss, step=self.global_step)
 
                 self.global_step += 1
-                prog_bar.update(1)
-                prog_bar.set_postfix_str(postfix)
-                state.update(
-                    global_step=self.global_step, 
-                    current_epoch=self.current_epoch
-                )
+                progress.update(desc, local_acc_step, status=status)
+                state.update(global_step=self.global_step, current_epoch=self.current_epoch)
                 self.on_post_training_batch(state)
-                
+
             self.current_epoch += 1
             if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:
                 should_stop = True
@@ -301,42 +295,12 @@ class Trainer:
             self.eval_model(is_last=True)
 
 
-class NonAutocastMixedPrecision(pl.fabric.plugins.precision.amp.MixedPrecision):
-    """Mixed precision training without automatic casting inputs and outputs."""
-
-    def convert_input(self, data):
-        return data
-
-    def convert_output(self, data):
-        return data
-
-
-class LossRecorder:
-    def __init__(self):
-        self.loss_list = []
-        self.loss_total = 0.0
-
-    def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0 or len(self.loss_list) <= step:
-            self.loss_list.append(loss)
-        else:
-            self.loss_total -= self.loss_list[step]
-            self.loss_list[step] = loss
-        self.loss_total += loss
-
-    @property
-    def avg(self) -> float:
-        # return the average loss of the last epoch
-        if len(self.loss_list) == 0:
-            return 0.0
-        return self.loss_total / len(self.loss_list)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str)
     parser.add_argument("--resume", action="store_true")
     first_args = sys.argv[1]
+    
     if first_args.startswith("--"):
         args = parser.parse_args()
     else:
@@ -348,18 +312,12 @@ def main():
     plugins = []
 
     strategy = config.lightning.pop("strategy", "auto")
-    _compatible = strategy in ["auto", "ddp"] or config.get("precision_hook", False)
     if "." in strategy:
         _params = config.lightning.pop("strategy_params", {})
         strategy = get_class(strategy)(**_params)
 
     if os.environ.get("SM_TRAINING", False) or os.environ.get("SM_HOSTS", False):
         strategy, config = setup_smddp(config)
-
-    target_precision = config.lightning.precision
-    if target_precision in ["16-mixed", "bf16-mixed"] and _compatible:
-        config.lightning.precision = None
-        plugins.append(NonAutocastMixedPrecision(target_precision, "cuda"))
 
     loggers = pl.fabric.loggers.CSVLogger(".")
     if config.trainer.wandb_id != "":

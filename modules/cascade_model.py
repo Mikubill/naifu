@@ -6,9 +6,8 @@ import numpy as np
 import lightning as pl
 
 from PIL import Image
-from omegaconf import OmegaConf
 from tqdm import tqdm 
-from common.utils import load_torch_file, rank_zero_print, EmptyInitWrapper
+from common.utils import load_torch_file, EmptyInitWrapper
 from lightning.pytorch.utilities import rank_zero_only
 
 from pathlib import Path
@@ -21,6 +20,8 @@ from models.cascade.previewer import Previewer
 from models.gdf import GDF, CosineSchedule, VPScaler, EpsilonTarget, CosineTNoiseCond, AdaptiveLossWeight, P2LossWeight
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
+import logging
+logger = logging.getLogger("Trainer")
 
 CLIP_TEXT_MODEL_NAME: str = "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 EFFNET_PREPROCESS = torchvision.transforms.Compose([
@@ -257,7 +258,7 @@ class StableCascadeModel(pl.LightningModule):
             model_path += ".ckpt"
             torch.save(state_dict, model_path)
             
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")
 
     def forward(self, batch):
         raise NotImplementedError

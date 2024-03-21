@@ -6,9 +6,9 @@ clip_text_model_name: "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 model_path: 
   # stage_a: /notebooks/sc/stage_a.safetensors
   # stage_b: /notebooks/sc/stage_b_bf16.safetensors
-  stage_c: /notebooks/sc/stage_c_bf16.safetensors
-  previewer: /notebooks/sc/previewer.safetensors
-  effnet: /notebooks/sc/effnet_encoder.safetensors
+  stage_c: stage_c_bf16.safetensors
+  previewer: previewer.safetensors
+  effnet: effnet_encoder.safetensors
 
 trainer:
   model_path: ${model_path}
@@ -42,7 +42,7 @@ dataset:
   # target_area: 1_048_576 # 1024*1024
   # min_size: 512
   # max_size: 2048
-  img_path: "/notebooks/BA"
+  img_path: "../niji-anime"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:

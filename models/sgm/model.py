@@ -12,11 +12,12 @@ from .model_util import (
     checkpoint,
     conv_nd,
     timestep_embedding,
-    zero_module,
-    rank_zero_print
+    zero_module,    
 )
 from .encoder_util import default, exists
 
+import logging
+logger = logging.getLogger("Trainer")
 
 class GroupNorm32(nn.GroupNorm):
     def forward(self, x):
@@ -148,7 +149,7 @@ class Downsample(nn.Module):
             #     f"kernel-size: 3, stride: {stride}, padding: {padding}"
             # )
             if dims == 3:
-                rank_zero_print(f"  --> Downsampling third axis (time): {third_down}")
+                logger.info(f"  --> Downsampling third axis (time): {third_down}")
             self.op = conv_nd(
                 dims,
                 self.channels,
@@ -239,7 +240,7 @@ class ResBlock(TimestepBlock):
             2 * self.out_channels if use_scale_shift_norm else self.out_channels
         )
         if self.skip_t_emb:
-            rank_zero_print(f"Skipping timestep embedding in {self.__class__.__name__}")
+            logger.info(f"Skipping timestep embedding in {self.__class__.__name__}")
             assert not self.use_scale_shift_norm
             self.emb_layers = None
             self.exchange_temb_dims = False
@@ -431,7 +432,7 @@ class UNetModel(nn.Module):
                     range(len(num_attention_blocks)),
                 )
             )
-            rank_zero_print(
+            logger.info(
                 f"Constructor of UNetModel received num_attention_blocks={num_attention_blocks}. "
                 f"This option has LESS priority than attention_resolutions {attention_resolutions}, "
                 f"i.e., in cases where num_attention_blocks[i] > 0 but 2**i not in attention_resolutions, "
@@ -459,7 +460,7 @@ class UNetModel(nn.Module):
             if isinstance(self.num_classes, int):
                 self.label_emb = nn.Embedding(num_classes, time_embed_dim)
             elif self.num_classes == "continuous":
-                rank_zero_print("setting up linear c_adm embedding layer")
+                logger.info("setting up linear c_adm embedding layer")
                 self.label_emb = nn.nn.Linear(1, time_embed_dim)
             elif self.num_classes == "timestep":
                 self.label_emb = nn.Sequential(
@@ -493,7 +494,7 @@ class UNetModel(nn.Module):
         input_block_chans = [model_channels]
         ch = model_channels
         ds = 1
-        rank_zero_print(f"Constructing UNet with {len(channel_mult)} levels, {channel_mult} channels and {transformer_depth} transformer blocks per level")
+        logger.info(f"Constructing UNet with {len(channel_mult)} levels, {channel_mult} channels and {transformer_depth} transformer blocks per level")
                 
         for level, mult in enumerate(channel_mult):
             for nr in range(self.num_res_blocks[level]):

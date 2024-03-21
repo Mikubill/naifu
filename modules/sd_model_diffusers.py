@@ -4,7 +4,7 @@ import torch.utils.checkpoint
 import lightning as pl
 
 from pathlib import Path
-from common.utils import rank_zero_print
+from common.logging import logger
 from diffusers import StableDiffusionPipeline
 from diffusers import DDIMScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
@@ -25,7 +25,7 @@ class StableDiffusionModel(pl.LightningModule):
         config = self.config
         advanced = config.get("advanced", {})
         
-        rank_zero_print(f"Loading model from {self.model_path}")
+        logger.info(f"Loading model from {self.model_path}")
         p = StableDiffusionPipeline
         if Path(self.model_path).is_file():
             self.pipeline = pipeline = p.from_single_file(self.model_path)
@@ -66,7 +66,10 @@ class StableDiffusionModel(pl.LightningModule):
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
-        
+
+    def get_module(self):
+        return self.unet
+    
     def encode_pixels(self, inputs):
         feed_pixel_values = inputs
         latents = []
@@ -78,7 +81,8 @@ class StableDiffusionModel(pl.LightningModule):
         latents = latents * self.vae.config.scaling_factor
         return latents
 
-    def encode_prompts(self, prompts):            
+    def encode_prompts(self, prompts):   
+        self.text_encoder.to(self.target_device)         
         input_ids = self.tokenizer(
             prompts, 
             padding="max_length", 
@@ -104,7 +108,7 @@ class StableDiffusionModel(pl.LightningModule):
         bs = oids.size(0)
         input_ids = oids.reshape((-1, tokenizer_max_length))
         
-        state = self.text_encoder(input_ids.to(self.device), output_hidden_states=True)
+        state = self.text_encoder(input_ids.to(self.target_device), output_hidden_states=True)
         encoder_hidden_states = state['hidden_states'][-self.config.trainer.clip_skip]
         if self.config.trainer.clip_skip > 1:
             encoder_hidden_states = self.text_encoder.text_model.final_layer_norm(encoder_hidden_states)
@@ -177,7 +181,7 @@ class StableDiffusionModel(pl.LightningModule):
     @rank_zero_only
     def save_checkpoint(self, model_path, metadata):
         self.pipeline.save_pretrained(model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")
 
     def forward(self, batch):
         raise NotImplementedError

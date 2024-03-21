@@ -3,7 +3,8 @@ import os
 import lightning as pl
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from common.utils import rank_zero_print, get_class
+from common.utils import get_class
+from common.logging import logger
 from modules.cascade_model import StableCascadeModel, EFFNET_PREPROCESS
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
@@ -11,7 +12,9 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
     model = SupervisedFineTune(
-        model_path=model_path, config=config, device=fabric.device
+        model_path=model_path, 
+        config=config, 
+        device=fabric.device
     )
 
     dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
@@ -45,18 +48,24 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
-    model, optimizer = fabric.setup(model, optimizer)
+    model.stage_c, optimizer = fabric.setup(model.stage_c, optimizer)
+    if config.advanced.get("train_text_encoder"):
+        model.text_encoder = fabric.setup(model.text_encoder)
+        
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
 
 class SupervisedFineTune(StableCascadeModel):
+    def get_module(self):
+        return self.stage_c
+    
     def forward(self, batch):
         if not batch["is_latent"]:
             self.effnet.to(self.target_device)
             latents = self.encode_pixels(batch["pixels"])
             if torch.any(torch.isnan(latents)):
-                rank_zero_print("NaN found in latents, replacing with zeros")
+                logger.info("NaN found in latents, replacing with zeros")
                 latents = torch.where(
                     torch.isnan(latents), torch.zeros_like(latents), latents
                 )

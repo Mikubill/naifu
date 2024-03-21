@@ -38,7 +38,7 @@ class AspectRatioDataset(Dataset):
         self.num_workers = kwargs.get("num_workers", 4)
 
         root_path = Path(img_path)
-        assert root_path.exists()
+        assert root_path.exists(), f"Path {root_path} does not exist."
 
         store_class = DirectoryImageStore
         if is_latent_folder(root_path):

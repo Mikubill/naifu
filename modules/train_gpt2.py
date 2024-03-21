@@ -2,11 +2,8 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import (
-    get_class,
-    rank_zero_print,
-    rank_zero_only,
-)
+from common.utils import get_class, rank_zero_only
+from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import GPT2LMHeadModel, AutoTokenizer
 
@@ -24,7 +21,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
     
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -118,4 +115,4 @@ class GPT2Model(pl.LightningModule):
         cfg = self.config.trainer
         self.model.save_pretrained(model_path)
         self.tokenizer.save_pretrained(model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")

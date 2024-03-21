@@ -10,10 +10,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from omegaconf import ListConfig
 from torch.utils.checkpoint import checkpoint
-from .model_util import (
-    rank_zero_print,
-    EmptyInitWrapper
-)
+from .model_util import EmptyInitWrapper
 from transformers import (
     CLIPTextModel,
     CLIPTextConfig,
@@ -28,6 +25,8 @@ from .encoder_util import (
     instantiate_from_config,
 )
 
+import logging
+logger = logging.getLogger("Trainer")
 
 def process_input_ids(input_ids, tokenizer, max_length):
     if max_length > tokenizer.model_max_length:
@@ -164,7 +163,7 @@ class GeneralConditioner(nn.Module):
                 for param in embedder.parameters():
                     param.requires_grad = False
                 embedder.eval()
-            rank_zero_print(
+            logger.info(
                 f"Initialized embedder #{n}: {embedder.__class__.__name__} "
                 f"with {count_params(embedder, False)} params. Trainable: {embedder.is_trainable}"
             )
@@ -303,6 +302,13 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         if layer == "hidden":
             assert layer_idx is not None
             assert 0 <= abs(layer_idx) <= 12
+            
+            # Freeze the layers after the unused layer to avoid grad issues
+            actual_layer_idx = layer_idx if layer_idx >= 0 else 12 + layer_idx
+            text_model = self.transformer.text_model
+            for layer in text_model.encoder.layers[actual_layer_idx:]:
+                layer.requires_grad_(False)
+            text_model.final_layer_norm.requires_grad_(False)
 
     def freeze(self):
         self.transformer = self.transformer.eval()
@@ -379,12 +385,8 @@ class OpenClipTextModel(open_clip.CLIP):
         self.ln_final = text.ln_final
         self.text_projection = text.text_projection
         self.text_pool_type = text.pool_type
+        self.logit_scale = nn.Parameter(torch.ones([]) * init_logit_scale, requires_grad=False)
         self.register_buffer('attn_mask', text.attn_mask, persistent=False)
-
-        self.logit_scale = nn.Parameter(torch.ones([]) * init_logit_scale)
-        self.logit_bias = None
-        if init_logit_bias is not None:
-            self.logit_bias = nn.Parameter(torch.ones([]) * init_logit_bias)
             
 
 class FrozenOpenCLIPEmbedder2(AbstractEmbModel):

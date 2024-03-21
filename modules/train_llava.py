@@ -2,11 +2,9 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import (
-    get_class,
-    rank_zero_print,
-    rank_zero_only,
-)
+from common.utils import get_class, rank_zero_only
+from common.logging import logger
+
 import torch.nn as nn
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoConfig
@@ -126,7 +124,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
     fabric.barrier()
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -204,7 +202,7 @@ class LLaVAModel(pl.LightningModule):
         self.logger_samples = []
         if use_lora:
             from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-            rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
+            logger.info(f"Using Lora with q_lora={use_q_lora}")
             config.lora_params.update({"target_modules": find_all_linear_names(model)})
             lora_config = LoraConfig(**config.lora_params)
             if use_q_lora:
@@ -253,4 +251,4 @@ class LLaVAModel(pl.LightningModule):
         else:
             self.model.save_pretrained(model_path)
             self.tokenizer.save_pretrained(model_path)
-            rank_zero_print(f"Saved model to {model_path}")
+            logger.info(f"Saved model to {model_path}")

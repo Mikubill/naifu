@@ -5,6 +5,7 @@ trainer:
   model_path: PixArt-XL-2-1024-MS.pth
   batch_size: 4
   seed: 1138
+  resolution: 1024
   wandb_id: ""
   accumulate_grad_batches: 1
   gradient_clip_val: 0.0

@@ -13,11 +13,6 @@ import math
 
 import torch
 import torch.nn as nn
-import numpy as np
-from contextlib import contextmanager
-from lightning.pytorch.utilities import rank_zero_only
-from common.logging import logger
-
 import torch.utils._device
 
 class EmptyInitWrapper(torch.overrides.TorchFunctionMode):
@@ -34,11 +29,6 @@ class EmptyInitWrapper(torch.overrides.TorchFunctionMode):
         if self.device is not None and func in torch.utils._device._device_constructors() and kwargs.get('device') is None:
             kwargs['device'] = self.device
         return func(*args, **kwargs)
-
-
-@rank_zero_only
-def rank_zero_print(*args, **kwargs):
-    logger.info(*args, **kwargs)
 
 
 def checkpoint(func, inputs, enabled=True):

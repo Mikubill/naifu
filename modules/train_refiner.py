@@ -4,14 +4,14 @@ import json
 import lightning as pl
 
 from omegaconf import OmegaConf
-from common.utils import rank_zero_print, get_class
+from common.utils import get_class, EmptyInitWrapper
+from common.logging import logger
 from modules.sdxl_model import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
 from models.sgm import GeneralConditioner
 from modules.scheduler_utils import apply_snr_weight
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
-from common.utils import rank_zero_print, EmptyInitWrapper
     
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -61,12 +61,14 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
         
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
+    if config.advanced.get("train_text_encoder"):
+        model.conditioner = fabric.setup(model.conditioner)
+        
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
 class SupervisedFineTune(StableDiffusionModel):
-
     def build_models(
         self, 
         init_unet=True, 
@@ -106,8 +108,8 @@ class SupervisedFineTune(StableDiffusionModel):
             unet = UnetWrapper(unet_config) if init_unet else None
             conditioner = GeneralConditioner(**cond_config) if init_conditioner else None
 
-        vae.train = disabled_train
         vae.eval()
+        vae.train = disabled_train
         vae.requires_grad_(False)
         return vae, unet, conditioner
     
@@ -124,7 +126,7 @@ class SupervisedFineTune(StableDiffusionModel):
             self.first_stage_model.to(self.target_device)
             latents = self.encode_first_stage(batch["pixels"].to(self.first_stage_model.dtype))
             if torch.any(torch.isnan(latents)):
-                rank_zero_print("NaN found in latents, replacing with zeros")
+                logger.info("NaN found in latents, replacing with zeros")
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
         else:
             self.first_stage_model.cpu()

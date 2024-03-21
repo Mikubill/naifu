@@ -6,9 +6,9 @@ from common.utils import (
     load_torch_file,
     get_class,
     EmptyInitWrapper,
-    rank_zero_print,
     rank_zero_only,
 )
+from common.logging import logger
 from modules.train_sdxl import SupervisedFineTune
 from modules.sdxl_utils import (
     get_hidden_states_sdxl,
@@ -71,7 +71,12 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
-    model, optimizer = fabric.setup(model, optimizer)
+    model.lycoris_unet, optimizer = fabric.setup(model.lycoris_unet, optimizer)
+    if config.advanced.get("train_text_encoder_1"):
+        model.lycoris_te1 = fabric.setup(model.lycoris_te1)
+    if config.advanced.get("train_text_encoder_2"):
+        model.lycoris_te2 = fabric.setup(model.lycoris_te2)
+    
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -124,9 +129,9 @@ class StableDiffusionModel(SupervisedFineTune):
                 unet_sd[target] = sd.pop(k)
 
         converted_sd = convert_sdxl_text_encoder_2_checkpoint(te2_sd, max_length=77)
-        self.text_encoder_1, self.text_encoder_2, self.tokenizer_1, self.tokenizer_2 = (
-            init_text_encoder()
-        )
+        self.text_encoder_1, self.text_encoder_2, self.tokenizer_1, self.tokenizer_2 = init_text_encoder()
+        self.text_encoder_1.to(self.target_device)
+        self.text_encoder_2.to(self.target_device)
         self.text_encoder_1.load_state_dict(te1_sd, strict=False)
         self.text_encoder_2.load_state_dict(converted_sd)
         vae.load_state_dict(vae_sd)
@@ -146,6 +151,7 @@ class StableDiffusionModel(SupervisedFineTune):
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
+        
         self.model.diffusion_model.train()
         self.text_encoder_1.train()
         self.text_encoder_2.train()
@@ -177,9 +183,12 @@ class StableDiffusionModel(SupervisedFineTune):
         if self.config.advanced.get("train_text_encoder_2"):
             self.lycoris_te2.to(self.target_device).apply_to()
             self.lycoris_te2.requires_grad_(True)
-    
+            
         self.text_encoder_1.text_model.embeddings.requires_grad_(True)
-        self.text_encoder_2.text_model.embeddings.requires_grad_(True)        
+        self.text_encoder_2.text_model.embeddings.requires_grad_(True) 
+        
+    def get_module(self):
+        return self.lycoris_unet       
 
     def encode_batch(self, batch):
         hidden1, hidden2, pooled = get_hidden_states_sdxl(
@@ -194,7 +203,7 @@ class StableDiffusionModel(SupervisedFineTune):
             batch["target_size_as_tuple"],
             batch["original_size_as_tuple"],
             batch["crop_coords_top_left"],
-            self.fabric.device,
+            self.target_device,
         )
         cond = {
             "crossattn": torch.cat([hidden1, hidden2], dim=2),
@@ -243,4 +252,4 @@ class StableDiffusionModel(SupervisedFineTune):
         else:
             model_path += ".ckpt"
             torch.save(state_dict, model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")

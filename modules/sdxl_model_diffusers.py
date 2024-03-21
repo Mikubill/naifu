@@ -3,7 +3,7 @@ import torch.utils.checkpoint
 import lightning as pl
 
 from pathlib import Path
-from common.utils import rank_zero_print
+from common.logging import logger
 from diffusers import StableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
@@ -26,7 +26,7 @@ class StableDiffusionModel(pl.LightningModule):
         config = self.config
         advanced = config.get("advanced", {})
         
-        rank_zero_print(f"Loading model from {self.model_path}")
+        logger.info(f"Loading model from {self.model_path}")
         p = StableDiffusionXLPipeline
         if Path(self.model_path).is_file():
             self.pipeline = pipeline = p.from_single_file(self.model_path)
@@ -73,6 +73,9 @@ class StableDiffusionModel(pl.LightningModule):
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
+        
+    def get_module(self):
+        return self.unet
              
     def encode_pixels(self, inputs):
         feed_pixel_values = inputs
@@ -159,7 +162,7 @@ class StableDiffusionModel(pl.LightningModule):
     @rank_zero_only
     def save_checkpoint(self, model_path, metadata):
         self.pipeline.save_pretrained(model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")
 
     def forward(self, batch):
         raise NotImplementedError

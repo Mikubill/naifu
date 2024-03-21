@@ -2,11 +2,8 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import (
-    get_class,
-    rank_zero_print,
-    rank_zero_only,
-)
+from common.utils import get_class, rank_zero_only
+from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
@@ -25,7 +22,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
     fabric.barrier()
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -57,7 +54,7 @@ class LLMModel(pl.LightningModule):
         self.logger_samples = []
         if use_lora:
             from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-            rank_zero_print(f"Using Lora with q_lora={use_q_lora}")
+            logger.info(f"Using Lora with q_lora={use_q_lora}")
             lora_config = LoraConfig(**OmegaConf.to_container(config.lora_params))
             if use_q_lora:
                 model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
@@ -147,4 +144,4 @@ class LLMModel(pl.LightningModule):
         cfg = self.config.trainer
         self.model.save_pretrained(model_path)
         self.tokenizer.save_pretrained(model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")

@@ -11,7 +11,8 @@ from tqdm import tqdm
 from models.sgm import GeneralConditioner
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
 from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values   
-from common.utils import load_torch_file, rank_zero_print, EmptyInitWrapper
+from common.utils import load_torch_file, EmptyInitWrapper
+from common.logging import logger
 
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
@@ -81,12 +82,12 @@ class StableDiffusionModel(pl.LightningModule):
         )
         self.to(self.target_device)
 
-        rank_zero_print(f"Loading model from {self.model_path}")
+        logger.info(f"Loading model from {self.model_path}")
         missing, unexpected = self.load_state_dict(sd, strict=False)
         if len(missing) > 0:
-            rank_zero_print(f"Missing Keys: {missing}")
+            logger.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
-            rank_zero_print(f"Unexpected Keys: {unexpected}")
+            logger.info(f"Unexpected Keys: {unexpected}")
             
         self.batch_size = self.config.trainer.batch_size
         self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
@@ -97,6 +98,9 @@ class StableDiffusionModel(pl.LightningModule):
             apply_zero_terminal_snr(self.noise_scheduler)
         cache_snr_values(self.noise_scheduler, self.target_device)
         
+    def get_module(self):
+        return self.model
+    
     def encode_batch(self, batch):
         self.conditioner.to(self.target_device)
         return self.conditioner(batch)
@@ -226,7 +230,7 @@ class StableDiffusionModel(pl.LightningModule):
             state_dict = {"state_dict": state_dict, **metadata} 
             model_path += ".ckpt"
             torch.save(state_dict, model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")
 
     def forward(self, batch):
         raise NotImplementedError

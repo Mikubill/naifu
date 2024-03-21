@@ -11,7 +11,9 @@ from transformers import T5EncoderModel, T5Tokenizer
 from diffusers import AutoencoderKL, DPMSolverMultistepScheduler
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
-from common.utils import load_torch_file, rank_zero_print, get_class, rank_zero_only
+from common.utils import load_torch_file, get_class, rank_zero_only
+from common.logging import logger
+
 from models.pixart.dit import DiT_XL_2, get_model_kwargs
 from models.pixart.diffusion import (
     SpacedDiffusion,
@@ -45,7 +47,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -98,7 +100,7 @@ class DiffusionModel(pl.LightningModule):
         self.model = DiT_XL_2(input_size=base // 8, interpolation_scale=base // 512)
         self.model.to(memory_format=torch.channels_last).train()
 
-        rank_zero_print("Loading weights from checkpoint: DiT-XL-2-1024-MS.pth")
+        logger.info("Loading weights from checkpoint: DiT-XL-2-1024-MS.pth")
         result = self.model.load_state_dict(dit_state_dict, strict=False)
         assert result.unexpected_keys == [
             "pos_embed"
@@ -125,7 +127,6 @@ class DiffusionModel(pl.LightningModule):
             return prompt_embeds, prompt_attention_mask
 
     def forward(self, batch):
-
         prompts = batch["prompts"]
         prompt_embeds, prompt_attention_mask = self.encode_tokens(prompts)
 
@@ -134,7 +135,7 @@ class DiffusionModel(pl.LightningModule):
             latent_dist = self.vae.encode(batch["pixels"]).latent_dist
             latents = latent_dist.sample() * self.vae.config.scaling_factor
             if torch.any(torch.isnan(latents)):
-                rank_zero_print("NaN found in latents, replacing with zeros")
+                logger.info("NaN found in latents, replacing with zeros")
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
         else:
             self.vae.cpu()
@@ -260,4 +261,4 @@ class DiffusionModel(pl.LightningModule):
             state_dict = {"state_dict": state_dict, **metadata},
             torch.save(state_dict, model_path)
             
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")

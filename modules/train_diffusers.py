@@ -2,7 +2,8 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import rank_zero_print, get_class
+from common.utils import get_class
+from common.logging import logger
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from modules.scheduler_utils import apply_snr_weight
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -45,7 +46,12 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
-    model, optimizer = fabric.setup(model, optimizer)
+    model.unet, optimizer = fabric.setup(model.unet, optimizer)
+    if config.advanced.get("train_text_encoder_1"):
+        model.text_encoder_1 = fabric.setup(model.text_encoder_1)
+    if config.advanced.get("train_text_encoder_2"):
+        model.text_encoder_2 = fabric.setup(model.text_encoder_2)
+        
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -57,7 +63,7 @@ class SupervisedFineTune(StableDiffusionModel):
             self.vae.to(self.target_device)
             latents = self.encode_pixels(batch["pixels"])
             if torch.any(torch.isnan(latents)):
-                rank_zero_print("NaN found in latents, replacing with zeros")
+                logger.info("NaN found in latents, replacing with zeros")
                 latents = torch.where(
                     torch.isnan(latents), torch.zeros_like(latents), latents
                 )

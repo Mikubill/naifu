@@ -14,7 +14,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from typing import Callable, Generator, Optional  # type: ignore
 from torchvision import transforms
-from common.utils import rank_zero_debug, rank_zero_warn
+from common.logging import logger
 from torchvision.transforms import Resize, InterpolationMode
 
 
@@ -293,7 +293,7 @@ class LatentStore(StoreBase):
         self.keys = list(self.h5_keymap.keys())
         self.length = len(self.keys)
         self.scale_factor = 0.13025
-        rank_zero_debug(f"Loaded {self.length} latent codes from {self.root_path}")
+        logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
 
         self.keys, self.raw_res, self.paths = self.repeat_entries(
             self.keys, self.raw_res, index=self.paths
@@ -301,9 +301,7 @@ class LatentStore(StoreBase):
         new_length = len(self.paths)
         if new_length != self.length:
             self.length = new_length
-            rank_zero_debug(
-                f"Using {self.length} entries after applied repeat strategy"
-            )
+            logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
     def setup_filehandles(self):
         self.h5_filehandles = {}
@@ -331,7 +329,7 @@ class DirectoryImageStore(StoreBase):
         self.paths = list(dirwalk(self.root_path, is_img))
         self.length = len(self.paths)
         self.transforms = IMAGE_TRANSFORMS
-        rank_zero_debug(f"Found {self.length} images in {self.root_path}")
+        logger.debug(f"Found {self.length} images in {self.root_path}")
 
         remove_paths = []
         for p in tqdm(
@@ -365,21 +363,16 @@ class DirectoryImageStore(StoreBase):
                 with open(p, "r") as f:
                     self.prompts.append(f.read())
             except Exception as e:
-                rank_zero_warn(f"Skipped: error processing {p}: {e}")
+                logger.warning(f"Skipped: error processing {p}: {e}")
                 self.prompts.append("")
                 
-        rank_zero_debug(
-            f"Loaded {len(self.prompts)} prompts, {self.length} image sizes"
-        )
         self.prompts, self.raw_res, self.paths = self.repeat_entries(
             self.prompts, self.raw_res, index=self.paths
         )
         new_length = len(self.paths)
         if new_length != self.length:
             self.length = new_length
-            rank_zero_debug(
-                f"Using {self.length} entries after applied repeat strategy"
-            )
+            logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         p = self.paths[index]

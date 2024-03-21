@@ -4,9 +4,9 @@ import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import (
     get_class,
-    rank_zero_print,
     rank_zero_only,
 )
+from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer
 from transformers.utils import is_flash_attn_2_available
@@ -27,7 +27,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
 
     fabric.barrier()
-    model, optimizer = fabric.setup(model, optimizer)
+    model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -130,4 +130,4 @@ class PhiModel(pl.LightningModule):
     def save_checkpoint(self, model_path, metadata):
         self.model.save_pretrained(model_path)
         self.tokenizer.save_pretrained(model_path)
-        rank_zero_print(f"Saved model to {model_path}")
+        logger.info(f"Saved model to {model_path}")

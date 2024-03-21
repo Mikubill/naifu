@@ -1,6 +1,7 @@
 import logging
 import copy
 import sys
+from lightning.pytorch.utilities import rank_zero_only
 
 class ColoredFormatter(logging.Formatter):
     COLORS = {
@@ -26,10 +27,26 @@ logger.propagate = False
 
 # Add handler if we don't have one.
 if not logger.handlers:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        ColoredFormatter("%(levelname)s - %(message)s")
-    )
+    from lightning_utilities.core.imports import RequirementCache   
+    _rich_available = RequirementCache("rich>=10.2.2")
+    
+    if _rich_available:
+        from rich.logging import RichHandler
+
+        class ConditionalRichHandler(RichHandler):
+            @rank_zero_only
+            def emit(self, record):
+                super().emit(record)
+            
+        handler = ConditionalRichHandler(
+            rich_tracebacks=True, 
+            show_time=False,
+        )
+        handler.setFormatter(logging.Formatter("%(message)s"))
+    else:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(ColoredFormatter("%(levelname)s - %(message)s"))
+        
     logger.addHandler(handler)
 
 # Configure logger

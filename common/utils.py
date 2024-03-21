@@ -1,28 +1,71 @@
+from typing import Callable, Optional
 import torch
 import os
 import safetensors.torch
 import torch.utils._device
-from lightning.pytorch.utilities import rank_zero_only
+
 from common.logging import logger
+from tqdm import tqdm
 
 
-@rank_zero_only
-def rank_zero_print(*args, **kwargs):
-    logger.info(*args, **kwargs)
-
-
-@rank_zero_only
-def rank_zero_warn(*args, **kwargs):
-    logger.warning(*args, **kwargs)
-
-
-@rank_zero_only
-def rank_zero_debug(*args, **kwargs):
-    logger.debug(*args, **kwargs)
-    
-    
 def get_world_size():
     return int(os.environ.get("WORLD_SIZE", 1))
+
+class ProgressBar:
+    def __init__(self, total: int, disable=False):
+        if disable:
+            self.progress = None
+            return
+
+        default_desc = "Epoch 0"
+        self.is_rich_progress = False
+        self.progress = tqdm(total=total, desc=default_desc)
+
+    def update(self, desc: str, step: int, status: str = ""):
+        if not self.progress:
+            return
+        
+        if step == 0:
+            self.progress.reset()
+        
+        self.progress.n = step
+        self.progress.set_description_str(desc)
+        self.progress.set_postfix_str(status)
+
+class LossRecorder:
+    def __init__(self):
+        self.loss_list = []
+        self.loss_total = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0 or len(self.loss_list) <= step:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def avg(self) -> float:
+        # return the average loss of the last epoch
+        if len(self.loss_list) == 0:
+            return 0.0
+        return self.loss_total / len(self.loss_list)
+
+
+class DummyOptimizer(torch.optim.Optimizer):
+    def __init__(
+        self, lr: float = 1e-3, optimizer_dict: Optional[dict] = None, *args, **kwargs
+    ) -> None:
+        dummy_tensor = torch.randn(1, 1)
+        self.optimizer_dict = optimizer_dict
+        super().__init__([dummy_tensor], {"lr": lr})
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        pass
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+        pass
 
 
 class EmptyInitWrapper(torch.overrides.TorchFunctionMode):
@@ -55,19 +98,19 @@ def load_torch_file(ckpt, safe_load=False, device=None, extract=True):
                     "Warning torch.load doesn't support weights_only on this pytorch version, loading unsafely."
                 )
                 safe_load = False
-                
+
         if safe_load:
             pl_sd = torch.load(ckpt, map_location="cpu", weights_only=True)
         else:
             pl_sd = torch.load(ckpt, map_location="cpu")
-    
+
         sd = pl_sd
         if extract:
             if "global_step" in pl_sd:
-                rank_zero_print(f"Global Step: {pl_sd['global_step']}")
+                logger.info(f"Global Step: {pl_sd['global_step']}")
             if "state_dict" in pl_sd:
                 sd = pl_sd["state_dict"]
-                
+
     return sd
 
 
@@ -91,15 +134,13 @@ def setup_smddp(config):
 
     # from lightning.fabric.strategies import DDPStrategy
     from common.fairscale import DDPShardedStrategy
+
     ddp_strategy = DDPShardedStrategy
 
     env = LightningEnvironment()
     env.world_size = lambda: int(os.environ["WORLD_SIZE"])
     env.global_rank = lambda: int(os.environ["RANK"])
-    strategy = ddp_strategy(
-        cluster_environment=env,
-        accelerator="gpu"
-    )
+    strategy = ddp_strategy(cluster_environment=env, accelerator="gpu")
 
     world_size = int(os.environ["WORLD_SIZE"])
     num_gpus = int(os.environ["SM_NUM_GPUS"])
