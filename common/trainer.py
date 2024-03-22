@@ -204,6 +204,8 @@ class Trainer:
             total=len(self.dataloader) // config.trainer.accumulate_grad_batches - 1,
             disable=not fabric.is_global_zero,
         )
+        in_resume_epoch = self.global_step // len(self.dataloader) == \
+            self.current_epoch and cfg.get("resume") == True
         assert len(self.dataloader) > 0, "Dataloader is empty"
         while not should_stop:
             desc = f"Epoch {self.current_epoch}"
@@ -212,7 +214,8 @@ class Trainer:
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1
                 local_acc_step = batch_idx // grad_accum_steps
-                if local_acc_step < self.global_step % len(self.dataloader):
+                if local_acc_step < self.global_step % len(self.dataloader) and in_resume_epoch:
+                    in_resume_epoch = False
                     continue
                 
                 is_accumulating = local_step % grad_accum_steps != 0

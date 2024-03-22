@@ -69,7 +69,7 @@ class AspectRatioDataset(Dataset):
             persistent_workers=False,
             num_workers=self.num_workers,
             worker_init_fn=worker_init_fn,
-            shuffle=False,
+            shuffle=True,
             pin_memory=True,
             **kwargs,
         )

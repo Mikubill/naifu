@@ -34,7 +34,7 @@ advanced:
   text_encoder_2_lr: 5e-5
   offset_noise: true
   offset_noise_val: 0.0375
-  min_snr: false
+  min_snr: true
   min_snr_val: 5
   timestep_start: 0
   timestep_end: 1000
