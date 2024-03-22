@@ -100,12 +100,13 @@ class Trainer:
 
         is_eval_step = eval_st > 0 and self.global_step % eval_st == 0
         is_eval_epoch = eval_fq > 0 and self.current_epoch % eval_fq == 0
+        
         should_eval = (is_last and is_eval_epoch) or is_eval_step
-        if not should_eval:
+        has_eval_method = hasattr(self.model, "eval_model")
+        if not should_eval or not has_eval_method:
             return
 
-        self.fabric.call(
-            "eval_model",
+        self.model.eval_model(
             logger=self.fabric.logger,
             current_epoch=self.current_epoch,
             global_step=self.global_step,
@@ -135,12 +136,9 @@ class Trainer:
         model_path = os.path.join(ckpt_dir, f"checkpoint-{postfix}")
         use_fabric_save = cfg.get("use_fabric_save", False)
         save_weights_only = cfg.get("save_weights_only", False)
-        save_method_avail = hasattr(self.model, "save_checkpoint")
+        has_save_method = hasattr(self.model, "save_checkpoint")
 
-        if use_fabric_save:
-            self.fabric.save(model_path + ".ckpt", state)
-        elif not save_method_avail:
-            logger.info("Model does not have a save_checkpoint method, falling back to fabric.save")
+        if use_fabric_save or not has_save_method:
             self.fabric.save(model_path + ".ckpt", state)
         else:
             metadata = {
@@ -214,8 +212,8 @@ class Trainer:
                 )
                 if latest_ckpt.endswith(".safetensors"):
                     remainder = safetensors.safe_open(latest_ckpt, "pt").metadata()
-                fabric.call("load_checkpoint", sd)
-
+                
+                self.model.load_checkpoint(sd)
                 opt = Path(latest_ckpt).stem + "_optimizer"
                 opt_path = Path(latest_ckpt).with_stem(opt)
                 if opt_path.is_file():
