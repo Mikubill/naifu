@@ -211,9 +211,6 @@ class StableDiffusionModel(pl.LightningModule):
 
         self.model.train()
         return image
-    
-    def load_checkpoint(self, sd):
-        self.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
 
     @rank_zero_only
     def save_checkpoint(self, model_path, metadata):

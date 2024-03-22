@@ -236,9 +236,6 @@ class StableCascadeModel(pl.LightningModule):
         image = Image.fromarray((image * 255).astype(np.uint8))
         return [image]
     
-    def load_checkpoint(self, sd):
-        self.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
-    
     @rank_zero_only
     def save_checkpoint(self, model_path, metadata):
         cfg = self.config.trainer

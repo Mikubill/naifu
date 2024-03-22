@@ -1,8 +1,10 @@
+import safetensors
 import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import (
+    get_latest_checkpoint,
     load_torch_file,
     get_class,
     EmptyInitWrapper,
@@ -28,6 +30,9 @@ from transformers import (
 )
 
 try:
+    import logging
+    logging.getLogger("LyCORIS").addHandler(logger.handlers[0])
+    
     from lycoris import create_lycoris, LycorisNetwork
 except ImportError as e:
     raise ImportError(
@@ -66,6 +71,18 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         scheduler = get_class(config.scheduler.name)(
             optimizer, **config.scheduler.params
         )
+        
+    if config.trainer.get("resume"):
+        latest_ckpt = get_latest_checkpoint(config.trainer.checkpoint_dir)
+        remainder = {}
+        if latest_ckpt:
+            logger.info(f"Loading weights from {latest_ckpt}")
+            remainder = sd = load_torch_file(ckpt=latest_ckpt, extract=False)
+            if latest_ckpt.endswith(".safetensors"):
+                remainder = safetensors.safe_open(latest_ckpt, "pt").metadata()
+            model.load_checkpoint(sd.get("state_dict", sd))
+            config.global_step = remainder.get("global_step", 0)
+            config.current_epoch = remainder.get("current_epoch", 0)
 
     model.first_stage_model.to(torch.float32)
     if fabric.is_global_zero and os.name != "nt":
@@ -166,8 +183,16 @@ class StableDiffusionModel(SupervisedFineTune):
         self.text_encoder_2.requires_grad_(False)
         LycorisNetwork.apply_preset({"target_name": ".*"})
 
+        logger.info("")
+        logger.info(f"Initializing model.lycoris_unet with {cfg.lycoris}")
         self.lycoris_unet = create_lycoris(self.model.diffusion_model, **cfg.get("lycoris_unet", default_cfg))
+        
+        logger.info("")
+        logger.info(f"Initializing model.lycoris_te1 with {cfg.lycoris}")
         self.lycoris_te1 = create_lycoris(self.text_encoder_1, **cfg.get("lycoris_te1", default_cfg))
+        
+        logger.info("")
+        logger.info(f"Initializing model.lycoris_te2 with {cfg.lycoris}")
         self.lycoris_te2 = create_lycoris(self.text_encoder_2, **cfg.get("lycoris_te2", default_cfg))
         lycoris_mapping["unet"] = self.lycoris_unet
         lycoris_mapping["te1"] = self.lycoris_te1

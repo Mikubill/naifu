@@ -1,9 +1,10 @@
+import safetensors
 import torch
 import os
 import lightning as pl
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from common.utils import get_class
+from common.utils import get_class, get_latest_checkpoint, load_torch_file
 from common.logging import logger
 from modules.cascade_model import StableCascadeModel, EFFNET_PREPROCESS
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -43,6 +44,18 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         scheduler = get_class(config.scheduler.name)(
             optimizer, **config.scheduler.params
         )
+        
+    if config.trainer.get("resume"):
+        latest_ckpt = get_latest_checkpoint(config.trainer.checkpoint_dir)
+        remainder = {}
+        if latest_ckpt:
+            logger.info(f"Loading weights from {latest_ckpt}")
+            remainder = sd = load_torch_file(ckpt=latest_ckpt, extract=False)
+            if latest_ckpt.endswith(".safetensors"):
+                remainder = safetensors.safe_open(latest_ckpt, "pt").metadata()
+            model.load_state_dict(sd.get("state_dict", sd))
+            config.global_step = remainder.get("global_step", 0)
+            config.current_epoch = remainder.get("current_epoch", 0)
 
     model.effnet.to(torch.float32)
     if fabric.is_global_zero and os.name != "nt":
