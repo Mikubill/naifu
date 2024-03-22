@@ -9,6 +9,7 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer
 from transformers.utils import is_flash_attn_2_available
 from models.llm.modeling_phi import PhiForCausalLM
+from lightning.fabric.wrappers import _unwrap_objects
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -97,7 +98,7 @@ class PhiModel(pl.LightningModule):
         val_loss /= total_val_steps
         logger.log_metrics({"val_loss": val_loss}, step=global_step)
         self.model.train()
-
+        
     @rank_zero_only
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
@@ -109,7 +110,7 @@ class PhiModel(pl.LightningModule):
             for k, v in batch.items():
                 batch[k] = v.to(self.target_device)
                 
-            generated_output = self.model.generate(
+            generated_output = _unwrap_objects(self.model).generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 max_length=config.max_length,

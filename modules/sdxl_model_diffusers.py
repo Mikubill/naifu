@@ -145,8 +145,11 @@ class StableDiffusionModel(pl.LightningModule):
             vae=self.vae,
             text_encoder=self.text_encoder_1,
             text_encoder_2=self.text_encoder_2,
-            noise_scheduler=scheduler,
+            tokenizer=self.tokenizer_1,
+            tokenizer_2=self.tokenizer_2,
+            scheduler=scheduler,
         )
+        pipeline.set_progress_bar_config(disable=True)
         image = pipeline(
             prompt=prompt,
             negative_prompt=negative_prompt,

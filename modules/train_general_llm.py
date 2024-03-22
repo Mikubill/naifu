@@ -8,6 +8,7 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
 from lightning.pytorch.utilities import rank_zero_only
+from lightning.fabric.wrappers import _unwrap_objects
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
@@ -126,7 +127,7 @@ class LLMModel(pl.LightningModule):
             for k, v in ret.items():
                 ret[k] = v.to(self.target_device)
                 
-            generated_output = self.model.generate(
+            generated_output = _unwrap_objects(self.model).generate(
                 input_ids=ret["input_ids"][0],
                 attention_mask=ret["attention_mask"][0],
                 max_length=config.max_length,

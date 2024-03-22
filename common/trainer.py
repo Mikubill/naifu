@@ -19,9 +19,9 @@ class Trainer:
             config (OmegaConf): The configuration object.
         """
         self.fabric = fabric
-                
-        model_cls = get_class(config.target)
-        model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
+        with fabric.init_module():
+            model_cls = get_class(config.target)
+            model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
 
         self.model = model
         self.optimizer = optimizer

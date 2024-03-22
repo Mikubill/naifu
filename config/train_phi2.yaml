@@ -3,7 +3,7 @@ target: modules.train_phi.setup
 
 use_neftune: true
 neft_alpha: 50
-use_compile: true 
+use_compile: false 
 
 trainer:
   model_path: microsoft/phi-2
@@ -57,7 +57,7 @@ scheduler:
 sampling:
   enabled: true
   max_length: 200
-  every_n_steps: 50
+  every_n_steps: 600
   every_n_epochs: 1
   prompts:
     - "what is the result of 1+1"

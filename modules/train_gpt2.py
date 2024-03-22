@@ -7,6 +7,7 @@ from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import GPT2LMHeadModel, AutoTokenizer
 from lightning.pytorch.utilities import rank_zero_only
+from lightning.fabric.wrappers import _unwrap_objects
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -96,7 +97,7 @@ class GPT2Model(pl.LightningModule):
             for k, v in batch.items():
                 batch[k] = v.to(self.target_device)
                 
-            generated_output = self.model.generate(
+            generated_output = _unwrap_objects(self.model).generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 max_length=config.max_length,
