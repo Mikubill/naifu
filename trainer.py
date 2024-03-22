@@ -14,6 +14,8 @@ from common.utils import *
 from common.logging import logger
 from omegaconf import OmegaConf
 from pathlib import Path
+from lightning.fabric.connector import _is_using_cli
+
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -133,15 +135,19 @@ class Trainer:
         model_path = os.path.join(ckpt_dir, f"checkpoint-{postfix}")
         use_fabric_save = cfg.get("use_fabric_save", False)
         save_weights_only = cfg.get("save_weights_only", False)
+        save_method_avail = hasattr(self.model, "save_checkpoint")
 
         if use_fabric_save:
+            self.fabric.save(model_path + ".ckpt", state)
+        elif not save_method_avail:
+            logger.info("Model does not have a save_checkpoint method, falling back to fabric.save")
             self.fabric.save(model_path + ".ckpt", state)
         else:
             metadata = {
                 "global_step": str(self.global_step),
                 "current_epoch": str(self.current_epoch),
             }
-            self.fabric.call("save_checkpoint", model_path, metadata)
+            self.model.save_checkpoint(model_path, metadata)
             if not save_weights_only:
                 optimizer_state = {"optimizer": self.optimizer, **metadata}
                 self.fabric.save(model_path + "_optimizer.pt", optimizer_state)
@@ -154,7 +160,8 @@ class Trainer:
             is_last (bool): Indicates if it is the last sampling.
         """
         config = self.model.config
-        enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled
+        enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled \
+            and hasattr(self.model, "generate_samples")
 
         sampling_cfg = config.sampling
         sampling_steps = sampling_cfg.every_n_steps
@@ -171,13 +178,11 @@ class Trainer:
             if sampling_cfg.get("save_dir", None):
                 os.makedirs(sampling_cfg.save_dir, exist_ok=True)
 
-            self.fabric.call(
-                "generate_samples",
+            self.model.generate_samples(
                 logger=self.fabric.logger,
                 current_epoch=self.current_epoch,
                 global_step=self.global_step,
             )
-
             torch.cuda.empty_cache()
             torch.set_rng_state(rng_state)
             torch.cuda.set_rng_state(cuda_rng_state)
@@ -281,7 +286,6 @@ class Trainer:
                     fabric.log("train_loss", loss, step=self.global_step)
 
                 self.global_step += 1
-                progress.update(desc, local_acc_step, status=status)
                 state.update(global_step=self.global_step, current_epoch=self.current_epoch)
                 self.on_post_training_batch(state)
 
@@ -330,7 +334,9 @@ def main():
         strategy=strategy, 
         **config.lightning
     )
-    fabric.launch()
+    if not _is_using_cli():
+        fabric.launch()
+        
     fabric.barrier()
     fabric.seed_everything(config.trainer.seed)
     Trainer(fabric, config).train_loop()

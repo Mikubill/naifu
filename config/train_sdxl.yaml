@@ -43,7 +43,7 @@ dataset:
   target_area: 1_048_576 # 1024*1024
   min_size: 512
   max_size: 2048
-  img_path: "../hanekoto"
+  img_path: "../niji-anime"
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:

@@ -2,10 +2,8 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import (
-    get_class,
-    rank_zero_only,
-)
+from common.utils import get_class
+from lightning.pytorch.utilities import rank_zero_only
 from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer
