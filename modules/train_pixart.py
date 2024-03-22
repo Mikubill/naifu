@@ -10,8 +10,9 @@ from safetensors.torch import save_file
 from transformers import T5EncoderModel, T5Tokenizer
 from diffusers import AutoencoderKL, DPMSolverMultistepScheduler
 from lightning.pytorch.utilities.model_summary import ModelSummary
+from lightning.pytorch.utilities import rank_zero_only
 
-from common.utils import load_torch_file, get_class, rank_zero_only
+from common.utils import load_torch_file, get_class
 from common.logging import logger
 
 from models.pixart.dit import DiT_XL_2, get_model_kwargs

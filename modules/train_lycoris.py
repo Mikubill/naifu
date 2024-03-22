@@ -6,7 +6,6 @@ from common.utils import (
     load_torch_file,
     get_class,
     EmptyInitWrapper,
-    rank_zero_only,
 )
 from common.logging import logger
 from modules.train_sdxl import SupervisedFineTune
@@ -17,6 +16,7 @@ from modules.sdxl_utils import (
 from modules.sdxl_utils import get_size_embeddings
 from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 from lightning.pytorch.utilities.model_summary import ModelSummary
+from lightning.pytorch.utilities import rank_zero_only
 from safetensors.torch import save_file
 
 from diffusers import DDPMScheduler

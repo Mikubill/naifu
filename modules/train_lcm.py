@@ -4,10 +4,11 @@ import os
 import lightning as pl
 import numpy as np
 from omegaconf import OmegaConf
-from common.utils import get_class, rank_zero_only
+from common.utils import get_class
 from common.logging import logger
 from modules.sdxl_model_diffusers import StableDiffusionModel
 from lightning.pytorch.utilities.model_summary import ModelSummary
+from lightning.pytorch.utilities import rank_zero_only
 from diffusers import UNet2DConditionModel, LCMScheduler, StableDiffusionXLPipeline
 
 

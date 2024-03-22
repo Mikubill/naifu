@@ -2,11 +2,12 @@ import torch
 import os
 import lightning as pl
 from omegaconf import OmegaConf
-from common.utils import get_class, rank_zero_only
+from common.utils import get_class
 from common.logging import logger
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig
+from lightning.pytorch.utilities import rank_zero_only
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
