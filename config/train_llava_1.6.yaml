@@ -2,7 +2,6 @@ name: test-run
 target: modules.train_llava.setup
 
 model_params:
-  trust_remote_code: true
   attn_implementation: sdpa
 
 # finetune config
@@ -26,7 +25,6 @@ model_config:
   tune_mm_vision_resampler: false
   unfreeze_mm_vision_tower: true # actually its load_vision_tower
   use_mm_proj: true
-  hidden_size: 5120
   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 use_lora: true

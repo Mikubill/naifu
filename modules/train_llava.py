@@ -126,7 +126,7 @@ class LLaVAModel(pl.LightningModule):
         mm_config = OmegaConf.to_container(config.model_config)
         use_q_lora = config.get("q_lora", False)
         use_lora = config.get("use_lora", False) or use_q_lora
-        config.dataset.update({"model_version": mm_config.pop("version")})
+        config.dataset.update({"version": mm_config.pop("version")})
         q_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
@@ -166,7 +166,7 @@ class LLaVAModel(pl.LightningModule):
             model.print_trainable_parameters()
             
         # load adapter
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)     
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)     
         self.tokenizer.pad_token = self.tokenizer.unk_token
         model.get_model().initialize_vision_modules(model_args=mm_config)
         model.config.tokenizer_padding_side = self.tokenizer.padding_side
