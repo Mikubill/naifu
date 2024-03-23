@@ -8,6 +8,7 @@ from common.utils import *
 from common.logging import logger
 from omegaconf import OmegaConf
 from pathlib import Path
+from contextlib import nullcontext
 
 class Trainer:
     def __init__(self, fabric: pl.Fabric, config: OmegaConf):
@@ -19,9 +20,11 @@ class Trainer:
             config (OmegaConf): The configuration object.
         """
         self.fabric = fabric
-        # with fabric.init_module():
-        model_cls = get_class(config.target)
-        model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
+        _unwrap = config.get("unwrap_fabric_init", False)
+        fabric_init_ctx = nullcontext if _unwrap else fabric.init_module
+        with fabric_init_ctx():
+            model_cls = get_class(config.target)
+            model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
 
         self.model = model
         self.optimizer = optimizer

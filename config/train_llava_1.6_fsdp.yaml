@@ -1,5 +1,6 @@
 name: test-run
 target: modules.train_llava.setup
+unwrap_fabric_init: true
 
 model_params:
   trust_remote_code: true
