@@ -215,19 +215,25 @@ class LLaVAModel(pl.LightningModule):
         loss = out["loss"]
         return loss
 
-    @rank_zero_only
     def save_checkpoint(self, model_path, metadata):
         if self.model.config.tune_mm_mlp_adapter:
             keys_to_match = ['mm_projector', 'vision_resampler']
-            if getattr(self.args, "use_im_start_end", False):
+            if getattr(self.config.model_config, "use_im_start_end", False):
                 keys_to_match.extend(['embed_tokens', 'embed_in'])
 
             named_params = list(self.model.named_parameters())
             weight_to_save = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
             weight_to_save = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in weight_to_save.items()}
+            
+        self._save_checkpoint_zero3(model_path, weight_to_save)
+
+    @rank_zero_only
+    def _save_checkpoint_zero3(self, model_path, weight_to_save):
+        if self.model.config.tune_mm_mlp_adapter:
             self.model.config.save_pretrained(model_path)
             torch.save(weight_to_save, os.path.join(model_path, f'mm_projector.bin'))
         else:
             self.model.save_pretrained(model_path)
             self.tokenizer.save_pretrained(model_path)
-            logger.info(f"Saved model to {model_path}")
+        
+        logger.info(f"Saved model to {model_path}")
