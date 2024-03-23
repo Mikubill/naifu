@@ -22,14 +22,14 @@ from .clip_encoder import build_vision_tower
 from .clip_projector import build_vision_projector
 from .constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from .mm_utils import get_anyres_image_grid_shape
-
+from common.logging import logger
 
 class LlavaMetaModel:
 
     def __init__(self, config):
         super(LlavaMetaModel, self).__init__(config)
-
         if hasattr(config, "mm_vision_tower"):
+            logger.info("Building vision tower {} for multimodal model".format(config.mm_vision_tower))
             self.vision_tower = build_vision_tower(config, delay_load=True)
             self.mm_projector = build_vision_projector(config)
 
@@ -45,12 +45,11 @@ class LlavaMetaModel:
         return vision_tower
 
     def initialize_vision_modules(self, model_args, fsdp=None):
-        vision_tower = model_args.vision_tower
+        vision_tower = model_args.get("vision_tower", model_args.get("mm_vision_tower"))
         mm_vision_select_layer = model_args.mm_vision_select_layer
         mm_vision_select_feature = model_args.mm_vision_select_feature
-        pretrain_mm_mlp_adapter = model_args.pretrain_mm_mlp_adapter
+        pretrain_mm_mlp_adapter = model_args.get("pretrain_mm_mlp_adapter", None)
         mm_patch_merge_type = model_args.mm_patch_merge_type
-
         self.config.mm_vision_tower = vision_tower
 
         if self.get_vision_tower() is None:

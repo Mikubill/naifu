@@ -5,36 +5,29 @@ model_params:
   trust_remote_code: true
   attn_implementation: sdpa
 
-# LLaVA v1.5 pretrain config
-# model_config:
-#   version: plain # v1
-#   vision_tower: openai/clip-vit-large-patch14-336
-#   mm_projector_type: mlp2x_gelu
-#   tune_mm_mlp_adapter: true
-#   mm_vision_select_layer: -2
-#   mm_use_im_start_end: false
-#   mm_use_im_patch_token: false
-#   pretrain_mm_mlp_adapter: null
-#   mm_patch_merge_type: 'flat'
-#   mm_vision_select_feature: 'patch'
-#   image_aspect_ratio: 'square'
-#   mm_projector_lr: null
-
-# LLaVA v1.5 finetune config
-# https://huggingface.co/liuhaotian/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/resolve/main/mm_projector.bin
+# finetune config
 model_config:
-  version: v1
-  vision_tower: openai/clip-vit-large-patch14-336
-  mm_projector_type: mlp2x_gelu
-  tune_mm_mlp_adapter: false
-  mm_vision_select_layer: -2
-  mm_use_im_start_end: false
+  version: vicuna_v1
+  image_aspect_ratio: "anyres"
+  image_crop_resolution: 224
+  image_split_resolution: 224
+  mm_hidden_size: 1024
+  mm_patch_merge_type: "spatial_unpad"
+  mm_projector_lr: null
+  mm_projector_type: "mlp2x_gelu"
+  mm_resampler_type: null
   mm_use_im_patch_token: false
-  pretrain_mm_mlp_adapter: mm_projector.bin
-  mm_patch_merge_type: 'flat'
-  mm_vision_select_feature: 'patch'
-  image_aspect_ratio: 'pad'
-  mm_projector_lr: 2e-5
+  mm_use_im_start_end: false
+  mm_vision_select_feature: "patch"
+  mm_vision_select_layer: -2
+  mm_vision_tower: "openai/clip-vit-large-patch14-336"
+  mm_vision_tower_lr: 2e-06
+  tune_mm_mlp_adapter: true
+  tune_mm_vision_resampler: false
+  unfreeze_mm_vision_tower: true # actually its load_vision_tower
+  use_mm_proj: true
+  hidden_size: 5120
+  image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 use_lora: true
 q_lora: false
@@ -47,7 +40,7 @@ lora_params:
   task_type: "CAUSAL_LM"
 
 trainer:
-  model_path: liuhaotian/llava-v1.5-7b
+  model_path: lmsys/vicuna-13b-v1.5
   batch_size: 32
   seed: 1138
   wandb_id: "qwen"

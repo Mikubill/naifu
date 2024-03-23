@@ -7,9 +7,20 @@ import torch.utils._device
 from common.logging import logger
 from tqdm import tqdm
 
+from transformers.utils import logging as tsl
+from diffusers.utils import logging as dsl
+
+tsl.disable_default_handler()
+tsl.get_logger().addHandler(logger.handlers[0])
+
+
+dsl.disable_default_handler()
+dsl.get_logger().addHandler(logger.handlers[0])
+
 
 def get_world_size():
     return int(os.environ.get("WORLD_SIZE", 1))
+
 
 class ProgressBar:
     def __init__(self, total: int, disable=False):
@@ -24,13 +35,14 @@ class ProgressBar:
     def update(self, desc: str, step: int, status: str = ""):
         if not self.progress:
             return
-        
+
         if step == 0:
             self.progress.reset()
-        
+
         self.progress.n = step
         self.progress.set_description_str(desc)
         self.progress.set_postfix_str(status)
+
 
 class LossRecorder:
     def __init__(self):
