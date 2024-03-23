@@ -19,9 +19,9 @@ class Trainer:
             config (OmegaConf): The configuration object.
         """
         self.fabric = fabric
-        with fabric.init_module():
-            model_cls = get_class(config.target)
-            model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
+        # with fabric.init_module():
+        model_cls = get_class(config.target)
+        model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
 
         self.model = model
         self.optimizer = optimizer
@@ -237,7 +237,7 @@ class Trainer:
 
                 if grad_clip_val > 0:
                     self.fabric.clip_gradients(
-                        module=self.model, 
+                        module=fabric_module, 
                         optimizer=self.optimizer, 
                         max_norm=grad_clip_val
                     )

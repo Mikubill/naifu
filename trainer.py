@@ -9,7 +9,7 @@ import torch
 import lightning as pl
 import argparse
 
-from common.utils import get_class, setup_smddp
+from common.utils import get_class, setup_smddp, parse_args
 from common.trainer import Trainer
 from omegaconf import OmegaConf
 from lightning.fabric.connector import _is_using_cli
@@ -18,17 +18,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str)
-    parser.add_argument("--resume", action="store_true")
-    first_args = sys.argv[1]
-    
-    if first_args.startswith("--"):
-        args = parser.parse_args()
-    else:
-        args = parser.parse_args(sys.argv[2:])
-        args.config = first_args
-
+    args = parse_args()
     config = OmegaConf.load(args.config)
     config.trainer.resume = args.resume
     plugins = []

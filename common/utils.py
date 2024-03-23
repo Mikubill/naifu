@@ -3,6 +3,8 @@ import torch
 import os
 import safetensors.torch
 import torch.utils._device
+import argparse
+import sys
 
 from common.logging import logger
 from tqdm import tqdm
@@ -21,6 +23,20 @@ dsl.get_logger().addHandler(logger.handlers[0])
 def get_world_size():
     return int(os.environ.get("WORLD_SIZE", 1))
 
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str)
+    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--resume", action="store_true")
+    first_args = sys.argv[1]
+    
+    if first_args.startswith("--"):
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(sys.argv[2:])
+        args.config = first_args
+    return args
 
 class ProgressBar:
     def __init__(self, total: int, disable=False):

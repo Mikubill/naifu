@@ -356,6 +356,7 @@ class LazySupervisedDataset(Dataset):
             self, 
             batch_size=batch_size, 
             shuffle=shuffle, 
+            num_workers=8,
             collate_fn=self.padding_collate_fn
         )
         return dataloader
