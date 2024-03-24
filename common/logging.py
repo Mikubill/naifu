@@ -1,5 +1,6 @@
 import logging
 import copy
+import os
 import sys
 from lightning.pytorch.utilities import rank_zero_only
 
@@ -30,7 +31,7 @@ if not logger.handlers:
     from lightning_utilities.core.imports import RequirementCache   
     _rich_available = RequirementCache("rich>=10.2.2")
     
-    if _rich_available:
+    if _rich_available and os.environ.get('SM_HOSTS', None) == None:
         from rich.logging import RichHandler
 
         class ConditionalRichHandler(RichHandler):

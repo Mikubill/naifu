@@ -7,9 +7,8 @@ os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 
 import torch
 import lightning as pl
-import argparse
 
-from common.utils import get_class, setup_smddp, parse_args
+from common.utils import get_class, parse_args
 from common.trainer import Trainer
 from omegaconf import OmegaConf
 from lightning.fabric.connector import _is_using_cli
@@ -27,9 +26,6 @@ def main():
     if "." in strategy:
         _params = config.lightning.pop("strategy_params", {})
         strategy = get_class(strategy)(**_params)
-
-    if os.environ.get("SM_TRAINING", False) or os.environ.get("SM_HOSTS", False):
-        strategy, config = setup_smddp(config)
 
     loggers = pl.fabric.loggers.CSVLogger(".")
     if config.trainer.wandb_id != "":
@@ -49,7 +45,6 @@ def main():
     fabric.seed_everything(config.trainer.seed + fabric.global_rank)
     
     Trainer(fabric, config).train_loop()
-
 
 if __name__ == "__main__":
     main()

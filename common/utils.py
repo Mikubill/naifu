@@ -157,39 +157,6 @@ def get_class(name: str):
     return getattr(module, class_name)
 
 
-def setup_smddp(config):
-    from lightning.pytorch.plugins.environments import LightningEnvironment
-
-    # from lightning.fabric.strategies import DDPStrategy
-    from common.fairscale import DDPShardedStrategy
-
-    ddp_strategy = DDPShardedStrategy
-
-    env = LightningEnvironment()
-    env.world_size = lambda: int(os.environ["WORLD_SIZE"])
-    env.global_rank = lambda: int(os.environ["RANK"])
-    strategy = ddp_strategy(cluster_environment=env, accelerator="gpu")
-
-    world_size = int(os.environ["WORLD_SIZE"])
-    num_gpus = int(os.environ["SM_NUM_GPUS"])
-    num_nodes = int(world_size / num_gpus)
-    init_params = {
-        "devices": num_gpus,
-        "num_nodes": num_nodes,
-    }
-
-    config.lightning.update(init_params)
-    del config.lightning.accelerator
-
-    config.trainer.checkpoint_dir = os.path.join(
-        "/opt/ml/checkpoints", config.trainer.checkpoint_dir
-    )
-    config.sampling.save_dir = os.path.join(
-        os.environ.get("SM_OUTPUT_DIR"), config.sampling.save_dir
-    )
-    return strategy, config
-
-
 def get_latest_checkpoint(checkpoint_dir: str):
     if not os.path.isdir(checkpoint_dir):
         return None
