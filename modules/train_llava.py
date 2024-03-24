@@ -144,7 +144,6 @@ class LLaVAModel(pl.LightningModule):
             torch_dtype=torch.bfloat16,
             quantization_config=q_config,
             config=cfg_pretrained,
-            ignore_mismatched_sizes=True if cfg_pretrained else False,
             **config.model_params
         )
         mm_config = config.model_config

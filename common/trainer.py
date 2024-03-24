@@ -20,11 +20,8 @@ class Trainer:
             config (OmegaConf): The configuration object.
         """
         self.fabric = fabric
-        _unwrap = config.get("unwrap_fabric_init", False)
-        fabric_init_ctx = nullcontext if _unwrap else fabric.init_module
-        with fabric_init_ctx():
-            model_cls = get_class(config.target)
-            model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
+        model_cls = get_class(config.target)
+        model, dataset, dataloader, optimizer, scheduler = model_cls(fabric, config)
 
         self.model = model
         self.optimizer = optimizer
