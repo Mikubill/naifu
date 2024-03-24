@@ -110,6 +110,9 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     fabric.barrier()
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
+    if hasattr(fabric.strategy, "_deepspeed_engine"):
+        model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    
     return model, dataset, dataloader, optimizer, scheduler
 
 # define the LightningModule
@@ -180,7 +183,7 @@ class LLaVAModel(pl.LightningModule):
             model.get_model().vision_tower.requires_grad_(True)
                 
         param_counts = defaultdict(int)
-        for name, param in model.model.named_parameters():
+        for name, param in model.named_parameters():
             if param.requires_grad:
                 # Increment the count for this type of parameter
                 param_counts[".".join(name.split('.')[:2])] += param.numel()
@@ -223,7 +226,17 @@ class LLaVAModel(pl.LightningModule):
             named_params = list(self.model.named_parameters())
             weight_to_save = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
             weight_to_save = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in weight_to_save.items()}
-            
+        else:
+            # save full model
+            # test param if its zero3
+            weight_to_save = None
+            param = next(self.model.parameters())
+            if hasattr(param, "ds_id") and hasattr(self, "_deepspeed_engine"):
+                try:
+                    weight_to_save = self._deepspeed_engine._zero3_consolidated_16bit_state_dict()
+                except ValueError:
+                    pass
+                
         self._save_checkpoint_zero3(model_path, weight_to_save)
 
     @rank_zero_only
@@ -232,7 +245,7 @@ class LLaVAModel(pl.LightningModule):
             self.model.config.save_pretrained(model_path)
             torch.save(weight_to_save, os.path.join(model_path, f'mm_projector.bin'))
         else:
-            self.model.save_pretrained(model_path)
             self.tokenizer.save_pretrained(model_path)
-        
+            self.model.save_pretrained(model_path, state_dict=weight_to_save)
+            
         logger.info(f"Saved model to {model_path}")

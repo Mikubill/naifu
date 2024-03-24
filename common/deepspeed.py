@@ -33,8 +33,10 @@ ds_strategy = DeepSpeedStrategy(
             "stage3_param_persistence_threshold": "auto",
             "stage3_max_live_parameters": 1e9,
             "stage3_max_reuse_distance": 1e9,
-            "stage3_gather_16bit_weights_on_model_save": True
-        }
+            "stage3_gather_16bit_weights_on_model_save": True,
+            "ignore_unused_parameters": True,
+        },
+        "zero_allow_untested_optimizer": True,
     }
 )   
 
