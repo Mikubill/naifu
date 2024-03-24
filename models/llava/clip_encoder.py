@@ -26,8 +26,8 @@ class CLIPVisionTower(nn.Module):
 
         if not delay_load:
             self.load_model()
-        elif getattr(args, 'unfreeze_mm_vision_tower', False):
-            self.load_model()
+        # elif getattr(args, 'unfreeze_mm_vision_tower', False):
+        #     self.vision_tower.requires_grad_(True)
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 

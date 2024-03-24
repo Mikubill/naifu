@@ -67,11 +67,7 @@ def get_optimizer_parameters(opt_model, config):
     mm_projector_lr = config.model_config.mm_projector_lr
     decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
-
-    # Get the names of the projector parameters, if applicable
-    projector_parameters = []
-    if mm_projector_lr is not None:
-        projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name] 
+    projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name] 
 
     # Helper function to get the parameters in a group
     def get_params_in_group(decay, projector):
@@ -179,6 +175,9 @@ class LLaVAModel(pl.LightningModule):
         else:
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = False
+                
+        if mm_config.tune_mm_vision_tower:
+            model.get_model().vision_tower.requires_grad_(True)
                 
         param_counts = defaultdict(int)
         for name, param in model.model.named_parameters():
