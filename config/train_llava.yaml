@@ -10,7 +10,6 @@ model_params:
 #   version: plain # v1
 #   vision_tower: openai/clip-vit-large-patch14-336
 #   mm_projector_type: mlp2x_gelu
-#   tune_mm_mlp_adapter: true
 #   mm_vision_select_layer: -2
 #   mm_use_im_start_end: false
 #   mm_use_im_patch_token: false
@@ -18,7 +17,10 @@ model_params:
 #   mm_patch_merge_type: 'flat'
 #   mm_vision_select_feature: 'patch'
 #   image_aspect_ratio: 'square'
-#   mm_projector_lr: null
+#   mm_projector_lr: 2e-5
+#   tune_mm_mlp_adapter: true
+#   tune_mm_vision_tower: false
+#   freeze_backbone: true
 
 # LLaVA v1.5 finetune config
 # https://huggingface.co/liuhaotian/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/resolve/main/mm_projector.bin
@@ -26,7 +28,6 @@ model_config:
   version: v1
   vision_tower: openai/clip-vit-large-patch14-336
   mm_projector_type: mlp2x_gelu
-  tune_mm_mlp_adapter: false
   mm_vision_select_layer: -2
   mm_use_im_start_end: false
   mm_use_im_patch_token: false
@@ -35,6 +36,9 @@ model_config:
   mm_vision_select_feature: 'patch'
   image_aspect_ratio: 'pad'
   mm_projector_lr: 2e-5
+  tune_mm_mlp_adapter: false
+  tune_mm_vision_tower: true
+  freeze_backbone: true
 
 use_lora: true
 q_lora: false

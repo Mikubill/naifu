@@ -45,6 +45,7 @@ model_config:
   mm_vision_tower_lr: 2e-06
   tune_mm_mlp_adapter: true
   tune_mm_vision_tower: false
+  freeze_backbone: true
   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 use_lora: true

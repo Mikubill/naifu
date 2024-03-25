@@ -170,8 +170,10 @@ class LLaVAModel(pl.LightningModule):
         model.config.tokenizer_padding_side = self.tokenizer.padding_side
         model.config.tokenizer_model_max_length = self.tokenizer.model_max_length  
          
-        if mm_config.tune_mm_mlp_adapter:
+        if mm_config.freeze_backbone:
             model.requires_grad_(False)
+            
+        if mm_config.tune_mm_mlp_adapter:
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = True
         else:
@@ -180,6 +182,8 @@ class LLaVAModel(pl.LightningModule):
                 
         if mm_config.tune_mm_vision_tower:
             model.get_model().vision_tower.requires_grad_(True)
+        else:
+            model.get_model().vision_tower.requires_grad_(False)
                 
         param_counts = defaultdict(int)
         for name, param in model.named_parameters():
