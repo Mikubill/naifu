@@ -17,7 +17,7 @@ from common.logging import logger
 from diffusers import EulerDiscreteScheduler, DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 from safetensors.torch import save_file
-
+from modules.config_sdxl_base import model_config
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -33,9 +33,7 @@ class StableDiffusionModel(pl.LightningModule):
         config = self.config
         advanced = config.get("advanced", {})
 
-        model_config = OmegaConf.load("modules/sdxl_base.yaml")
         model_params = model_config.model.params
-
         if trainer_cfg.use_xformers:
             unet_config = model_params.network_config.params
             vae_config = model_params.first_stage_config.params

@@ -12,7 +12,7 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from models.sgm import GeneralConditioner
 from modules.scheduler_utils import apply_snr_weight
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
-    
+from modules.config_sdxl_refiner import model_config
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model_path = config.trainer.model_path
@@ -79,9 +79,7 @@ class SupervisedFineTune(StableDiffusionModel):
         config = self.config
         advanced = config.get("advanced", {})
 
-        model_config = OmegaConf.load("modules/sdxl_refiner.yaml")
         model_params = model_config.model.params
-
         if trainer_cfg.use_xformers:
             unet_config = model_params.network_config.params
             vae_config = model_params.first_stage_config.params

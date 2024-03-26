@@ -41,7 +41,7 @@ lightning:
   precision: 16-mixed
 
 dataset:
-  name: data.arb_dataset.AspectRatioDataset 
+  name: data.bucket.AspectRatioDataset 
   target_area: 1_048_576 # 1024*1024
   min_size: 512
   max_size: 2048

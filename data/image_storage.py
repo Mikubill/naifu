@@ -1,10 +1,7 @@
-import functools
 import hashlib
 import json
-import math
 import h5py as h5
 import numpy as np
-import random
 import torch
 
 from tqdm.auto import tqdm
@@ -15,7 +12,6 @@ from torch.utils.data import Dataset
 from typing import Callable, Generator, Optional  # type: ignore
 from torchvision import transforms
 from common.logging import logger
-from torchvision.transforms import Resize, InterpolationMode
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -78,18 +74,15 @@ class StoreBase(Dataset):
         root_path,
         rank=0,
         dtype=torch.float16,
-        use_central_crop=True,
         **kwargs,
     ):
         self.rank = rank
         self.root_path = Path(root_path)
         self.dtype = dtype
-        self.use_central_crop = use_central_crop
         self.kwargs = kwargs
 
         self.length = 0
         self.rand_list: list = []
-        self.to_ratio: None | np.ndarray = None
         self.raw_res: list[tuple[int, int]] = []
         self.curr_res: list[tuple[int, int]] = []
 
@@ -100,60 +93,10 @@ class StoreBase(Dataset):
 
     def fix_aspect_randomness(self, rng: np.random.Generator):
         raise NotImplementedError
-
-    @staticmethod
-    @functools.cache
-    def fit_dimensions(target_ratio, min_h, min_w):
-        min_area = min_h * min_w
-        h = max(min_h, math.ceil(math.sqrt(min_area * target_ratio)))
-        w = max(min_w, math.ceil(h / target_ratio))
-
-        if w < min_w:
-            w = min_w
-            h = max(min_h, math.ceil(w * target_ratio))
-
-        while h * w < min_area:
-            increment = 8
-            if target_ratio >= 1:
-                h += increment
-            else:
-                w += increment
-
-            w = max(min_w, math.ceil(h / target_ratio))
-            h = max(min_h, math.ceil(w * target_ratio))
-        return int(h), int(w)
-
-    def crop(self, entry: Entry, i: int) -> Entry:
-        assert self.to_ratio is not None, "to_ratio is not initialized"
-        H, W = entry.pixel.shape[-2:]
-        base_ratio = H / W
-        target_ratio = self.to_ratio[i]
-        h, w = self.ratio_to_bucket[target_ratio]
-        if not entry.is_latent:
-            resize_h, resize_w = self.fit_dimensions(base_ratio, h, w)
-            interp = (
-                InterpolationMode.BILINEAR
-                if resize_h < H
-                else InterpolationMode.BICUBIC
-            )
-            entry.pixel = Resize(
-                size=(resize_h, resize_w), 
-                interpolation=interp, 
-                antialias=None
-            )(entry.pixel)
-        else:
-            h, w = h // 8, w // 8
-
-        H, W = entry.pixel.shape[-2:]
-        if self.use_central_crop:
-            dh, dw = (H - h) // 2, (W - w) // 2
-        else:
-            assert H >= h and W >= w, f"{H}<{h} or {W}<{w}"
-            dh, dw = random.randint(0, H - h), random.randint(0, W - w)
-
-        entry.pixel = entry.pixel[:, dh : dh + h, dw : dw + w]
-        return entry, dh, dw
-
+    
+    def crop(self, entry: Entry, index: int) -> Entry:
+        return entry, 0, 0
+    
     @torch.no_grad()
     def get_batch(self, indices: list[int]) -> Entry:
         entries = [self._get_entry(i) for i in indices]

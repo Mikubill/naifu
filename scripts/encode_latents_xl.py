@@ -59,7 +59,7 @@ def dirwalk(path: Path, cond: Optional[Callable] = None) -> Generator[Path, None
 
 
 class LatentEncodingDataset(Dataset):
-    def __init__(self, root: str | Path, dtype=torch.float32):
+    def __init__(self, root: str | Path, dtype=torch.float32, no_upscale=False):
         self.tr = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -89,6 +89,10 @@ class LatentEncodingDataset(Dataset):
         self.paths = [p for p in self.paths if p not in remove_paths]
         self.length = len(self.raw_res)
         print(f"Loaded {self.length} image sizes")
+        
+        self.fit_bucket_func = self.fit_bucket
+        if no_upscale:
+            self.fit_bucket_func = self.fit_bucket_no_upscale
 
         self.target_area = 1024 * 1024
         self.max_size, self.min_size, self.divisible = 2048, 512, 64
@@ -166,6 +170,27 @@ class LatentEncodingDataset(Dataset):
         img = img[dh : dh + target_h, dw : dw + target_w]
         return img, (dh, dw)
 
+    @torch.no_grad()
+    def fit_bucket_no_upscale(self, idx, img: np.ndarray) -> np.ndarray:
+        h, w = img.shape[:2]
+        img_area = h * w
+
+        # Check if the image needs to be resized (i.e., only allow downsizing)
+        if img_area > self.target_area:
+            scale_factor = math.sqrt(self.target_area / img_area)
+            resize_w = math.floor(w * scale_factor / self.divisible) * self.divisible
+            resize_h = math.floor(h * scale_factor / self.divisible) * self.divisible
+
+        target_w = resize_w - resize_w % self.reso_steps
+        target_h = resize_h - resize_h % self.reso_steps
+            
+        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
+        img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
+
+        dh, dw = abs(target_h - img.shape[0]) // 2, abs(target_w - img.shape[1]) // 2
+        img = img[dh : dh + target_h, dw : dw + target_w]
+        return img, (dh, dw)
+
     def __getitem__(self, index) -> tuple[list[torch.Tensor], str, str, (int, int)]:
         try:
             img, prompt = load_entry(self.paths[index])
@@ -188,6 +213,7 @@ def get_args():
         "--input", "-i", type=str, required=True, help="root directory of images"
     )
     parser.add_argument("--output", "-o", type=str, required=True, help="output file")
+    parser.add_argument("--no-upscale", "-nu", action="store_true", help="do not upscale images")
     parser.add_argument("--dtype", "-d", type=str, default="float32", help="data type")
     parser.add_argument("--num_workers", "-n", type=int, default=4, help="number of dataloader workers")
     args = parser.parse_args()
@@ -206,7 +232,7 @@ if __name__ == "__main__":
     vae.requires_grad_(False)
     vae.eval().cuda()
 
-    dataset = LatentEncodingDataset(root, dtype=dtype)
+    dataset = LatentEncodingDataset(root, dtype=dtype, no_upscale=args.no_upscale)
     dataloader = DataLoader(dataset, batch_size=None, num_workers=num_workers)
     opt.mkdir(exist_ok=True, parents=True)
     assert opt.is_dir(), f"{opt} is not a directory"
