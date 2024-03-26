@@ -42,8 +42,7 @@ def main():
         fabric.launch()
         
     fabric.barrier()
-    fabric.seed_everything(config.trainer.seed + fabric.global_rank)
-    
+    fabric.seed_everything(config.trainer.seed)
     Trainer(fabric, config).train_loop()
 
 if __name__ == "__main__":
