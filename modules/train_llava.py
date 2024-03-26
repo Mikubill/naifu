@@ -166,7 +166,7 @@ class LLaVAModel(pl.LightningModule):
             config=cfg_pretrained,
             **config.model_params
         )
-        mm_config = config.model_config
+        mm_config = OmegaConf.create(cfg_pretrained.to_dict())
         model.enable_input_require_grads()
         model.gradient_checkpointing_enable()
         model.train() 
@@ -235,7 +235,8 @@ class LLaVAModel(pl.LightningModule):
 
     def forward(self, batch):
         for k, v in batch.items():
-            batch[k] = v.to(self.target_device)
+            if isinstance(batch[k], torch.Tensor):
+                batch[k] = v.to(self.target_device)
 
         out = self.model(**batch)
         loss = out["loss"]

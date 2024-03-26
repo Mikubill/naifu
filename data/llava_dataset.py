@@ -1,7 +1,7 @@
 # copy from https://github.com/haotian-liu/LLaVA/blob/7440ec9ee37b0374c6b5548818e89878e38f3353/llava/train/train.py
 
 import copy
-from models.llava.mm_utils import tokenizer_image_token
+from models.llava.mm_utils import process_images, tokenizer_image_token
 from models.llava.constants import *
 from typing import Dict
 from torch.utils.data import Dataset
@@ -39,6 +39,9 @@ class LazySupervisedDataset(Dataset):
         self.default_conv = conv_templates[version] if version in conv_templates else conv_templates["vicuna_v1"]
         self.tokenizer = tokenizer
         self.mm_config = mm_config
+        if hasattr(self.mm_config, "image_grid_pinpoints"):
+            self.mm_config.image_grid_pinpoints = list(mm_config.image_grid_pinpoints)
+        
         self.list_data_dict = list_data_dict
         self.image_folder = image_folder
         self.image_processor = image_processor
@@ -70,28 +73,13 @@ class LazySupervisedDataset(Dataset):
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+        
         if 'image' in sources[0]:
             image_file = self.list_data_dict[i]['image']
             image_folder = self.image_folder
-            processor = self.image_processor
             image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
-            if self.mm_config.image_aspect_ratio == 'pad':
-                def expand2square(pil_img, background_color):
-                    width, height = pil_img.size
-                    if width == height:
-                        return pil_img
-                    elif width > height:
-                        result = Image.new(pil_img.mode, (width, width), background_color)
-                        result.paste(pil_img, (0, (width - height) // 2))
-                        return result
-                    else:
-                        result = Image.new(pil_img.mode, (height, height), background_color)
-                        result.paste(pil_img, ((height - width) // 2, 0))
-                        return result
-                image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
-            else:
-                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+            image_size = image.size
+            image = process_images([image], self.image_processor, self.mm_config)[0]
             sources = self.preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]))
         else:
             sources = copy.deepcopy([e["conversations"] for e in sources])
@@ -106,10 +94,13 @@ class LazySupervisedDataset(Dataset):
         # image exist in the data
         if 'image' in self.list_data_dict[i]:
             data_dict['image'] = image
+            data_dict['image_size'] = image_size
         elif self.is_multimodal:
+            logger.warn(f"Image does not exist in the data, but the model is multimodal. Filling with zeros.")
             # image does not exist in the data, but the model is multimodal
             crop_size = self.image_processor.crop_size
             data_dict['image'] = torch.zeros(3, crop_size['height'], crop_size['width'])
+            data_dict['image_size'] = (crop_size['height'], crop_size['width'])
         
         return data_dict
     
@@ -345,10 +336,12 @@ class LazySupervisedDataset(Dataset):
 
         if 'image' in instances[0]:
             images = [instance['image'] for instance in instances]
+            batch['image_sizes'] = [instance['image_size'] for instance in instances]
             if all(x is not None and x.shape == images[0].shape for x in images):
                 batch['images'] = torch.stack(images)
             else:
                 batch['images'] = images
+                
         return batch
                 
     def build_dataloader(self, batch_size: int, shuffle: bool = False):
