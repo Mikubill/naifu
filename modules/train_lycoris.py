@@ -150,7 +150,7 @@ class StableDiffusionModel(SupervisedFineTune):
         self.text_encoder_1.to(self.target_device)
         self.text_encoder_2.to(self.target_device)
         self.text_encoder_1.load_state_dict(te1_sd, strict=False)
-        self.text_encoder_2.load_state_dict(converted_sd)
+        self.text_encoder_2.load_state_dict(converted_sd, strict=False)
         vae.load_state_dict(vae_sd)
         unet.load_state_dict(unet_sd)
         self.noise_scheduler = DDPMScheduler(
