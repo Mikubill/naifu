@@ -74,13 +74,17 @@ class StoreBase(Dataset):
         root_path,
         rank=0,
         dtype=torch.float16,
+        process_batch_fn = lambda x: x,
         **kwargs,
     ):
         self.rank = rank
         self.root_path = Path(root_path)
         self.dtype = dtype
         self.kwargs = kwargs
-
+        self.process_batch_fn = process_batch_fn
+        if isinstance(self.process_batch_fn, str):
+            self.process_batch_fn = get_class(self.process_batch_fn)
+            
         self.length = 0
         self.rand_list: list = []
         self.raw_res: list[tuple[int, int]] = []
@@ -166,8 +170,8 @@ class StoreBase(Dataset):
     def get_batch_extras(self, path):
         return None
 
-    def process_batch(self, inputs):
-        return inputs
+    def process_batch(self, inputs: Entry):
+        return self.process_batch_fn(inputs)
 
     def _get_entry(self, index) -> Entry:
         is_latent, pixel, prompt, original_size, dhdw, extras = self.get_raw_entry(
