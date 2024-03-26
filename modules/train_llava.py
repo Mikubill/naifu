@@ -70,23 +70,22 @@ def get_optimizer_parameters(opt_model, config):
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
     vision_tower_parameters = [name for name, _ in opt_model.named_parameters() if "vision_tower" in name] 
+    added_params = set()
 
     # Helper function to get the parameters in a group
     def get_params_in_group(decay, projector=False, vision_tower=False):
         params_in_group = []
         for n, p in opt_model.named_parameters():
-            if (n in decay_parameters) == decay:
+            if (n in decay_parameters) == decay and n not in added_params:
                 if (n in projector_parameters) == projector and p.requires_grad:
                     params_in_group.append(p)
-                if (n in vision_tower_parameters) == vision_tower and p.requires_grad:
+                    added_params.add(n)
+                elif (n in vision_tower_parameters) == vision_tower and p.requires_grad:
                     params_in_group.append(p)
+                    added_params.add(n)
         return params_in_group
-
-    # Create the parameter groups for the optimizer
-    optimizer_grouped_parameters = [
-        {"params": get_params_in_group(True), "weight_decay": optim_param.weight_decay},
-        {"params": get_params_in_group(False), "weight_decay": 0.0},
-    ]
+    
+    optimizer_grouped_parameters = []
 
     # Add the projector parameters to the parameter groups, if applicable
     if mm_projector_lr is not None:
@@ -100,7 +99,15 @@ def get_optimizer_parameters(opt_model, config):
             {"params": get_params_in_group(True, vision_tower=True), "weight_decay": optim_param.weight_decay, "lr": mm_vision_tower_lr},
             {"params": get_params_in_group(False, vision_tower=True), "weight_decay": 0.0, "lr": mm_vision_tower_lr},
         ])
-
+        
+    # Create the parameter groups for the optimizer
+    optimizer_grouped_parameters.extend([
+        {"params": get_params_in_group(True), "weight_decay": optim_param.weight_decay},
+        {"params": get_params_in_group(False), "weight_decay": 0.0},
+    ])
+    
+    # scan and remove empty groups
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if len(group["params"]) > 0]
     return optimizer_grouped_parameters
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -123,6 +130,8 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     dataloader = fabric.setup_dataloaders(dataloader)
     if hasattr(fabric.strategy, "_deepspeed_engine"):
         model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    if hasattr(fabric.strategy, "_fsdp_kwargs"):
+        model._fsdp_engine = fabric.strategy
     
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -206,7 +215,8 @@ class LLaVAModel(pl.LightningModule):
         for param_type, count in param_counts.items():
             logger.info(f"Trainable: {param_type} - {get_human_readable_count(count)} parameters")
                 
-        model.initialize_vision_tokenizer(mm_config, tokenizer=self.tokenizer)    
+        model.initialize_vision_tokenizer(mm_config, tokenizer=self.tokenizer)   
+        model.get_vision_tower().to(next(model.parameters()).dtype) 
         self.image_processor = model.get_vision_tower().image_processor
         self.logger_samples = []
         self.model = model
@@ -232,7 +242,7 @@ class LLaVAModel(pl.LightningModule):
         return loss
 
     def save_checkpoint(self, model_path, metadata):
-        if self.model.config.tune_mm_mlp_adapter:
+        if self.model.config.freeze_backbone:
             keys_to_match = ['mm_projector', 'vision_resampler']
             if getattr(self.config.model_config, "use_im_start_end", False):
                 keys_to_match.extend(['embed_tokens', 'embed_in'])
@@ -250,12 +260,20 @@ class LLaVAModel(pl.LightningModule):
                     weight_to_save = self._deepspeed_engine._zero3_consolidated_16bit_state_dict()
                 except ValueError:
                     pass
+            elif hasattr(self, "_fsdp_engine"):
+                from lightning.fabric.strategies.fsdp import _get_full_state_dict_context
                 
-        self._save_checkpoint_zero3(model_path, weight_to_save)
+                world_size = self._fsdp_engine.world_size
+                with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
+                    weight_to_save = self.model._forward_module.state_dict()
+            else:
+                weight_to_save = self.model.state_dict()
+                
+        self._save_checkpoint(model_path, weight_to_save)
 
     @rank_zero_only
-    def _save_checkpoint_zero3(self, model_path, weight_to_save):
-        if self.model.config.tune_mm_mlp_adapter:
+    def _save_checkpoint(self, model_path, weight_to_save):
+        if self.model.config.freeze_backbone:
             self.model.config.save_pretrained(model_path)
             torch.save(weight_to_save, os.path.join(model_path, f'mm_projector.bin'))
         else:
