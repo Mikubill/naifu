@@ -65,6 +65,7 @@ def get_optimizer_parameters(opt_model, config):
     # Get the names of the parameters that should decay
     optim_param = config.optimizer.params
     mm_projector_lr = config.model_config.mm_projector_lr
+    mm_vision_tower_lr = config.model_config.mm_vision_tower_lr
     decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name] 
@@ -85,6 +86,12 @@ def get_optimizer_parameters(opt_model, config):
 
     # Add the projector parameters to the parameter groups, if applicable
     if mm_projector_lr is not None:
+        optimizer_grouped_parameters.extend([
+            {"params": get_params_in_group(True, True), "weight_decay": optim_param.weight_decay, "lr": mm_projector_lr},
+            {"params": get_params_in_group(False, True), "weight_decay": 0.0, "lr": mm_projector_lr},
+        ])
+        
+    if mm_vision_tower_lr is not None:
         optimizer_grouped_parameters.extend([
             {"params": get_params_in_group(True, True), "weight_decay": optim_param.weight_decay, "lr": mm_projector_lr},
             {"params": get_params_in_group(False, True), "weight_decay": 0.0, "lr": mm_projector_lr},
