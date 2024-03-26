@@ -68,33 +68,37 @@ def get_optimizer_parameters(opt_model, config):
     mm_vision_tower_lr = config.model_config.mm_vision_tower_lr
     decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
-    projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name] 
+    projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
+    vision_tower_parameters = [name for name, _ in opt_model.named_parameters() if "vision_tower" in name] 
 
     # Helper function to get the parameters in a group
-    def get_params_in_group(decay, projector):
+    def get_params_in_group(decay, projector=False, vision_tower=False):
         params_in_group = []
         for n, p in opt_model.named_parameters():
-            if (n in decay_parameters) == decay and (n in projector_parameters) == projector and p.requires_grad:
-                params_in_group.append(p)
+            if (n in decay_parameters) == decay:
+                if (n in projector_parameters) == projector and p.requires_grad:
+                    params_in_group.append(p)
+                if (n in vision_tower_parameters) == vision_tower and p.requires_grad:
+                    params_in_group.append(p)
         return params_in_group
 
     # Create the parameter groups for the optimizer
     optimizer_grouped_parameters = [
-        {"params": get_params_in_group(True, False), "weight_decay": optim_param.weight_decay},
-        {"params": get_params_in_group(False, False), "weight_decay": 0.0},
+        {"params": get_params_in_group(True), "weight_decay": optim_param.weight_decay},
+        {"params": get_params_in_group(False), "weight_decay": 0.0},
     ]
 
     # Add the projector parameters to the parameter groups, if applicable
     if mm_projector_lr is not None:
         optimizer_grouped_parameters.extend([
-            {"params": get_params_in_group(True, True), "weight_decay": optim_param.weight_decay, "lr": mm_projector_lr},
-            {"params": get_params_in_group(False, True), "weight_decay": 0.0, "lr": mm_projector_lr},
+            {"params": get_params_in_group(True, projector=True), "weight_decay": optim_param.weight_decay, "lr": mm_projector_lr},
+            {"params": get_params_in_group(False, projector=True), "weight_decay": 0.0, "lr": mm_projector_lr},
         ])
         
     if mm_vision_tower_lr is not None:
         optimizer_grouped_parameters.extend([
-            {"params": get_params_in_group(True, True), "weight_decay": optim_param.weight_decay, "lr": mm_projector_lr},
-            {"params": get_params_in_group(False, True), "weight_decay": 0.0, "lr": mm_projector_lr},
+            {"params": get_params_in_group(True, vision_tower=True), "weight_decay": optim_param.weight_decay, "lr": mm_vision_tower_lr},
+            {"params": get_params_in_group(False, vision_tower=True), "weight_decay": 0.0, "lr": mm_vision_tower_lr},
         ])
 
     return optimizer_grouped_parameters
