@@ -280,6 +280,11 @@ class LLaVAModel(pl.LightningModule):
 
     @rank_zero_only
     def _save_checkpoint(self, model_path, weight_to_save):
+        # remove all '_forward_module.module' prefix
+        for k in list(weight_to_save.keys()):
+            if k.startswith("_forward_module.module."):
+                weight_to_save[k.replace("_forward_module.module.", "")] = weight_to_save.pop(k)
+        
         if self.model.config.freeze_backbone:
             self.model.config.save_pretrained(model_path)
             torch.save(weight_to_save, os.path.join(model_path, f'mm_projector.bin'))
