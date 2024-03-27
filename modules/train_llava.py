@@ -76,13 +76,15 @@ def get_optimizer_parameters(opt_model, config):
     def get_params_in_group(decay, projector=False, vision_tower=False):
         params_in_group = []
         for n, p in opt_model.named_parameters():
-            if (n in decay_parameters) == decay and n not in added_params:
-                if (n in projector_parameters) == projector and p.requires_grad:
-                    params_in_group.append(p)
-                    added_params.add(n)
-                elif (n in vision_tower_parameters) == vision_tower and p.requires_grad:
-                    params_in_group.append(p)
-                    added_params.add(n)
+            if (
+                p.requires_grad and \
+                (n not in added_params) and \
+                (n in decay_parameters) == decay and \
+                (n in projector_parameters) == projector and \
+                (n in vision_tower_parameters) == vision_tower
+            ):
+                params_in_group.append(p)
+                added_params.add(n)
         return params_in_group
     
     optimizer_grouped_parameters = []
