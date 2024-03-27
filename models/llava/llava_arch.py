@@ -92,6 +92,8 @@ class LlavaMetaModel:
                 return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
 
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
+            if hasattr(self, "image_newline"):
+                self.image_newline.load_state_dict(get_w(mm_projector_weights, 'image_newline'))
 
 
 def unpad_image(tensor, original_size):

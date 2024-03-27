@@ -68,7 +68,7 @@ def get_optimizer_parameters(opt_model, config):
     mm_vision_tower_lr = config.model_config.mm_vision_tower_lr
     decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
-    projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
+    projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name or "image_newline" in name]
     vision_tower_parameters = [name for name, _ in opt_model.named_parameters() if "vision_tower" in name] 
     added_params = set()
 
@@ -198,9 +198,13 @@ class LLaVAModel(pl.LightningModule):
         if mm_config.tune_mm_mlp_adapter:
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = True
+            if hasattr(model.get_model(), "image_newline"):
+                model.get_model().image_newline.requires_grad = True
         else:
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = False
+            if hasattr(model.get_model(), "image_newline"):
+                model.get_model().image_newline.requires_grad = False
                 
         if mm_config.tune_mm_vision_tower:
             model.get_model().vision_tower.requires_grad_(True)
@@ -246,7 +250,7 @@ class LLaVAModel(pl.LightningModule):
 
     def save_checkpoint(self, model_path, metadata):
         if self.model.config.freeze_backbone:
-            keys_to_match = ['mm_projector', 'vision_resampler']
+            keys_to_match = ['mm_projector', 'vision_resampler', 'image_newline']
             if getattr(self.config.model_config, "use_im_start_end", False):
                 keys_to_match.extend(['embed_tokens', 'embed_in'])
 
