@@ -40,7 +40,7 @@ trainer:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: bf16-mixed
+  precision: bf16-true 
 
 dataset:
   name: data.text_dataset.ChatMLDataset

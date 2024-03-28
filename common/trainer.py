@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Dict
 
 import torch
@@ -64,7 +65,7 @@ class Trainer:
         ocls = self.optimizer.__class__.__name__
 
         for i, lr in enumerate(last_lr):
-            self.fabric.log(f"lr-{ocls}-{i}", lr, step=self.global_step)
+            self.fabric.log(f"lr/{ocls}-{i}", lr, step=self.global_step)
 
         is_da = optimizer_name.startswith("DAdapt")
         is_prodigy = optimizer_name.startswith("prodigyopt")
@@ -73,7 +74,7 @@ class Trainer:
 
         last_d_lr = [(g["d"] * g["lr"]) for g in self.optimizer.param_groups]
         for i, lr in enumerate(last_d_lr):
-            self.fabric.log(f"d*lr-{ocls}-{i}", lr, step=self.global_step)
+            self.fabric.log(f"d*lr/{ocls}-{i}", lr, step=self.global_step)
 
     def eval_model(self, is_last: bool = False):
         """
@@ -214,6 +215,8 @@ class Trainer:
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1
                 local_acc_step = batch_idx // grad_accum_steps + 1
+                local_timer = time.perf_counter()
+                
                 if local_acc_step < self.global_step % len(self.dataloader) and in_resume_epoch:
                     in_resume_epoch = False
                     continue
@@ -222,12 +225,13 @@ class Trainer:
                 fabric_module = getattr(self.model, "model", None)
                 if hasattr(self.model, "get_module"):
                     fabric_module = self.model.get_module()
-
+                    
                 with fabric.no_backward_sync(fabric_module, enabled=is_accumulating):
                     loss = self.model(batch)
                     self.fabric.backward(loss / grad_accum_steps)
 
-                loss_rec.add(epoch=self.current_epoch, step=batch_idx, loss=loss.item())
+                loss = loss.detach().item()
+                loss_rec.add(epoch=self.current_epoch, step=batch_idx, loss=loss)
                 status = f"train_loss: {loss:.3f}, avg_loss: {loss_rec.avg:.3f}"
                 progress.update(desc, local_acc_step, status=status)
 
@@ -235,8 +239,9 @@ class Trainer:
                 if is_accumulating:
                     continue
 
+                grad_norm = None
                 if grad_clip_val > 0:
-                    self.fabric.clip_gradients(
+                    grad_norm = self.fabric.clip_gradients(
                         module=fabric_module, 
                         optimizer=self.optimizer, 
                         max_norm=grad_clip_val
@@ -252,7 +257,13 @@ class Trainer:
                     self.scheduler.step(actual_step)
 
                 if fabric.logger:
-                    fabric.log("train_loss", loss, step=self.global_step)
+                    metrics = {
+                        "train/loss": loss,
+                        "trainer/step_t": time.perf_counter() - local_timer,
+                    }
+                    if grad_norm is not None:
+                        metrics["train/grad_norm"] = grad_norm
+                    fabric.log_dict(metrics=metrics, step=self.global_step)
 
                 self.global_step += 1
                 state.update(global_step=self.global_step, current_epoch=self.current_epoch)
@@ -266,4 +277,3 @@ class Trainer:
             self.perform_sampling(is_last=True)
             self.save_model(state, is_last=True)
             self.eval_model(is_last=True)
-

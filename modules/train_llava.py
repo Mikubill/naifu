@@ -44,23 +44,6 @@ def find_all_linear_names(model):
         lora_module_names.remove('lm_head')
     return list(lora_module_names)
 
-def maybe_zero_3(param, ignore_status=False, name=None):
-    try:
-        from deepspeed import zero
-        from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    except ImportError:
-        return param
-    
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(name, 'no ignore status')
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
 def get_optimizer_parameters(opt_model, config):
     # Get the names of the parameters that should decay
     optim_param = config.optimizer.params
@@ -256,7 +239,22 @@ class LLaVAModel(pl.LightningModule):
 
             named_params = list(self.model.named_parameters())
             weight_to_save = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
-            weight_to_save = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in weight_to_save.items()}
+            param = next(self.model.parameters())
+            if hasattr(param, "ds_id") and hasattr(self, "_deepspeed_engine"):
+                from deepspeed import zero
+    
+                with zero.GatheredParameters([param]):
+                    for k, v in weight_to_save.items():
+                        v = v.data.detach().cpu().clone()
+                        weight_to_save[k] = v.cpu()
+            elif hasattr(self, "_fsdp_engine"):
+                from lightning.fabric.strategies.fsdp import _get_full_state_dict_context
+                
+                world_size = self._fsdp_engine.world_size
+                with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
+                    for k, v in weight_to_save.items():
+                        v = v.data.detach().cpu().clone()
+                        weight_to_save[k] = v.cpu()
         else:
             # save full model
             # test param if its zero3
