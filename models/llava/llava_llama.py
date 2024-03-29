@@ -96,7 +96,7 @@ class CLIPVisionTower(nn.Module):
         return (self.vision_tower.config.image_size // self.vision_tower.config.patch_size) ** 2
     
 class LlavaConfig(LlamaConfig):
-    model_type = "llava_llama"
+    model_type = "llava"
     
 class LlamaLlavaModel(LlamaModel):
     def __init__(self, config):

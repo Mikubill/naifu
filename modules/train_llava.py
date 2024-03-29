@@ -159,7 +159,7 @@ class LLaVAModel(pl.LightningModule):
             from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
             logger.info(f"Using Lora with q_lora={use_q_lora}")
             config.lora_params.update({"target_modules": find_all_linear_names(model)})
-            lora_config = LoraConfig(**config.lora_params)
+            lora_config = LoraConfig(**OmegaConf.to_container(config.lora_params))
             if use_q_lora:
                 model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 
