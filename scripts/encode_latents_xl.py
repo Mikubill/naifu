@@ -24,6 +24,11 @@ def load_entry(p: Path, label_ext: str = ".txt"):
         prompt = f.read()
     if _img.mode == "RGB":
         img = np.array(_img)
+    elif img.shape[-1] == 4:
+        # transparent images
+        baimg = Image.new('RGB', img.size, (255, 255, 255))
+        baimg.paste(img, (0, 0), img)
+        img = np.array(baimg)
     else:
         img = np.array(_img.convert("RGB"))
     return img, prompt
