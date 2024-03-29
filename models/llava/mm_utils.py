@@ -4,9 +4,63 @@ import base64
 import torch
 import math
 
-from transformers import StoppingCriteria
 from .constants import IMAGE_TOKEN_INDEX
 from omegaconf import OmegaConf
+
+
+def unpad_image(tensor, original_size):
+    """
+    Unpads a PyTorch tensor of a padded and resized image.
+
+    Args:
+    tensor (torch.Tensor): The image tensor, assumed to be in CxHxW format.
+    original_size (tuple): The original size of the image (height, width).
+
+    Returns:
+    torch.Tensor: The unpadded image tensor.
+    """
+    original_width, original_height = original_size
+    current_height, current_width = tensor.shape[1:]
+
+    original_aspect_ratio = original_width / original_height
+    current_aspect_ratio = current_width / current_height
+
+    if original_aspect_ratio > current_aspect_ratio:
+        scale_factor = current_width / original_width
+        new_height = int(original_height * scale_factor)
+        padding = (current_height - new_height) // 2
+        unpadded_tensor = tensor[:, padding : current_height - padding, :]
+    else:
+        scale_factor = current_height / original_height
+        new_width = int(original_width * scale_factor)
+        padding = (current_width - new_width) // 2
+        unpadded_tensor = tensor[:, :, padding : current_width - padding]
+
+    return unpadded_tensor
+
+
+def unpad_image_shape(current_height, current_width, original_size):
+    """
+    Unpads a PyTorch tensor of a padded and resized image
+    and returns the new shape.
+    """
+    original_width, original_height = original_size
+
+    original_aspect_ratio = original_width / original_height
+    current_aspect_ratio = current_width / current_height
+
+    if original_aspect_ratio > current_aspect_ratio:
+        scale_factor = current_width / original_width
+        new_height = int(original_height * scale_factor)
+        padding = (current_height - new_height) // 2
+        new_shape = (current_height - 2 * padding, current_width)
+    else:
+        scale_factor = current_height / original_height
+        new_width = int(original_width * scale_factor)
+        padding = (current_width - new_width) // 2
+        new_shape = (current_height, current_width - 2 * padding)
+
+    return new_shape
 
 
 def select_best_resolution(original_size, possible_resolutions):
@@ -211,37 +265,3 @@ def get_model_name_from_path(model_path):
         return model_paths[-2] + "_" + model_paths[-1]
     else:
         return model_paths[-1]
-
-class KeywordsStoppingCriteria(StoppingCriteria):
-    def __init__(self, keywords, tokenizer, input_ids):
-        self.keywords = keywords
-        self.keyword_ids = []
-        self.max_keyword_len = 0
-        for keyword in keywords:
-            cur_keyword_ids = tokenizer(keyword).input_ids
-            if len(cur_keyword_ids) > 1 and cur_keyword_ids[0] == tokenizer.bos_token_id:
-                cur_keyword_ids = cur_keyword_ids[1:]
-            if len(cur_keyword_ids) > self.max_keyword_len:
-                self.max_keyword_len = len(cur_keyword_ids)
-            self.keyword_ids.append(torch.tensor(cur_keyword_ids))
-        self.tokenizer = tokenizer
-        self.start_len = input_ids.shape[1]
-    
-    def call_for_batch(self, output_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
-        offset = min(output_ids.shape[1] - self.start_len, self.max_keyword_len)
-        self.keyword_ids = [keyword_id.to(output_ids.device) for keyword_id in self.keyword_ids]
-        for keyword_id in self.keyword_ids:
-            truncated_output_ids = output_ids[0, -keyword_id.shape[0]:]
-            if torch.equal(truncated_output_ids, keyword_id):
-                return True
-        outputs = self.tokenizer.batch_decode(output_ids[:, -offset:], skip_special_tokens=True)[0]
-        for keyword in self.keywords:
-            if keyword in outputs:
-                return True
-        return False
-    
-    def __call__(self, output_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
-        outputs = []
-        for i in range(output_ids.shape[0]):
-            outputs.append(self.call_for_batch(output_ids[i].unsqueeze(0), scores))
-        return all(outputs)

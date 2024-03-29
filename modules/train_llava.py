@@ -9,9 +9,8 @@ from common.logging import logger
 import torch.nn as nn
 from lightning.pytorch.utilities import rank_zero_only
 from lightning.pytorch.utilities.model_summary import ModelSummary, get_human_readable_count
-from transformers import AutoTokenizer, AutoConfig
-from transformers import BitsAndBytesConfig
-from models.llava.llava_llama import LlavaLlamaForCausalLM
+from transformers import AutoTokenizer, BitsAndBytesConfig
+from models.llava.llava_llama import LlavaLlamaForCausalLM, LlavaConfig
 
 ALL_LAYERNORM_LAYERS = [nn.LayerNorm]
 def get_parameter_names(model, forbidden_layer_types):
@@ -140,7 +139,7 @@ class LLaVAModel(pl.LightningModule):
         
         cfg_pretrained = None
         if not mm_config.get("vision_tower"):
-            cfg_pretrained = AutoConfig.from_pretrained(model_path)
+            cfg_pretrained = LlavaConfig.from_pretrained(model_path)
             cfg_pretrained.update(mm_config)
             # logger.info(f"Using config: {cfg_pretrained}")
         
@@ -169,30 +168,25 @@ class LLaVAModel(pl.LightningModule):
             model.print_trainable_parameters()
             
         # load adapter
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)     
+        tokenizer_path = config.trainer.get("tokenizer_path", model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False)     
         self.tokenizer.pad_token = self.tokenizer.unk_token
-        model.get_model().initialize_vision_modules(model_args=mm_config)
         model.config.tokenizer_padding_side = self.tokenizer.padding_side
         model.config.tokenizer_model_max_length = self.tokenizer.model_max_length  
-         
+
         if mm_config.freeze_backbone:
             model.requires_grad_(False)
-            
-        if mm_config.tune_mm_mlp_adapter:
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = True
-            if hasattr(model.get_model(), "image_newline"):
-                model.get_model().image_newline.requires_grad = True
-        else:
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = False
-            if hasattr(model.get_model(), "image_newline"):
-                model.get_model().image_newline.requires_grad = False
+        
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = mm_config.tune_mm_mlp_adapter
+        
+        if hasattr(model, "image_newline"):
+            model.get_model().image_newline.requires_grad = True
                 
         if mm_config.tune_mm_vision_tower:
-            model.get_model().vision_tower.requires_grad_(True)
+            model.get_vision_tower().requires_grad_(True)
         else:
-            model.get_model().vision_tower.requires_grad_(False)
+            model.get_vision_tower().requires_grad_(False)
                 
         param_counts = defaultdict(int)
         for name, param in model.named_parameters():
@@ -204,14 +198,13 @@ class LLaVAModel(pl.LightningModule):
         for param_type, count in param_counts.items():
             logger.info(f"Trainable: {param_type} - {get_human_readable_count(count)} parameters")
                 
-        model.initialize_vision_tokenizer(mm_config, tokenizer=self.tokenizer)   
         model.get_vision_tower().to(next(model.parameters()).dtype) 
         self.image_processor = model.get_vision_tower().image_processor
-        self.logger_samples = []
         self.model = model
 
     def prepare_dataset(self, config):
         dataset_class = get_class(config.dataset.name) 
+        
         train_dataset = dataset_class(
             tokenizer=self.tokenizer,
             image_processor=self.image_processor,
