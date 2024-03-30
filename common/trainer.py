@@ -101,6 +101,7 @@ class Trainer:
             current_epoch=self.current_epoch,
             global_step=self.global_step,
         )
+        torch.cuda.empty_cache()
 
     def save_model(self, state: Dict, is_last: bool = False):
         """
@@ -144,8 +145,7 @@ class Trainer:
             is_last (bool): Indicates if it is the last sampling.
         """
         config = self.model.config
-        enabled_sampling = self.fabric.is_global_zero and config.sampling.enabled \
-            and hasattr(self.model, "generate_samples")
+        enabled_sampling = config.sampling.enabled and hasattr(self.model, "generate_samples")
 
         sampling_cfg = config.sampling
         sampling_steps = sampling_cfg.every_n_steps
@@ -157,6 +157,7 @@ class Trainer:
             return
 
         if (is_last and sample_by_epoch) or sample_by_step:
+            torch.cuda.empty_cache()
             rng_state = torch.get_rng_state()
             cuda_rng_state = torch.cuda.get_rng_state()
             if sampling_cfg.get("save_dir", None):
@@ -211,6 +212,7 @@ class Trainer:
         while not should_stop:
             desc = f"Epoch {self.current_epoch}"
             progress.update(desc, 0)
+            torch.cuda.empty_cache()
 
             for batch_idx, batch in enumerate(self.dataloader):
                 local_step += 1

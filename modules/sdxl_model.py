@@ -128,12 +128,14 @@ class StableDiffusionModel(pl.LightningModule):
         prompts = list(config.prompts)
         images = []
         size = (config.get("height", 1024), config.get("width", 1024))
-
-        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False):
+        self.model.eval()
+        
+        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", total=len(prompts), leave=False):
             image = self.sample(prompt, size=size, generator=generator)
             image[0].save(Path(config.save_dir) / f"sample_e{current_epoch}_s{global_step}_{idx}.png")
             images.extend(image)
-
+            
+        self.model.train()
         if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
             logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
 
@@ -147,7 +149,6 @@ class StableDiffusionModel(pl.LightningModule):
         steps=20,
         guidance_scale=6.5,
     ):
-        self.model.eval()
         self.first_stage_model.to(self.target_device)
 
         model_dtype = next(self.model.parameters()).dtype
@@ -206,8 +207,6 @@ class StableDiffusionModel(pl.LightningModule):
 
         image = (image * 255).round().astype("uint8")
         image = [Image.fromarray(im) for im in image]
-
-        self.model.train()
         return image
 
     @rank_zero_only
