@@ -6,6 +6,7 @@ from omegaconf import OmegaConf
 from common.utils import get_class
 from common.logging import logger
 
+import bitsandbytes
 import torch.nn as nn
 from lightning.pytorch.utilities import rank_zero_only
 from lightning.pytorch.utilities.model_summary import ModelSummary, get_human_readable_count
@@ -101,10 +102,21 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
 
     # Prepare the optimizer
     optim_param = config.optimizer.params
+    optim_cls = config.optimizer.name
     optimizer_grouped_parameters = get_optimizer_parameters(model, config)
-    optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
+    optimizer = get_class(optim_cls)(optimizer_grouped_parameters, **optim_param)
     scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
 
+    if "bitsandbytes" in optim_cls and "8bit" in optim_cls:
+        manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
+        skipped = 0
+        for module in model.modules():
+            if isinstance(module, nn.Embedding):
+                skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
+                manager.register_module_override(module, "weight", {"optim_bits": 32})
+                logger.debug(f"bitsandbytes: will optimize {module} in fp32")
+        logger.info(f"skipped: {skipped/2**20}M params")
+                
     # Print the model summary, if applicable
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
