@@ -18,6 +18,7 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = SupervisedFineTune(
         model_path=model_path, config=config, device=fabric.device
     )
+    model._fabric = fabric
 
     dataset, dataloader = setup_hf_dataloader(config)
     params_to_optim = [{"params": model.unet.parameters()}]
@@ -127,10 +128,11 @@ class SupervisedFineTune(StableDiffusionModel):
         model_diff = model_losses_w - model_losses_l  # These are both LBS (as is t)
 
         with torch.no_grad():
+            ref_d = next(self.unet_ref.parameters()).dtype
             ref_preds = self.unet_ref(
-                sample=noisy_latents,
+                sample=noisy_latents.to(ref_d),
                 timestep=timesteps,
-                encoder_hidden_states=text_embedding,
+                encoder_hidden_states=text_embedding.to(ref_d),
                 added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids},
             ).sample
 
@@ -146,7 +148,7 @@ class SupervisedFineTune(StableDiffusionModel):
 
         implicit_acc = (inside_term > 0).sum().float() / inside_term.size(0)
         implicit_acc += 0.5 * (inside_term == 0).sum().float() / inside_term.size(0)
-        self.fabric.log_dict(
+        self._fabric.log_dict(
             {
                 "loss": loss.detach().item(),
                 "raw_model_loss": raw_model_loss.detach().item(),

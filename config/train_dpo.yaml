@@ -3,12 +3,12 @@ target: modules.sdxl_dpo.setup
 dpo_beta: 2500
 
 trainer:
-  model_path: ../sd_xl_base_1.0_0.9vae.safetensors
+  model_path: sd_xl_base_1.0_0.9vae.safetensors
   batch_size: 8
   seed: 1138
   wandb_id: "dpo-test"
   use_xformers: false
-  accumulate_grad_batches: 16
+  accumulate_grad_batches: 1
   gradient_clip_val: 0.0
 
   save_format: safetensors
@@ -20,7 +20,7 @@ trainer:
   max_steps: -1
 
 advanced:
-  vae_encode_batch_size: 4 # same as batch_size
+  vae_encode_batch_size: 4 
   train_text_encoder_1: false
   train_text_encoder_2: false
   text_encoder_1_lr: 1e-6
@@ -53,7 +53,7 @@ scheduler:
     last_epoch: -1
 
 sampling:
-  enabled: false
+  enabled: true
   use_wandb: true
   seed: 1234
   every_n_steps: -1

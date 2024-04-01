@@ -12,21 +12,22 @@ class PairedDataset(torch.utils.data.Dataset):
             name=None,
             cache_dir=config.dataset.get("cache_dir", None),
         )[config.dataset.dataset_split]
-        
-        reso = config.dataset.resolution
+        self.dataset = self.dataset.with_transform(self.preprocess_train)
+        self.reso = config.dataset.resolution
+
         interp = transforms.InterpolationMode.BILINEAR
         self.train_transforms = transforms.Compose(
             [
-                transforms.Resize(reso, interpolation=interp),
-                transforms.CenterCrop(reso),
+                transforms.Resize(self.reso, interpolation=interp),
+                transforms.CenterCrop(self.reso),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-    
+
     def __len__(self):
         return len(self.dataset)
-    
+
     def preprocess_train(self, examples):
         all_pixel_values = []
         for col_name in ["jpg_0", "jpg_1"]:
@@ -57,10 +58,9 @@ class PairedDataset(torch.utils.data.Dataset):
             }
         )
         return examples
-    
+
     def __getitem__(self, idx):
         example = self.dataset[idx]
-        example = self.preprocess_train(example)
         return example
 
 
