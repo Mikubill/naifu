@@ -28,6 +28,7 @@ from transformers import (
     CLIPTextModel,
     CLIPTextModelWithProjection,
 )
+from contextlib import nullcontext
 
 try:
     import logging
@@ -45,6 +46,8 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     model = StableDiffusionModel(
         model_path=model_path, config=config, device=fabric.device
     )
+    model.prepare(fabric)
+    
     dataset_class = get_class(config.dataset.get("name", "data.AspectRatioDataset"))
     dataset = dataset_class(
         batch_size=config.trainer.batch_size,
@@ -123,6 +126,20 @@ def init_text_encoder():
 
 # define the LightningModule
 class StableDiffusionModel(SupervisedFineTune):
+    def prepare(self, fabric):
+        self.config = self.config
+        self.forward_context = nullcontext()
+        if self.config.lightning.precision in ["16-true", "16-true-scaled"]:
+            self.forward_context = self.fabric.autocast()
+            self.model.to(torch.float16)
+        elif self.config.lightning.precision in ["bf16-true"]:
+            self.forward_context = self.fabric.autocast()
+            self.model.to(torch.bfloat16)
+        
+    def forward(self, batch):
+        with self.forward_context:
+            return super().forward(batch)
+    
     def init_model(self):
         advanced = self.config.get("advanced", {})
         sd = load_torch_file(self.model_path, self.target_device)

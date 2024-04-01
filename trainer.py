@@ -8,7 +8,7 @@ os.environ.update({"BITSANDBYTES_NOWELCOME": "1"})
 import torch
 import lightning as pl
 
-from common.utils import get_class, parse_args
+from common.utils import get_class, parse_args, create_scaled_precision_plugin
 from common.trainer import Trainer
 from omegaconf import OmegaConf
 from lightning.fabric.connector import _is_using_cli
@@ -31,6 +31,10 @@ def main():
     if config.trainer.wandb_id != "":
         from lightning.pytorch.loggers import WandbLogger
         loggers = WandbLogger(project=config.trainer.wandb_id)
+        
+    if config.lightning.precision == "16-true-scaled":
+        config.lightning.precision = None
+        plugins.append(create_scaled_precision_plugin())
 
     fabric = pl.Fabric(
         loggers=[loggers], 
