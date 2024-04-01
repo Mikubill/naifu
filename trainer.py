@@ -34,6 +34,7 @@ def main():
         
     if config.lightning.precision == "16-true-scaled":
         config.lightning.precision = None
+        config._scaled_fp16_precision = True
         plugins.append(create_scaled_precision_plugin())
 
     fabric = pl.Fabric(
