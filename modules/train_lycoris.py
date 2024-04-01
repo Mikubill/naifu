@@ -129,6 +129,10 @@ class StableDiffusionModel(SupervisedFineTune):
         with self.forward_context:
             return super().forward(batch)
         
+    def generate_samples(self, **kwargs):
+        with self.forward_context:
+            return super().generate_samples(**kwargs)
+        
     def prepare_context(self, fabric):
         self.forward_context = nullcontext()
         is_fp16_scaled = self.config.get("_scaled_fp16_precision", False)
