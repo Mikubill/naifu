@@ -1,6 +1,5 @@
 import os
 import time
-from typing import Dict
 
 import torch
 import lightning as pl
@@ -9,7 +8,6 @@ from common.utils import *
 from common.logging import logger
 from omegaconf import OmegaConf
 from pathlib import Path
-from contextlib import nullcontext
 
 class Trainer:
     def __init__(self, fabric: pl.Fabric, config: OmegaConf):
@@ -39,26 +37,20 @@ class Trainer:
             config = OmegaConf.to_container(self.model.config, resolve=True)
             fabric.logger.log_hyperparams(config)
 
-    def on_post_training_batch(self, state: Dict):
+    def on_post_training_batch(self, is_last=False):
         """
         Perform actions after each training batch.
-
-        Args:
-            state (Dict): The state dictionary.
         """
-        if self.fabric.logger:
+        if self.fabric.logger and not is_last:
             self.log_lr_values()
 
-        self.perform_sampling()
-        self.save_model(state)
-        self.eval_model()
+        self.perform_sampling(is_last=is_last)
+        self.save_model(is_last=is_last)
+        self.eval_model(is_last=is_last)
 
     def log_lr_values(self):
         """
         Log learning rate values for the optimizer.
-
-        Args:
-            self.global_step (int): The current global step.
         """
         optimizer_name = self.model.config.optimizer.name
         last_lr = [group.get("lr", 0) for group in self.optimizer.param_groups]
@@ -79,9 +71,6 @@ class Trainer:
     def eval_model(self, is_last: bool = False):
         """
         Save the model checkpoint.
-
-        Args:
-            is_last (bool): Indicates if it is the last checkpoint.
         """
         config = self.model.config
         cfg = config.trainer
@@ -103,13 +92,9 @@ class Trainer:
         )
         torch.cuda.empty_cache()
 
-    def save_model(self, state: Dict, is_last: bool = False):
+    def save_model(self, is_last: bool = False):
         """
         Save the model checkpoint.
-
-        Args:
-            state (Dict): The state dictionary.
-            is_last (bool): Indicates if it is the last checkpoint.
         """
         config = self.model.config
         cfg = config.trainer
@@ -132,6 +117,16 @@ class Trainer:
             "global_step": str(self.global_step),
             "current_epoch": str(self.current_epoch),
         }
+        
+        # # save state if you want to use fabric.save
+        # state = dict(
+        #     mode=self.model,
+        #     global_step=self.global_step, 
+        #     current_epoch=self.current_epoch,
+        #     optimizer=self.optimizer,
+        # )
+        # self.fabric.save(model_path + "_state.pt", state)
+        
         self.model.save_checkpoint(model_path, metadata)
         if not save_weights_only:
             optimizer_state = {"optimizer": self.optimizer, **metadata}
@@ -140,9 +135,6 @@ class Trainer:
     def perform_sampling(self, is_last: bool = False):
         """
         Perform image/text sampling.
-
-        Args:
-            is_last (bool): Indicates if it is the last sampling.
         """
         config = self.model.config
         enabled_sampling = config.sampling.enabled and hasattr(self.model, "generate_samples")
@@ -173,17 +165,28 @@ class Trainer:
             torch.cuda.set_rng_state(cuda_rng_state)
             
     def train_loop(self):
-        """Run the training loop."""
+        """
+        Run the training loop.
+        """
         config = self.model.config
+        fabric = self.fabric
         cfg = config.trainer
-        fabric: pl.Fabric = self.fabric
+        
         grad_accum_steps = cfg.accumulate_grad_batches
         grad_clip_val = cfg.gradient_clip_val
 
         local_step = 0
         os.makedirs(cfg.checkpoint_dir, exist_ok=True)
-        state = {"state_dict": self.model, "optimizer": self.optimizer}
         latest_ckpt = get_latest_checkpoint(cfg.checkpoint_dir)
+        
+        # # load state if you used fabric.save
+        # state = dict(
+        #     mode=self.model,
+        #     global_step=self.global_step, 
+        #     current_epoch=self.current_epoch,
+        #     optimizer=self.optimizer,
+        # )
+        # self.fabric.load(model_path + "_state.pt", state)
 
         if cfg.get("resume") and latest_ckpt:
             opt_name = Path(latest_ckpt).stem + "_optimizer"
@@ -206,8 +209,6 @@ class Trainer:
             total=len(self.dataloader) // config.trainer.accumulate_grad_batches,
             disable=not fabric.is_global_zero,
         )
-        in_resume_epoch = self.global_step // len(self.dataloader) == \
-            self.current_epoch and cfg.get("resume") == True
         assert len(self.dataloader) > 0, "Dataloader is empty"
         while not should_stop:
             desc = f"Epoch {self.current_epoch}"
@@ -218,10 +219,6 @@ class Trainer:
                 local_step += 1
                 local_acc_step = batch_idx // grad_accum_steps + 1
                 local_timer = time.perf_counter()
-                
-                if local_acc_step < self.global_step % len(self.dataloader) and in_resume_epoch:
-                    in_resume_epoch = False
-                    continue
                 
                 is_accumulating = local_step % grad_accum_steps != 0
                 fabric_module = getattr(self.model, "model", None)
@@ -234,23 +231,29 @@ class Trainer:
 
                 loss = loss.detach().item()
                 loss_rec.add(epoch=self.current_epoch, step=batch_idx, loss=loss)
-                status = f"train_loss: {loss:.3f}, avg_loss: {loss_rec.avg:.3f}"
-                progress.update(desc, local_acc_step, status=status)
-
+                metrics = {
+                    "train/loss": loss,
+                    "trainer/step_t": time.perf_counter() - local_timer,
+                }
+                stat_str = f"train_loss: {loss:.3f}, avg_loss: {loss_rec.avg:.3f}"
+                progress.update(desc, local_acc_step, status=stat_str)
+                    
                 # skip here if we are accumulating
                 if is_accumulating:
                     continue
 
-                grad_norm = None
                 if grad_clip_val > 0:
                     grad_norm = self.fabric.clip_gradients(
                         module=fabric_module, 
                         optimizer=self.optimizer, 
                         max_norm=grad_clip_val
                     )
+                    if grad_norm is not None:
+                        metrics["train/grad_norm"] = grad_norm
 
-                self.optimizer.step()
-                self.optimizer.zero_grad(set_to_none=True)
+                if self.scheduler is not None:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
 
                 if self.scheduler is not None:
                     is_transformers_sch = "transformers" in config.scheduler.name
@@ -259,23 +262,13 @@ class Trainer:
                     self.scheduler.step(actual_step)
 
                 if fabric.logger:
-                    metrics = {
-                        "train/loss": loss,
-                        "trainer/step_t": time.perf_counter() - local_timer,
-                    }
-                    if grad_norm is not None:
-                        metrics["train/grad_norm"] = grad_norm
                     fabric.log_dict(metrics=metrics, step=self.global_step)
 
                 self.global_step += 1
-                state.update(global_step=self.global_step, current_epoch=self.current_epoch)
-                self.on_post_training_batch(state)
+                self.on_post_training_batch()
 
             self.current_epoch += 1
             if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:
                 should_stop = True
 
-            state.update(global_step=self.global_step, current_epoch=self.current_epoch)
-            self.perform_sampling(is_last=True)
-            self.save_model(state, is_last=True)
-            self.eval_model(is_last=True)
+            self.on_post_training_batch(is_last=True)
