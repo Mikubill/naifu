@@ -24,11 +24,12 @@ model_params:
 #   mm_vision_tower_lr: 2e-06
 #   tune_mm_mlp_adapter: true
 #   tune_mm_vision_tower: false
+#   freeze_backbone: true
 #   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 # finetune config
 model_config:
-  version: vicuna_v1
+  version: vicuna_v1 # chatml_direct for 34b
   image_aspect_ratio: "anyres"
   image_crop_resolution: 224
   image_split_resolution: 224
@@ -45,7 +46,7 @@ model_config:
   mm_vision_tower_lr: 2e-06
   tune_mm_mlp_adapter: false
   tune_mm_vision_tower: true
-  freeze_backbone: true
+  freeze_backbone: false
   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 use_lora: true
@@ -84,7 +85,7 @@ lightning:
 
 dataset:
   name: data.llava_dataset.LazySupervisedDataset
-  model_max_length: 2048
+  model_max_length: 4096
   data_path: /home/ubuntu/llava/blip_laion_cc_sbu_558k.json
   image_folder: /home/ubuntu/llava/
   
