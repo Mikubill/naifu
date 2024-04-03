@@ -186,8 +186,8 @@ class LatentEncodingDataset(Dataset):
             resize_w = math.floor(w * scale_factor / self.divisible) * self.divisible
             resize_h = math.floor(h * scale_factor / self.divisible) * self.divisible
 
-        target_w = resize_w - resize_w % self.reso_steps
-        target_h = resize_h - resize_h % self.reso_steps
+        target_w = resize_w - resize_w % self.divisible
+        target_h = resize_h - resize_h % self.divisible
             
         interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
         img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
@@ -200,7 +200,7 @@ class LatentEncodingDataset(Dataset):
         try:
             img, prompt = load_entry(self.paths[index])
             original_size = img.shape[:2]
-            img, dhdw = self.fit_bucket(index, img)
+            img, dhdw = self.fit_bucket_func(index, img) 
             img = self.tr(img).to(self.dtype)
             sha1 = get_sha1(self.paths[index])
         except Exception as e:
