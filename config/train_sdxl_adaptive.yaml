@@ -42,6 +42,7 @@ dataset:
   name: data.bucket.AdaptiveSizeDataset
   target_area: 1_048_576 # 1024*1024
   img_path: "../niji-anime"
+  # process_batch_fn: data.processors.shuffle_prompts_sdstyle
   max_token_length: 225 # [75, 150, 225]
 
 optimizer:
