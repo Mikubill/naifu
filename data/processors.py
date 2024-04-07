@@ -45,7 +45,7 @@ def shuffle_prompts_sdstyle(e: Entry):
     token_warmup_step = 0 # unsupported
     caption_tag_dropout_rate = 0
     caption_separator = ","
-    keep_tokens_separator = "|"
+    keep_tokens_separator = "|||"
     replacements = {}
     
     if keep_tokens_separator not in e.prompt:

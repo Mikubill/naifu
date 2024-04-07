@@ -185,6 +185,8 @@ class LatentEncodingDataset(Dataset):
             scale_factor = math.sqrt(self.target_area / img_area)
             resize_w = math.floor(w * scale_factor / self.divisible) * self.divisible
             resize_h = math.floor(h * scale_factor / self.divisible) * self.divisible
+        else:
+            resize_w, resize_h = w, h
 
         target_w = resize_w - resize_w % self.divisible
         target_h = resize_h - resize_h % self.divisible
@@ -205,7 +207,7 @@ class LatentEncodingDataset(Dataset):
             sha1 = get_sha1(self.paths[index])
         except Exception as e:
             print(f"\033[31mError processing {self.paths[index]}: {e}\033[0m")
-            return None, self.paths[index], None, None, None
+            return None, self.paths[index], None, None, None, None
         return img, self.paths[index], prompt, sha1, original_size, dhdw
 
     def __len__(self):
