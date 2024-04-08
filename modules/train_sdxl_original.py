@@ -5,6 +5,8 @@ from omegaconf import OmegaConf
 from common.utils import load_torch_file, get_class
 from common.logging import logger
 from modules.sdxl_model import StableDiffusionModel
+from lightning.pytorch.utilities import rank_zero_only
+from safetensors.torch import save_file
 from lightning.pytorch.utilities.model_summary import ModelSummary
 
 def append_dims(x, target_dims):
@@ -73,9 +75,25 @@ class SupervisedFineTune(StableDiffusionModel):
         
         # original sgxl denoiser
         dn_cfg = self.config.denoiser
-        self.loss_weighting = get_class(dn_cfg.weighting)()
+        if "edm_vpred.sigma_max" in sd.keys():
+            sigma_max = sd["edm_vpred.sigma_max"].item()
+            sigma_min = sd["edm_vpred.sigma_min"].item()
+            dn_cfg.params.sigma_max = sigma_max
+            dn_cfg.params.sigma_min = sigma_min
+            self.extras = {
+                "edm_vpred.sigma_max": torch.tensor(sigma_max), 
+                "edm_vpred.sigma_min": torch.tensor(sigma_min)
+            }
+            if self.config.sampling.enabled:
+                self.config.sampling.scheduler_params.sigma_max = sigma_max
+                self.config.sampling.scheduler_params.sigma_min = sigma_min
+        
+        weighting_params = dn_cfg.get("weighting_params", {})
+        sigma_sampler_params = dn_cfg.get("sigma_sampler_params", dn_cfg.params)
+        
+        self.loss_weighting = get_class(dn_cfg.weighting)(**weighting_params)
         self.denoiser = get_class(dn_cfg.target)(**dn_cfg.params)
-        self.sigma_sampler = get_class(dn_cfg.sigma_sampler)(**dn_cfg.params)
+        self.sigma_sampler = get_class(dn_cfg.sigma_sampler)(**sigma_sampler_params)
         
         self.to(self.target_device)
         logger.info(f"Loading model from {self.model_path}")
@@ -115,12 +133,12 @@ class SupervisedFineTune(StableDiffusionModel):
         bsz = latents.shape[0]
 
         # Sample a random timestep for each image
-        timesteps = torch.randint(
-            advanced.get("timestep_start", 0),
-            advanced.get("timestep_end", 1000),
-            (bsz,),
-            dtype=torch.int64,
-        )
+        # timesteps = torch.randint(
+        #     advanced.get("timestep_start", 0),
+        #     advanced.get("timestep_end", 1000),
+        #     (bsz,),
+        #     dtype=torch.int64,
+        # )
         
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=model_dtype)
@@ -130,7 +148,7 @@ class SupervisedFineTune(StableDiffusionModel):
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
-        sigmas = self.sigma_sampler(bsz, rand=timesteps).to(self.target_device)
+        sigmas = self.sigma_sampler(bsz).to(self.target_device)
         sigmas_bc = append_dims(sigmas, latents.ndim)
         noisy_latents = latents + noise * sigmas_bc
 
@@ -146,3 +164,21 @@ class SupervisedFineTune(StableDiffusionModel):
             raise FloatingPointError("Error infinite or NaN loss detected")
 
         return loss
+    
+    @rank_zero_only
+    def save_checkpoint(self, model_path, metadata):
+        cfg = self.config.trainer
+        state_dict = self.state_dict()
+        state_dict.update(self.extras)
+        # check if any keys startswith modules. if so, remove the modules. prefix
+        if any([key.startswith("module.") for key in state_dict.keys()]):
+            state_dict = {key.replace("module.", ""): value for key, value in state_dict.items()}
+                
+        if cfg.get("save_format") == "safetensors":
+            model_path += ".safetensors"
+            save_file(state_dict, model_path, metadata=metadata)
+        else:
+            state_dict = {"state_dict": state_dict, **metadata} 
+            model_path += ".ckpt"
+            torch.save(state_dict, model_path)
+        logger.info(f"Saved model to {model_path}")

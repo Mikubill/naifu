@@ -10,7 +10,7 @@ from .discretizer import Discretization
 
 
 class Denoiser(nn.Module):
-    def __init__(self, scaling):
+    def __init__(self, scaling, **kwargs):
         super().__init__()
         self.scaling: DenoiserScaling = get_class(scaling)()
 

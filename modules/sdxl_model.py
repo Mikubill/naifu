@@ -11,10 +11,10 @@ from tqdm import tqdm
 from models.sgm import GeneralConditioner
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
 from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values   
-from common.utils import load_torch_file, EmptyInitWrapper
+from common.utils import get_class, load_torch_file, EmptyInitWrapper
 from common.logging import logger
 
-from diffusers import EulerDiscreteScheduler, DDPMScheduler
+from diffusers import DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 from safetensors.torch import save_file
 from modules.config_sdxl_base import model_config
@@ -152,12 +152,19 @@ class StableDiffusionModel(pl.LightningModule):
         self.first_stage_model.to(self.target_device)
 
         model_dtype = next(self.model.parameters()).dtype
-        scheduler = EulerDiscreteScheduler(
+        scheduler_name = self.config.sampling.get("scheduler", "diffusers.EulerDiscreteScheduler")
+        scheduler_params = self.config.sampling.get("scheduler_params", dict(
             beta_start=0.00085,
             beta_end=0.012,
             beta_schedule="scaled_linear",
-            num_train_timesteps=1000,
-        )
+            prediction_type="epsilon",
+            num_train_timesteps=1000,  
+        ))
+        if self.config.advanced.get("v_parameterization", True):
+            scheduler_params["prediction_type"] = "v_prediction"
+        
+        scheduler_cls = get_class(scheduler_name)
+        scheduler = scheduler_cls(**scheduler_params)
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
             "original_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
