@@ -269,7 +269,7 @@ class Trainer:
                     if grad_norm is not None:
                         metrics["train/grad_norm"] = grad_norm
 
-                if self.scheduler is not None:
+                if self.optimizer is not None:
                     self.optimizer.step()
                     self.optimizer.zero_grad(set_to_none=True)
 

@@ -30,7 +30,7 @@ def main():
     loggers = pl.fabric.loggers.CSVLogger(".")
     if config.trainer.wandb_id != "":
         from lightning.pytorch.loggers import WandbLogger
-        loggers = WandbLogger(project=config.trainer.wandb_id)
+        loggers = WandbLogger(project=config.trainer.wandb_id, name=config.name)
         
     if config.lightning.precision == "16-true-scaled":
         config.lightning.precision = None
