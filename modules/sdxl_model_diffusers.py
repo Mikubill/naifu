@@ -72,10 +72,34 @@ class StableDiffusionModel(pl.LightningModule):
         
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
-        cache_snr_values(self.noise_scheduler, self.target_device)
+            
+        if hasattr(self.vae.config, "latents_mean") and self.vae.config.latents_mean is not None:
+            self.latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, 4, 1, 1)
+            self.latents_std = torch.tensor(self.vae.config.latents_std).view(1, 4, 1, 1)
+        
+        if hasattr(self.noise_scheduler, "alphas_cumprod"):
+            cache_snr_values(self.noise_scheduler, self.target_device)
         
     def get_module(self):
         return self.unet
+    
+    def _denormlize(self, latents):
+        scaling_factor = self.vae.config.scaling_factor
+        if hasattr(self, "latents_mean"):
+            # https://github.com/huggingface/diffusers/pull/7111
+            latents = latents * self.latents_std / scaling_factor + self.latents_mean
+        else:
+            latents = 1.0 / scaling_factor * latents
+        return latents
+    
+    def _normliaze(self, latents):
+        scaling_factor = self.vae.config.scaling_factor
+        if hasattr(self, "latents_mean"):
+            # https://github.com/huggingface/diffusers/pull/7111
+            latents = (latents - self.latents_mean) * scaling_factor / self.latents_std
+        else:
+            latents = scaling_factor * latents
+        return latents
              
     def encode_pixels(self, inputs):
         feed_pixel_values = inputs
@@ -85,8 +109,7 @@ class StableDiffusionModel(pl.LightningModule):
                 lat = self.vae.encode(feed_pixel_values[i : i + self.vae_encode_bsz]).latent_dist.sample()
             latents.append(lat)
         latents = torch.cat(latents, dim=0)
-        latents = latents * self.vae.config.scaling_factor
-        return latents
+        return self._normliaze(latents)
         
     def encode_prompt(self, batch):
         prompt = batch["prompts"]

@@ -36,7 +36,7 @@ advanced:
   
 lightning:
   accelerator: gpu
-  devices: -1
+  devices: 1
   precision: 16-mixed
 
 dataset:
@@ -44,7 +44,7 @@ dataset:
   target_area: 1_048_576 # 1024*1024
   min_size: 512
   max_size: 2048
-  img_path: "/root/niji-anime"
+  img_path: "/root/niji-anime-1"
   # process_batch_fn: "data.processors.shuffle_prompts_sdstyle"
   max_token_length: 225 # [75, 150, 225]
 

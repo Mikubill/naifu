@@ -62,7 +62,7 @@ class SupervisedFineTune(StableDiffusionModel):
                 )
         else:
             self.vae.cpu()
-            latents = batch["pixels"]
+            latents = batch["pixels"] * self.vae.config.scaling_factor
 
         self.text_encoder.to(self.target_device)
         model_dtype = next(self.unet.parameters()).dtype

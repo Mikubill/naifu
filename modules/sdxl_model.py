@@ -19,7 +19,6 @@ from lightning.pytorch.utilities import rank_zero_only
 from safetensors.torch import save_file
 from modules.config_sdxl_base import model_config
 
-
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self, model_path, config, device):
@@ -56,7 +55,6 @@ class StableDiffusionModel(pl.LightningModule):
         model_params.conditioner_config.params.emb_models[0]["is_trainable"] = tte_1
         model_params.conditioner_config.params.emb_models[1]["is_trainable"] = tte_2
 
-        self.scale_factor = model_params.scale_factor
         with EmptyInitWrapper(self.target_device):
             vae_config = model_params.first_stage_config.params
             unet_config = model_params.network_config.params
@@ -67,6 +65,13 @@ class StableDiffusionModel(pl.LightningModule):
             conditioner = (
                 GeneralConditioner(**cond_config) if init_conditioner else None
             )
+            
+        self.scale_factor = advanced.get("scale_factor", model_params.scale_factor)            
+        if advanced.get("latents_mean", None):
+            self.latents_mean = torch.asarray(advanced.latents_mean)
+            self.latents_std = torch.asarray(advanced.latents_std)
+            self.latents_mean = self.latents_mean.view(1, 4, 1, 1).to(self.target_device)
+            self.latents_std = self.latents_std.view(1, 4, 1, 1).to(self.target_device)
 
         vae.eval()
         vae.train = disabled_train
@@ -116,10 +121,26 @@ class StableDiffusionModel(pl.LightningModule):
     def encode_batch(self, batch):
         self.conditioner.to(self.target_device)
         return self.conditioner(batch)
+    
+    def _denormlize(self, latents):
+        if hasattr(self, "latents_mean"):
+            # https://github.com/huggingface/diffusers/pull/7111
+            latents = latents * self.latents_std / self.scale_factor + self.latents_mean
+        else:
+            latents = 1.0 / self.scale_factor * latents
+        return latents
+    
+    def _normliaze(self, latents):
+        if hasattr(self, "latents_mean"):
+            # https://github.com/huggingface/diffusers/pull/7111
+            latents = (latents - self.latents_mean) * self.scale_factor / self.latents_std
+        else:
+            latents = self.scale_factor * latents
+        return latents
 
     @torch.no_grad()
     def decode_first_stage(self, z):
-        z = 1.0 / self.scale_factor * z
+        z = self._denormlize(z)
         with torch.autocast("cuda", enabled=False):
             out = self.first_stage_model.decode(z)
         return out
@@ -132,8 +153,7 @@ class StableDiffusionModel(pl.LightningModule):
                 o = x[i : i + self.vae_encode_bsz]
                 latents.append(self.first_stage_model.encode(o).sample())
         z = torch.cat(latents, dim=0)
-        z = self.scale_factor * z
-        return z
+        return self._normliaze(z)
 
     @rank_zero_only
     def generate_samples(self, logger, current_epoch, global_step):
@@ -167,7 +187,7 @@ class StableDiffusionModel(pl.LightningModule):
         negative_prompt="lowres, low quality, text, error, extra digit, cropped",
         generator=None,
         size=(1024, 1024),
-        steps=20,
+        steps=25,
         guidance_scale=6.5,
     ):
         self.first_stage_model.to(self.target_device)

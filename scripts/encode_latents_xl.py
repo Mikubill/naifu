@@ -223,6 +223,8 @@ def get_args():
     parser.add_argument("--no-upscale", "-nu", action="store_true", help="do not upscale images")
     parser.add_argument("--dtype", "-d", type=str, default="float32", help="data type")
     parser.add_argument("--num_workers", "-n", type=int, default=4, help="number of dataloader workers")
+    parser.add_argument("--model", "-m", type=str, default="stabilityai/sdxl-vae", help="model path")
+    parser.add_argument("--subfolder", type=str, default=None, help="use subfolder to locate vae")
     args = parser.parse_args()
     return args
 
@@ -234,8 +236,7 @@ if __name__ == "__main__":
     dtype = torch.float32 if args.dtype == "float32" else torch.float16
     num_workers = args.num_workers
 
-    vae_path = "stabilityai/sdxl-vae"
-    vae = AutoencoderKL.from_pretrained(vae_path).to(dtype=dtype)
+    vae = AutoencoderKL.from_pretrained(args.model, subfolder=args.subfolder).to(dtype)
     vae.requires_grad_(False)
     vae.eval().cuda()
 

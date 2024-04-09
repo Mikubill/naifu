@@ -69,7 +69,7 @@ class SupervisedFineTune(StableDiffusionModel):
                 )
         else:
             self.vae.cpu()
-            latents = batch["pixels"]
+            latents = self._normliaze(batch["pixels"])
 
         self.text_encoder_1.to(self.target_device)
         self.text_encoder_2.to(self.target_device)

@@ -140,7 +140,7 @@ class DiffusionModel(pl.LightningModule):
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
         else:
             self.vae.cpu()
-            latents = batch["pixels"]
+            latents = batch["pixels"] * self.vae.config.scaling_factor
 
         model_dtype = next(self.model.parameters()).dtype
         bsz = latents.shape[0]

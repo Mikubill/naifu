@@ -261,9 +261,12 @@ class LatentStore(StoreBase):
         latent_key = self.keys[index]
         h5_path, prompt, original_size = self.h5_keymap[latent_key]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
-        scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
         dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
-        latent = latent * self.scale_factor if not scaled else latent
+    
+        # if scaled, we need to unscale the latent (training process will scale it back)
+        scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
+        if scaled:
+            latent = 1.0 / self.scale_factor * latent
 
         extras = self.get_batch_extras(self.paths[index])
         return True, latent, prompt, original_size, dhdw, extras

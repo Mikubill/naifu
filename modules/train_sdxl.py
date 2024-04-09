@@ -95,7 +95,7 @@ class SupervisedFineTune(StableDiffusionModel):
                 latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
         else:
             self.first_stage_model.cpu()
-            latents = batch["pixels"]
+            latents = self._normliaze(batch["pixels"])
 
         cond = self.encode_batch(batch)
         model_dtype = next(self.model.parameters()).dtype
