@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from models.sgm import GeneralConditioner
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
-from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values   
+from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 from common.utils import get_class, load_torch_file, EmptyInitWrapper
 from common.logging import logger
 
@@ -18,6 +18,7 @@ from diffusers import DDPMScheduler
 from lightning.pytorch.utilities import rank_zero_only
 from safetensors.torch import save_file
 from modules.config_sdxl_base import model_config
+
 
 # define the LightningModule
 class StableDiffusionModel(pl.LightningModule):
@@ -46,7 +47,7 @@ class StableDiffusionModel(pl.LightningModule):
             self.max_token_length = self.config.dataset.get("max_token_length", 75) + 2
             conditioner.params["device"] = str(self.target_device)
             conditioner.params["max_length"] = self.max_token_length
-            
+
         if advanced.get("use_checkpoint", True) == False:
             model_params.network_config.params.use_checkpoint = False
 
@@ -63,7 +64,9 @@ class StableDiffusionModel(pl.LightningModule):
 
             vae = AutoencoderKLWrapper(**vae_config) if init_vae else None
             unet = UnetWrapper(unet_config) if init_unet else None
-            conditioner = GeneralConditioner(**cond_config) if init_conditioner else None
+            conditioner = (
+                GeneralConditioner(**cond_config) if init_conditioner else None
+            )
 
         vae.eval()
         vae.train = disabled_train
@@ -81,33 +84,35 @@ class StableDiffusionModel(pl.LightningModule):
             num_train_timesteps=1000,
             clip_sample=False,
         )
-        
+
         # allow custom class
         if self.config.get("noise_scheduler"):
             scheduler_cls = get_class(self.config.noise_scheduler.name)
             self.noise_scheduler = scheduler_cls(**self.config.noise_scheduler.params)
 
         self.to(self.target_device)
-
         logger.info(f"Loading model from {self.model_path}")
         missing, unexpected = self.load_state_dict(sd, strict=False)
+
         if len(missing) > 0:
             logger.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             logger.info(f"Unexpected Keys: {unexpected}")
-            
+
         self.batch_size = self.config.trainer.batch_size
         self.vae_encode_bsz = self.config.get("vae_encode_batch_size", self.batch_size)
         if self.vae_encode_bsz < 0:
             self.vae_encode_bsz = self.batch_size
-            
+
         if advanced.get("zero_terminal_snr", False):
             apply_zero_terminal_snr(self.noise_scheduler)
-        cache_snr_values(self.noise_scheduler, self.target_device)
-        
+
+        if hasattr(self.noise_scheduler, "alphas_cumprod"):
+            cache_snr_values(self.noise_scheduler, self.target_device)
+
     def get_module(self):
         return self.model
-    
+
     def encode_batch(self, batch):
         self.conditioner.to(self.target_device)
         return self.conditioner(batch)
@@ -119,7 +124,7 @@ class StableDiffusionModel(pl.LightningModule):
             out = self.first_stage_model.decode(z)
         return out
 
-    @torch.no_grad() 
+    @torch.no_grad()
     def encode_first_stage(self, x):
         latents = []
         with torch.autocast("cuda", enabled=False):
@@ -129,7 +134,7 @@ class StableDiffusionModel(pl.LightningModule):
         z = torch.cat(latents, dim=0)
         z = self.scale_factor * z
         return z
-    
+
     @rank_zero_only
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
@@ -138,15 +143,22 @@ class StableDiffusionModel(pl.LightningModule):
         images = []
         size = (config.get("height", 1024), config.get("width", 1024))
         self.model.eval()
-        
-        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", total=len(prompts), leave=False):
+
+        for idx, prompt in tqdm(
+            enumerate(prompts), desc="Sampling", total=len(prompts), leave=False
+        ):
             image = self.sample(prompt, size=size, generator=generator)
-            image[0].save(Path(config.save_dir) / f"sample_e{current_epoch}_s{global_step}_{idx}.png")
+            image[0].save(
+                Path(config.save_dir)
+                / f"sample_e{current_epoch}_s{global_step}_{idx}.png"
+            )
             images.extend(image)
-            
+
         self.model.train()
         if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
-            logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
+            logger.log_image(
+                key="samples", images=images, caption=prompts, step=global_step
+            )
 
     @torch.inference_mode()
     def sample(
@@ -161,17 +173,22 @@ class StableDiffusionModel(pl.LightningModule):
         self.first_stage_model.to(self.target_device)
 
         model_dtype = next(self.model.parameters()).dtype
-        scheduler_name = self.config.sampling.get("scheduler", "diffusers.EulerDiscreteScheduler")
-        scheduler_params = self.config.sampling.get("scheduler_params", dict(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            prediction_type="epsilon",
-            num_train_timesteps=1000,  
-        ))
+        scheduler_name = self.config.sampling.get(
+            "scheduler", "diffusers.EulerDiscreteScheduler"
+        )
+        scheduler_params = self.config.sampling.get(
+            "scheduler_params",
+            dict(
+                beta_start=0.00085,
+                beta_end=0.012,
+                beta_schedule="scaled_linear",
+                prediction_type="epsilon",
+                num_train_timesteps=1000,
+            ),
+        )
         if self.config.advanced.get("v_parameterization", True):
             scheduler_params["prediction_type"] = "v_prediction"
-        
+
         scheduler_cls = get_class(scheduler_name)
         scheduler = scheduler_cls(**scheduler_params)
         prompts_batch = {
@@ -193,7 +210,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         height, width = size
         height = max(64, height - height % 8)  # round to divisible by 8
-        width = max(64, width - width % 8) 
+        width = max(64, width - width % 8)
         size = (height, width)
         latents_shape = (1, 4, size[0] // 8, size[1] // 8)
         latents = torch.randn(latents_shape, generator=generator, dtype=torch.float32)
@@ -231,13 +248,15 @@ class StableDiffusionModel(pl.LightningModule):
         state_dict = self.state_dict()
         # check if any keys startswith modules. if so, remove the modules. prefix
         if any([key.startswith("module.") for key in state_dict.keys()]):
-            state_dict = {key.replace("module.", ""): value for key, value in state_dict.items()}
-                
+            state_dict = {
+                key.replace("module.", ""): value for key, value in state_dict.items()
+            }
+
         if cfg.get("save_format") == "safetensors":
             model_path += ".safetensors"
             save_file(state_dict, model_path, metadata=metadata)
         else:
-            state_dict = {"state_dict": state_dict, **metadata} 
+            state_dict = {"state_dict": state_dict, **metadata}
             model_path += ".ckpt"
             torch.save(state_dict, model_path)
         logger.info(f"Saved model to {model_path}")
