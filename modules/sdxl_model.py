@@ -46,6 +46,9 @@ class StableDiffusionModel(pl.LightningModule):
             self.max_token_length = self.config.dataset.get("max_token_length", 75) + 2
             conditioner.params["device"] = str(self.target_device)
             conditioner.params["max_length"] = self.max_token_length
+            
+        if advanced.get("use_checkpoint", True) == False:
+            model_params.network_config.params.use_checkpoint = False
 
         tte_1 = advanced.get("train_text_encoder_1", False)
         tte_2 = advanced.get("train_text_encoder_2", False)
@@ -78,6 +81,12 @@ class StableDiffusionModel(pl.LightningModule):
             num_train_timesteps=1000,
             clip_sample=False,
         )
+        
+        # allow custom class
+        if self.config.get("noise_scheduler"):
+            scheduler_cls = get_class(self.config.noise_scheduler.name)
+            self.noise_scheduler = scheduler_cls(**self.config.noise_scheduler.params)
+
         self.to(self.target_device)
 
         logger.info(f"Loading model from {self.model_path}")

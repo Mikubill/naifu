@@ -82,15 +82,22 @@ class Trainer:
         
         should_eval = (is_last and is_eval_epoch) or is_eval_step
         has_eval_method = hasattr(self.model, "eval_model")
+        
         if not should_eval or not has_eval_method:
             return
 
+        if "schedulefree" in self.optimizer.__class__.__name__:
+            self.optimizer.eval()
+            
         self.model.eval_model(
             logger=self.fabric.logger,
             current_epoch=self.current_epoch,
             global_step=self.global_step,
         )
         torch.cuda.empty_cache()
+        
+        if "schedulefree" in self.optimizer.__class__.__name__:
+            self.optimizer.train()
 
     def save_model(self, is_last: bool = False):
         """
@@ -147,13 +154,18 @@ class Trainer:
 
         if not enabled_sampling or len(sampling_cfg.prompts) == 0:
             return
+        
+        if sampling_cfg.get("save_dir", None):
+            os.makedirs(sampling_cfg.save_dir, exist_ok=True)
 
         if (is_last and sample_by_epoch) or sample_by_step:
+            
+            if "schedulefree" in self.optimizer.__class__.__name__:
+                self.optimizer.eval()
+                
             torch.cuda.empty_cache()
             rng_state = torch.get_rng_state()
             cuda_rng_state = torch.cuda.get_rng_state()
-            if sampling_cfg.get("save_dir", None):
-                os.makedirs(sampling_cfg.save_dir, exist_ok=True)
 
             self.model.generate_samples(
                 logger=self.fabric.logger,
@@ -163,6 +175,9 @@ class Trainer:
             torch.cuda.empty_cache()
             torch.set_rng_state(rng_state)
             torch.cuda.set_rng_state(cuda_rng_state)
+            
+            if "schedulefree" in self.optimizer.__class__.__name__:
+                self.optimizer.train()
             
     def train_loop(self):
         """
@@ -214,8 +229,11 @@ class Trainer:
             desc = f"Epoch {self.current_epoch}"
             progress.update(desc, 0)
             torch.cuda.empty_cache()
+            
+            if "schedulefree" in self.optimizer.__class__.__name__:
+                self.optimizer.train()
 
-            for batch_idx, batch in enumerate(self.dataloader):
+            for batch_idx, batch in enumerate(self.dataloader):                
                 local_step += 1
                 local_acc_step = batch_idx // grad_accum_steps + 1
                 local_timer = time.perf_counter()
