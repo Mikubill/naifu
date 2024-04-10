@@ -86,7 +86,7 @@ class Trainer:
         if not should_eval or not has_eval_method:
             return
 
-        if "schedulefree" in self.optimizer.__class__.__name__:
+        if "schedulefree" in self.optimizer.__class__.__name__.lower():
             self.optimizer.eval()
             
         self.model.eval_model(
@@ -96,7 +96,7 @@ class Trainer:
         )
         torch.cuda.empty_cache()
         
-        if "schedulefree" in self.optimizer.__class__.__name__:
+        if "schedulefree" in self.optimizer.__class__.__name__.lower():
             self.optimizer.train()
 
     def save_model(self, is_last: bool = False):
@@ -160,7 +160,7 @@ class Trainer:
 
         if (is_last and sample_by_epoch) or sample_by_step:
             
-            if "schedulefree" in self.optimizer.__class__.__name__:
+            if "schedulefree" in self.optimizer.__class__.__name__.lower():
                 self.optimizer.eval()
                 
             torch.cuda.empty_cache()
@@ -176,7 +176,7 @@ class Trainer:
             torch.set_rng_state(rng_state)
             torch.cuda.set_rng_state(cuda_rng_state)
             
-            if "schedulefree" in self.optimizer.__class__.__name__:
+            if "schedulefree" in self.optimizer.__class__.__name__.lower():
                 self.optimizer.train()
             
     def train_loop(self):
@@ -230,7 +230,7 @@ class Trainer:
             progress.update(desc, 0)
             torch.cuda.empty_cache()
             
-            if "schedulefree" in self.optimizer.__class__.__name__:
+            if "schedulefree" in self.optimizer.__class__.__name__.lower():
                 self.optimizer.train()
 
             for batch_idx, batch in enumerate(self.dataloader):                
