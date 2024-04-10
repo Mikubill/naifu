@@ -68,8 +68,8 @@ class StableDiffusionModel(pl.LightningModule):
             
         self.scale_factor = advanced.get("scale_factor", model_params.scale_factor)            
         if advanced.get("latents_mean", None):
-            self.latents_mean = torch.asarray(advanced.latents_mean)
-            self.latents_std = torch.asarray(advanced.latents_std)
+            self.latents_mean = torch.tensor(advanced.latents_mean)
+            self.latents_std = torch.tensor(advanced.latents_std)
             self.latents_mean = self.latents_mean.view(1, 4, 1, 1).to(self.target_device)
             self.latents_std = self.latents_std.view(1, 4, 1, 1).to(self.target_device)
 
@@ -206,7 +206,7 @@ class StableDiffusionModel(pl.LightningModule):
                 num_train_timesteps=1000,
             ),
         )
-        if self.config.advanced.get("v_parameterization", True):
+        if self.config.advanced.get("v_parameterization", False):
             scheduler_params["prediction_type"] = "v_prediction"
 
         scheduler_cls = get_class(scheduler_name)
@@ -239,6 +239,7 @@ class StableDiffusionModel(pl.LightningModule):
         scheduler.set_timesteps(steps)
         timesteps = scheduler.timesteps
         num_latent_input = 2
+        
         for i, t in enumerate(timesteps):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))

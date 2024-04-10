@@ -114,6 +114,9 @@ class Trainer:
         should_save = (is_last and is_ckpt_epoch) or is_ckpt_step
         if not should_save:
             return
+        
+        if "schedulefree" in self.optimizer.__class__.__name__.lower():
+            self.optimizer.eval()
 
         postfix = f"e{self.current_epoch}_s{self.global_step}"
         model_path = os.path.join(ckpt_dir, f"checkpoint-{postfix}")
@@ -138,6 +141,9 @@ class Trainer:
         if not save_weights_only:
             optimizer_state = {"optimizer": self.optimizer, **metadata}
             self.fabric.save(model_path + "_optimizer.pt", optimizer_state)
+            
+        if "schedulefree" in self.optimizer.__class__.__name__.lower():
+            self.optimizer.train()
 
     def perform_sampling(self, is_last: bool = False):
         """
