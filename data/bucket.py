@@ -197,9 +197,7 @@ class AspectRatioDataset(RatioDataset):
         resos.add(((int(np.sqrt(self.target_area)) // self.divisible) * self.divisible,) * 2)
         self.buckets_sizes = np.array(sorted(resos))
         self.bucket_ratios = self.buckets_sizes[:, 0] / self.buckets_sizes[:, 1]
-        self.ratio_to_bucket = {
-            ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)
-        }
+        self.ratio_to_bucket = {ratio: hw for ratio, hw in zip(self.bucket_ratios, self.buckets_sizes)}
 
     def assign_buckets(self):
         img_res = np.array(self.store.raw_res)

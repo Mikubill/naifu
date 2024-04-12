@@ -1,3 +1,4 @@
+import os
 import hashlib
 import json
 import h5py as h5
@@ -12,6 +13,12 @@ from torch.utils.data import Dataset
 from typing import Callable, Generator, Optional  # type: ignore
 from torchvision import transforms
 from common.logging import logger
+
+json_lib = json
+try:
+    import rapidjson as json_lib
+except ImportError:
+    pass
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -205,7 +212,7 @@ class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         prompt_mapping = next(dirwalk(self.root_path, lambda p: p.suffix == ".json"))
-        prompt_mapping = json.loads(Path(prompt_mapping).read_text())
+        prompt_mapping = json_lib.loads(Path(prompt_mapping).read_text())
 
         self.h5_paths = list(
             dirwalk(
@@ -213,39 +220,47 @@ class LatentStore(StoreBase):
                 lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem,
             )
         )
+        
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
-        total_latents = len(self.h5_paths)
+        self.keys = []
+        progress = tqdm(
+            total=len(prompt_mapping),
+            desc=f"Loading latents",
+            disable=self.rank != 0,
+            leave=False,
+            ascii=True,
+        )
+
+        has_h5_loc = "h5_path" in next(iter(prompt_mapping.values()))
         for idx, h5_path in enumerate(self.h5_paths):
             fs = h5.File(h5_path, "r", libver="latest")
-            for k in tqdm(
-                fs.keys(),
-                desc=f"Loading latents {idx+1}/{total_latents}",
-                disable=self.rank != 0,
-                leave=False,
-                ascii=True,
-            ):
+            h5_name = h5_path.name
+            
+            for k in fs.keys():
                 hashkey = k[:-8]  # ".latents"
                 assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
+                
                 it = prompt_mapping[hashkey]
-                if not it["train_use"]:
+                if not it["train_use"] or (has_h5_loc and it["h5_path"] != h5_name):
                     continue
+                
                 prompt, it_path = it["train_caption"], it["file_path"]
                 height, width = it["train_height"], it["train_width"]
                 self.paths.append(it_path)
+                self.keys.append(k)
                 self.raw_res.append((height, width))
                 self.h5_keymap[k] = (h5_path, prompt, (height, width))
-
-        self.keys = list(self.h5_keymap.keys())
+                progress.update(1)
+                
+        progress.close()
         self.length = len(self.keys)
         self.scale_factor = 0.13025
         logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
 
-        self.keys, self.raw_res, self.paths = self.repeat_entries(
-            self.keys, self.raw_res, index=self.paths
-        )
-        new_length = len(self.paths)
+        self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
+        new_length = len(self.keys)
         if new_length != self.length:
             self.length = new_length
             logger.debug(f"Using {self.length} entries after applied repeat strategy")

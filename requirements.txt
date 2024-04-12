@@ -12,12 +12,14 @@ torchvision
 requests
 timm
 safetensors
+
 h5py
 open-clip-torch
 einops
 scipy
 opencv-python
 
+# python-rapidjson
 # xformers==0.0.22.post7
 # fairscale
 # prodigyopt
