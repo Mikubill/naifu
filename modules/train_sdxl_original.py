@@ -66,6 +66,11 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         model.conditioner = fabric.setup(model.conditioner)
     
     dataloader = fabric.setup_dataloaders(dataloader)
+    if hasattr(fabric.strategy, "_deepspeed_engine"):
+        model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    if hasattr(fabric.strategy, "_fsdp_kwargs"):
+        model._fsdp_engine = fabric.strategy
+        
     return model, dataset, dataloader, optimizer, scheduler
 
 class SupervisedFineTune(StableDiffusionModel):  

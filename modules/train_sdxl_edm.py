@@ -69,6 +69,11 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         model.conditioner = fabric.setup(model.conditioner)
         
     dataloader = fabric.setup_dataloaders(dataloader)
+    if hasattr(fabric.strategy, "_deepspeed_engine"):
+        model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    if hasattr(fabric.strategy, "_fsdp_kwargs"):
+        model._fsdp_engine = fabric.strategy
+    
     return model, dataset, dataloader, optimizer, scheduler
 
 
@@ -131,17 +136,11 @@ def rand_log_normal(shape, loc=0., scale=1., device='cpu', dtype=torch.float32):
 # sigma_data = 0.5
 
 class EDMPrecond:
-    def __init__(
-        self, 
-        sigma_min=0.002, 
-        sigma_max=80.0, 
-        sigma_data=0.5, 
-        prediction_type="epsilon",
-    ):
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-        self.sigma_data = sigma_data
-        self.prediction_type = prediction_type
+    def __init__(self):
+        self.sigma_min = 0.002
+        self.sigma_max = 120.0
+        self.sigma_data = 1.0
+        self.prediction_type = "v_prediction"
         
     def __call__(self, net, x, sigma, **model_kwargs):
         x = x.to(torch.float32)
@@ -162,33 +161,39 @@ class EDMPrecond:
         return D_x
 
 class EDMLoss:
-    def __init__(self, P_mean=-1.2, P_std=1.2, sigma_data=0.5):
-        self.P_mean = P_mean
-        self.P_std = P_std
-        self.sigma_data = sigma_data
-
-    def __call__(self, model, precond, y, **model_kwargs):
-        sigma = rand_log_normal(shape=[y.shape[0],], loc=self.P_mean, scale=self.P_std)
+    def __init__(self):
+        # sigma = rand_log_normal(shape=[y.shape[0],], loc=self.P_mean, scale=self.P_std)
         # sigma = rand_cosine_interpolated(
         #     shape=[y.shape[0],], 
-        #     image_d=image_d, 
-        #     noise_d_low=noise_d_low,
-        #     noise_d_high=noise_d_high,
-        #     sigma_data=sigma_data, 
-        #     min_value=min_value, 
-        #     max_value=max_value
+        #     image_d=128, 
+        #     noise_d_low=32,
+        #     noise_d_high=128,
+        #     sigma_data=1.0, 
+        #     min_value=0.002, 
+        #     max_value=120.0
         # )
+        self.sample_sigma = lambda y: rand_v_diffusion(
+            shape=[y.shape[0],], 
+            sigma_data=1.0, 
+            min_value=0.002, 
+            max_value=120.0
+        )
+        self.sigma_data = 1.0
+        self.precond = EDMPrecond()
+
+    def __call__(self, model, y, **model_kwargs):
+        sigma = self.sample_sigma(y) 
         sigma = sigma[:, None, None, None].to(y.device)
         weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
         n = torch.randn_like(y) * sigma
-        D_yn = precond(model, y + n, sigma, **model_kwargs)
+        D_yn = self.precond(model, y + n, sigma, **model_kwargs)
         loss = weight * ((D_yn - y) ** 2)
-        return loss
+        return torch.mean(loss, dim=1).mean()
 
 class SupervisedFineTune(StableDiffusionModel):  
     def init_model(self):
         super().init_model()
-        self.precond = EDMPrecond()
+        
         self.loss_fn = EDMLoss()
         
     def forward(self, batch):
@@ -206,7 +211,7 @@ class SupervisedFineTune(StableDiffusionModel):
         cond = self.encode_batch(batch)
         model_dtype = next(self.model.parameters()).dtype
         cond = {k: v.to(model_dtype) for k, v in cond.items()}
-        loss = self.loss_fn(self.model, self.precond, y=latents, c=cond).mean()
+        loss = self.loss_fn(self.model, y=latents, c=cond)
         
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")

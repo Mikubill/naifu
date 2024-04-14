@@ -263,10 +263,23 @@ class StableDiffusionModel(pl.LightningModule):
         image = [Image.fromarray(im) for im in image]
         return image
 
-    @rank_zero_only
     def save_checkpoint(self, model_path, metadata):
+        weight_to_save = None
+        param = next(self.model.parameters())
+        if hasattr(self, "_fsdp_engine"):
+            from lightning.fabric.strategies.fsdp import _get_full_state_dict_context
+                
+            world_size = self._fsdp_engine.world_size
+            with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
+                weight_to_save = self.model._forward_module.state_dict()
+        else:
+            weight_to_save = self.model.state_dict()
+                
+        self._save_checkpoint(model_path, weight_to_save, metadata)
+
+    @rank_zero_only
+    def _save_checkpoint(self, model_path, state_dict, metadata):
         cfg = self.config.trainer
-        state_dict = self.state_dict()
         # check if any keys startswith modules. if so, remove the modules. prefix
         if any([key.startswith("module.") for key in state_dict.keys()]):
             state_dict = {
