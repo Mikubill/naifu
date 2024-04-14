@@ -52,7 +52,7 @@ def _sd_hybrid_z2_strategy():
     from models.sgm.model import TimestepEmbedSequential
     
     fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2, 
+        sharding_strategy=ShardingStrategy.HYBRID_SHARD, 
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         forward_prefetch=True,
         auto_wrap_policy={TimestepEmbedSequential},

@@ -265,15 +265,25 @@ class StableDiffusionModel(pl.LightningModule):
 
     def save_checkpoint(self, model_path, metadata):
         weight_to_save = None
-        param = next(self.model.parameters())
         if hasattr(self, "_fsdp_engine"):
             from lightning.fabric.strategies.fsdp import _get_full_state_dict_context
                 
             world_size = self._fsdp_engine.world_size
             with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
-                weight_to_save = self.model._forward_module.state_dict()
+                unet_weight = self.model._forward_module.state_dict()
+                
+            with _get_full_state_dict_context(self.conditioner._forward_module, world_size=world_size):
+                cond_weight = self.conditioner._forward_module.state_dict()
+                
+            vae_weight = self.first_stage_model.state_dict()
+            weight_to_save = {
+                "model": unet_weight,
+                "conditioner": cond_weight,
+                "first_stage_model": vae_weight,
+            }
+            weight_to_save = {f"{key}.{item_key}": value for key, value in weight_to_save.items() for item_key in value.keys()}
         else:
-            weight_to_save = self.model.state_dict()
+            weight_to_save = self.state_dict()
                 
         self._save_checkpoint(model_path, weight_to_save, metadata)
 

@@ -51,4 +51,8 @@ def main():
     Trainer(fabric, config).train_loop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Captured KeyboardInterrupt, exiting...")
+        sys.exit(0)
