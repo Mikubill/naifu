@@ -3,7 +3,6 @@ import torch
 import torch.utils.checkpoint
 import lightning as pl
 from PIL import Image
-from omegaconf import OmegaConf
 
 import torch
 from tqdm import tqdm
@@ -267,21 +266,22 @@ class StableDiffusionModel(pl.LightningModule):
         weight_to_save = None
         if hasattr(self, "_fsdp_engine"):
             from lightning.fabric.strategies.fsdp import _get_full_state_dict_context
-                
+            
+            weight_to_save = {}    
             world_size = self._fsdp_engine.world_size
             with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
                 unet_weight = self.model._forward_module.state_dict()
+                for key in unet_weight.keys():
+                    weight_to_save[f"model.{key}"] = unet_weight[key]
                 
             with _get_full_state_dict_context(self.conditioner._forward_module, world_size=world_size):
                 cond_weight = self.conditioner._forward_module.state_dict()
+                for key in cond_weight.keys():
+                    weight_to_save[f"conditioner.{key}"] = cond_weight[key]
                 
             vae_weight = self.first_stage_model.state_dict()
-            weight_to_save = {
-                "model": unet_weight,
-                "conditioner": cond_weight,
-                "first_stage_model": vae_weight,
-            }
-            weight_to_save = {f"{key}.{item_key}": value for key, value in weight_to_save.items() for item_key in value.keys()}
+            for key in vae_weight.keys():
+                weight_to_save[f"first_stage_model.{key}"] = vae_weight[key]
         else:
             weight_to_save = self.state_dict()
                 
