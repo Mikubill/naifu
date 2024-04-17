@@ -56,9 +56,17 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
         use_crossframe_attention_in_spatial_layers=False,
     ):
         for layer in self:
-            if isinstance(layer, TimestepBlock):
+            actual_layer = layer
+            # handle wrapping
+            if hasattr(actual_layer, "_fsdp_wrapped_module"):
+                actual_layer = actual_layer._fsdp_wrapped_module
+            if hasattr(actual_layer, "_checkpoint_wrapped_module"):
+                actual_layer = actual_layer._checkpoint_wrapped_module
+            
+            if isinstance(actual_layer, TimestepBlock):
                 x = layer(x, emb)
-            elif isinstance(layer, SpatialTransformer):
+            elif isinstance(actual_layer, SpatialTransformer):
+                assert context is not None
                 x = layer(x, context)
             else:
                 x = layer(x)

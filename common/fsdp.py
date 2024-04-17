@@ -22,41 +22,56 @@ def _strategy():
 
 
 def _sd_strategy():
-    from models.sgm.model import TimestepEmbedSequential
+    from models.sgm.model import ResBlock, SpatialTransformer
 
     fsdp_strategy = FSDPStrategy(
         sharding_strategy=ShardingStrategy.FULL_SHARD,
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         forward_prefetch=True,
-        auto_wrap_policy={TimestepEmbedSequential},
+        auto_wrap_policy={ResBlock, SpatialTransformer},
         limit_all_gathers=True,
-        activation_checkpointing=[TimestepEmbedSequential],
+        activation_checkpointing=[ResBlock, SpatialTransformer],
     )
     return fsdp_strategy
 
 
 def _sd_shard_grad_strategy():
-    from models.sgm.model import TimestepEmbedSequential
+    from models.sgm.model import ResBlock, SpatialTransformer
     
     fsdp_strategy = FSDPStrategy(
         sharding_strategy=ShardingStrategy.SHARD_GRAD_OP, 
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         forward_prefetch=True,
-        auto_wrap_policy={TimestepEmbedSequential},
+        auto_wrap_policy={ResBlock, SpatialTransformer},
         limit_all_gathers=True,
-        activation_checkpointing=[TimestepEmbedSequential],
+        activation_checkpointing=[ResBlock, SpatialTransformer],
     )
     return fsdp_strategy
 
 def _sd_hybrid_z2_strategy():
-    from models.sgm.model import TimestepEmbedSequential
+    from models.sgm.model import ResBlock, SpatialTransformer
     
     fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy.HYBRID_SHARD, 
+        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2, 
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         forward_prefetch=True,
-        auto_wrap_policy={TimestepEmbedSequential},
+        auto_wrap_policy={ResBlock, SpatialTransformer},
         limit_all_gathers=True,
-        activation_checkpointing=[TimestepEmbedSequential],
+        activation_checkpointing=[ResBlock, SpatialTransformer],
+    )
+    return fsdp_strategy
+
+def _sd_hybrid_z2_mpi_strategy():
+    from models.sgm.model import ResBlock, SpatialTransformer
+    from lightning.fabric.plugins.environments import MPIEnvironment
+    
+    fsdp_strategy = FSDPStrategy(
+        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2, 
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        forward_prefetch=True,
+        cluster_environment=MPIEnvironment(),
+        auto_wrap_policy={ResBlock, SpatialTransformer},
+        limit_all_gathers=True,
+        activation_checkpointing=[ResBlock, SpatialTransformer],
     )
     return fsdp_strategy

@@ -44,7 +44,7 @@ advanced:
 lightning:
   accelerator: gpu
   devices: -1
-  precision: 16-mixed
+  precision: 16-true-scaled
 
 dataset:
   name: data.bucket.AspectRatioDataset 

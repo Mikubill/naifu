@@ -59,12 +59,18 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     params_to_optim = [{"params": model.lycoris_unet.parameters()}]
     # params_to_optim = [{'params': model.model.parameters()}]
     if config.advanced.get("train_text_encoder_1"):
-        lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.lycoris_te1.parameters(), "lr": lr})
+        if hasattr(config.optimizer.params, 'lr'):
+            lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
+            params_to_optim.append({"params": model.lycoris_te1.parameters(), "lr": lr})
+        else:
+            params_to_optim.append({"params": model.lycoris_te1.parameters()})
 
     if config.advanced.get("train_text_encoder_2"):
-        lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.lycoris_te2.parameters(), "lr": lr})
+        if hasattr(config.optimizer.params, 'lr'):
+            lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
+            params_to_optim.append({"params": model.lycoris_te2.parameters(), "lr": lr})
+        else:
+            params_to_optim.append({"params": model.lycoris_te2.parameters()})
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)

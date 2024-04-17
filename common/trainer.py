@@ -241,6 +241,10 @@ class Trainer:
 
             for batch_idx, batch in enumerate(self.dataloader):                
                 local_step += 1
+                
+                if local_step == 2:
+                    self.perform_sampling(is_last=True)
+                    
                 local_acc_step = batch_idx // grad_accum_steps + 1
                 local_timer = time.perf_counter()
                 
