@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, get_worker_info
 from data.image_storage import DirectoryImageStore, Entry, LatentStore
 from torchvision.transforms import Resize, InterpolationMode
 from common.logging import logger
+from common.utils import get_class
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
 
@@ -48,10 +49,13 @@ class RatioDataset(Dataset):
 
         root_path = Path(img_path)
         assert root_path.exists(), f"Path {root_path} does not exist."
-
-        store_class = DirectoryImageStore
-        if is_latent_folder(root_path):
+        
+        if kwargs.get("store_cls"):
+            store_class = get_class(kwargs["store_cls"])
+        elif is_latent_folder(root_path):
             store_class = LatentStore
+        else:
+            store_class = DirectoryImageStore
 
         self.store = store_class(
             root_path,

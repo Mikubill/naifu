@@ -207,7 +207,6 @@ class StoreBase(Dataset):
             index_new = index
         return k, res, index_new
 
-
 class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -240,18 +239,19 @@ class LatentStore(StoreBase):
             
             for k in fs.keys():
                 hashkey = k[:-8]  # ".latents"
-                assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
+                if hashkey not in prompt_mapping:
+                    logger.warning(f"Key {k} not found in prompt_mapping")
+                    continue
                 
                 it = prompt_mapping[hashkey]
                 if not it["train_use"] or (has_h5_loc and it["h5_path"] != h5_name):
                     continue
                 
-                prompt, it_path = it["train_caption"], it["file_path"]
-                height, width = it["train_height"], it["train_width"]
-                self.paths.append(it_path)
+                height, width, fp = it["train_height"], it["train_width"], it["file_path"]
+                self.paths.append(fp)
                 self.keys.append(k)
                 self.raw_res.append((height, width))
-                self.h5_keymap[k] = (h5_path, prompt, (height, width))
+                self.h5_keymap[k] = (h5_path, it, (height, width))
                 progress.update(1)
                 
         progress.close()
@@ -273,8 +273,12 @@ class LatentStore(StoreBase):
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         if len(self.h5_filehandles) == 0:
             self.setup_filehandles()
+            
         latent_key = self.keys[index]
-        h5_path, prompt, original_size = self.h5_keymap[latent_key]
+        h5_path, entry, original_size = self.h5_keymap[latent_key]
+        
+        # modify here if you want to use a different format
+        prompt = entry["train_caption"]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
         dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
     
