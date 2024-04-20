@@ -14,16 +14,13 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import functools
+import xformers.ops
 
 from einops import rearrange
 from tqdm.auto import tqdm
-
-XFORMERS_AVAILABLE = False
-try:
-    import xformers.ops
-    XFORMERS_AVAILABLE = True
-except ImportError:
-    pass
+from PIL import Image
+from transformers import T5EncoderModel, T5Tokenizer
+from diffusers import DPMSolverMultistepScheduler, AutoencoderKL
 
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift
@@ -138,18 +135,10 @@ class Attention(nn.Module):
     
     def forward(self, x):
         B, N, C = x.shape
-        
-        if XFORMERS_AVAILABLE:
-            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 1, 3, 4)
-            q, k, v = qkv.unbind(0)
-            x = xformers.ops.memory_efficient_attention(q, k, v)
-            x = x.reshape(B, N, C)
-        else:    
-            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-            q, k, v = qkv.unbind(0)
-            x = F.scaled_dot_product_attention(q, k, v)
-            x = x.transpose(1, 2).reshape(B, N, C)
-        
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 1, 3, 4)
+        q, k, v = qkv.unbind(0)
+        x = xformers.ops.memory_efficient_attention(q, k, v)
+        x = x.reshape(B, N, C)
         x = self.proj(x)
         return x
 
@@ -171,29 +160,19 @@ class MultiHeadCrossAttention(nn.Module):
         self.kv_linear = nn.Linear(d_model, d_model*2)
         self.proj = nn.Linear(d_model, d_model)
 
-    def forward(self, x, cond, attention_mask=None):
+    def forward(self, x, cond, mask=None):
         # query/value: img tokens; key: condition; mask: if padding tokens
         B, N, C = x.shape
         
-        if attention_mask is not None:
-            attention_mask = attention_mask.repeat_interleave(self.num_heads, dim=0)
-            attention_mask = attention_mask.view(B, self.num_heads, -1, attention_mask.shape[-1]).to(x.dtype)
-        
-        q = self.q_linear(x).view(B, -1, self.num_heads, self.head_dim)
-        kv = self.kv_linear(cond).view(B, -1, 2, self.num_heads, self.head_dim)
+        q = self.q_linear(x).view(1, -1, self.num_heads, self.head_dim)
+        kv = self.kv_linear(cond).view(1, -1, 2, self.num_heads, self.head_dim)
         k, v = kv.unbind(2)
-        
-        if XFORMERS_AVAILABLE:
-            attention_mask = attention_mask.expand(-1, -1, N, -1).to(q.dtype)
-            x = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=attention_mask)
-            x = x.reshape(B, N, C)
-            x = self.proj(x)
-        else:
-            q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-            x = F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask)
-            x = x.transpose(1, 2).reshape(B, N, C)
-            x = self.proj(x)
-        
+        attn_bias = None
+        if mask is not None:
+            attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
+        x = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+        x = x.reshape(B, -1, C)
+        x = self.proj(x)
         return x
 
 
@@ -207,8 +186,7 @@ class FinalLayer(nn.Module):
 
     def forward(self, x, t):
         shift, scale = (self.scale_shift_table[None] + t[:, None]).chunk(2, dim=1)
-        # x = modulate(self.norm_final(x), shift, scale)
-        x = self.norm_final(x) * (1 + scale) + shift
+        x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
         return x
 
@@ -319,12 +297,12 @@ class DiTBlock(nn.Module):
         # self.xattn_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size ** 0.5)
 
-    def forward(self, x, t, y, attention_mask):
+    def forward(self, x, t, y, mask):
         B, N, C = x.shape
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
             
         x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)).reshape(B, N, C)
-        x = x + self.cross_attn(x, y, attention_mask)
+        x = x + self.cross_attn(x, y, mask)
         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
     
@@ -356,6 +334,7 @@ class DiTModel(nn.Module):
         caption_channels=4096,
         learn_sigma=True,
         interpolation_scale=2.,
+        max_token_length=120,
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -382,7 +361,7 @@ class DiTModel(nn.Module):
             hidden_size=hidden_size, 
             uncond_prob=class_dropout_prob, 
             act_layer=approx_gelu,
-            token_num=120,
+            token_num=max_token_length,
         )
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
@@ -445,7 +424,7 @@ class DiTModel(nn.Module):
     
     def forward(
         self, x, t, y, 
-        encoder_mask=None,
+        mask=None,
         c_size=None,
         ar=None,
         pos_embed=None,
@@ -455,11 +434,7 @@ class DiTModel(nn.Module):
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (N,) tensor of diffusion timesteps
         y: (N, 1, 120, C) tensor of class labels
-        """
-        if encoder_mask is not None and encoder_mask.ndim == 2:
-            encoder_mask = (1 - encoder_mask.to(y.dtype)) * -10000.0
-            encoder_mask = encoder_mask.unsqueeze(1)
-            
+        """ 
         if pos_embed is None or c_size is None or ar is None:
             kw = get_model_kwargs(x, self)
             c_size, ar, pos_embed = kw["c_size"], kw["ar"], kw["pos_embed"]
@@ -475,12 +450,22 @@ class DiTModel(nn.Module):
         temb = t + torch.cat([csize, ar], dim=1)
         t = self.t_block(temb)  # (N, 6, D) for adaLN-single
         y = self.y_embedder(y)  # (N, 1, L, D)
+        
+        if mask is not None:
+            if mask.shape[0] != y.shape[0]:
+                mask = mask.repeat(y.shape[0] // mask.shape[0], 1)
+            mask = mask.squeeze(1).squeeze(1)
+            y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
+            y_lens = mask.sum(dim=1).long().tolist()
+        else:
+            y_lens = [y.shape[2]] * y.shape[0]
+            y = y.squeeze(1).view(1, -1, x.shape[-1])
 
         for block in self.blocks:
             if self.training:
-                x = ckpt_wrapper(block, x, t, y, encoder_mask)  # (N, T, D)
+                x = ckpt_wrapper(block, x, t, y, y_lens)  # (N, T, D)
             else:
-                x = block(x, t, y, encoder_mask)
+                x = block(x, t, y, y_lens)
                           
         x = self.final_layer(x, temb)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
@@ -563,12 +548,13 @@ def get_model_kwargs(latents, model):
 #################################################################################
 
 def DiT_XL_2(**kwargs):
-    print(f"Building DiT-XL-2 model with xformers: {XFORMERS_AVAILABLE}")
+    print(f"Building DiT-XL-2 alpha model with kwargs: {kwargs}")
     model = DiTModel(depth=28, hidden_size=1152, patch_size=2, num_heads=16, **kwargs)
     return model
 
 @torch.no_grad()    
-def sample(model, vae, prompt, tokenizer, text_encoder, negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None):
+def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderModel, \
+    negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None, max_token_length=120):
     
     assert type(prompt) == list, "Prompt must be a list of strings"
     if len(negative_prompt) != len(prompt):
@@ -576,33 +562,39 @@ def sample(model, vae, prompt, tokenizer, text_encoder, negative_prompt, size=(1
         
     prompt = [prompt.replace("_", " ").lower() for prompt in prompt]
     negative_prompt = [negative_prompt.replace("_", " ").lower() for negative_prompt in negative_prompt]
+    
+    # encode prompt
     text_inputs = tokenizer(
         prompt,
         padding="max_length",
-        max_length=120,
+        max_length=max_token_length,
         truncation=True,
         add_special_tokens=True,
         return_tensors="pt",
     ) 
-    text_input_ids = text_inputs.input_ids
-    prompt_attention_mask = text_inputs.attention_mask
-    prompt_attention_mask = prompt_attention_mask.cuda()
-    prompt_embeds = text_encoder(text_input_ids.cuda(), attention_mask=prompt_attention_mask)
-    prompt_embeds = prompt_embeds[0]
+    prompt_attention_mask = text_inputs.attention_mask.cuda()
+    prompt_embeds = text_encoder(
+        input_ids=text_inputs.input_ids.cuda(), 
+        attention_mask=prompt_attention_mask,
+        return_dict=True
+    )['last_hidden_state']
     
+    # encode negative prompt
     uncond_input = tokenizer(
         negative_prompt,
         padding="max_length",
-        max_length=120,
+        max_length=max_token_length,
         truncation=True,
         return_attention_mask=True,
         add_special_tokens=True,
         return_tensors="pt",
     )
-    negative_prompt_attention_mask = uncond_input.attention_mask
-    negative_prompt_attention_mask = negative_prompt_attention_mask.cuda()
-    negative_prompt_embeds = text_encoder(uncond_input.input_ids.cuda(), attention_mask=negative_prompt_attention_mask)
-    negative_prompt_embeds = negative_prompt_embeds[0]
+    negative_prompt_attention_mask = uncond_input.attention_mask.cuda()
+    negative_prompt_embeds = text_encoder(
+        input_ids=uncond_input.input_ids.cuda(), 
+        attention_mask=negative_prompt_attention_mask,
+        return_dict=True
+    )['last_hidden_state']
     
     scheduler = DPMSolverMultistepScheduler()
     model_dtype = next(model.parameters()).dtype
@@ -616,15 +608,11 @@ def sample(model, vae, prompt, tokenizer, text_encoder, negative_prompt, size=(1
     timesteps = scheduler.timesteps
     num_latent_input = 2
     
-    cond = torch.cat([negative_prompt_embeds, prompt_embeds]).cuda().to(model_dtype)
-    encoder_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask]).cuda().to(model_dtype)
     extra_kwargs = {
-        "y": cond, 
-        "encoder_mask": encoder_mask,
+        "y": torch.cat([negative_prompt_embeds, prompt_embeds]).cuda().to(model_dtype), 
+        "mask": torch.cat([negative_prompt_attention_mask, prompt_attention_mask]).cuda().to(model_dtype),
         **get_model_kwargs(latents, model),
-    }
-            
-    # micro-condition
+    }        
     for i, t in tqdm(enumerate(timesteps), total=steps, desc="Sampling"):
         # expand the latents if we are doing classifier free guidance
         latent_model_input = torch.cat([latents] * 2)
@@ -641,8 +629,10 @@ def sample(model, vae, prompt, tokenizer, text_encoder, negative_prompt, size=(1
         # compute the previous noisy sample x_t -> x_t-1
         noise_pred  = noise_pred.chunk(2, dim=1)[0]
         latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+    with torch.autocast('cuda', enabled=False):
+        decoded = vae.decode(latents / vae.config.scaling_factor).sample
         
-    decoded = vae.decode(latents / vae.config.scaling_factor).sample
     image = torch.clamp((decoded + 1.0) / 2.0, min=0.0, max=1.0).cpu().float()
     image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
@@ -651,27 +641,10 @@ def sample(model, vae, prompt, tokenizer, text_encoder, negative_prompt, size=(1
     return image
 
 
-ASPECT_RATIO_1024 = {
-    '0.25': [512., 2048.], '0.26': [512., 1984.], '0.27': [512., 1920.], '0.28': [512., 1856.],
-    '0.32': [576., 1792.], '0.33': [576., 1728.], '0.35': [576., 1664.], '0.4':  [640., 1600.],
-    '0.42':  [640., 1536.], '0.48': [704., 1472.], '0.5': [704., 1408.], '0.52': [704., 1344.],
-    '0.57': [768., 1344.], '0.6': [768., 1280.], '0.68': [832., 1216.], '0.72': [832., 1152.],
-    '0.78': [896., 1152.], '0.82': [896., 1088.], '0.88': [960., 1088.], '0.94': [960., 1024.],
-    '1.0':  [1024., 1024.], '1.07': [1024.,  960.], '1.13': [1088.,  960.], '1.21': [1088.,  896.],
-    '1.29': [1152.,  896.], '1.38': [1152.,  832.], '1.46': [1216.,  832.], '1.67': [1280.,  768.],
-    '1.75': [1344.,  768.], '2.0':  [1408.,  704.], '2.09':  [1472.,  704.], '2.4':  [1536.,  640.],
-    '2.5':  [1600.,  640.], '2.89':  [1664.,  576.], '3.0':  [1728.,  576.], '3.11':  [1792.,  576.],
-    '3.62':  [1856.,  512.], '3.75':  [1920.,  512.], '3.88':  [1984.,  512.], '4.0':  [2048.,  512.],
-}
-
 if __name__ == '__main__':    
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
     # torch.set_float32_matmul_precision('medium')
-    
-    from PIL import Image
-    from transformers import T5EncoderModel, T5Tokenizer
-    from diffusers import DPMSolverMultistepScheduler, AutoencoderKL
 
     seed = int(184371982347)
     generator = torch.Generator().manual_seed(seed)
@@ -684,15 +657,16 @@ if __name__ == '__main__':
         subfolder="text_encoder"
     )
     tokenizer = T5Tokenizer.from_pretrained("PixArt-alpha/PixArt-XL-2-1024-MS", legacy=False, subfolder="tokenizer")
-    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").cuda()
     
+    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").cuda()
     model = DiT_XL_2(input_size=1024//8, interpolation_scale=2.)
     model.to("cuda:0", dtype=torch.float16, memory_format=torch.channels_last).eval()
     state_dict = torch.hub.load_state_dict_from_url("https://huggingface.co/datasets/nyanko7/tmp-public/resolve/main/PixArt-XL-2-1024-MS.pth", map_location="cuda:0")["state_dict"]            
     
     print("Loading weights from DiT-XL-2-1024-MS.pth")
-    result = model.load_state_dict(state_dict, strict=False)
-    assert len(result.unexpected_keys) <= 1, f"Unexpected keys: {result.unexpected_keys}, Missing keys: {result.missing_keys}"
+    if 'pos_embed' in state_dict:
+        del state_dict['pos_embed']
+    result = model.load_state_dict(state_dict)
     
     # model = torch.compile(model, mode="max-autotune", dynamic=True)
     img = sample(

@@ -15,7 +15,7 @@ from lightning.pytorch.utilities import rank_zero_only
 from common.utils import load_torch_file, get_class
 from common.logging import logger
 
-from nyanko.naifu.models.pixart.alpha import DiT_XL_2, get_model_kwargs
+from nyanko.naifu.models.pixart.sigma_mp import DiT_XL_2, get_model_kwargs
 from nyanko.naifu.models.pixart.diffusion import (
     SpacedDiffusion,
     get_named_beta_schedule,
@@ -66,7 +66,7 @@ class DiffusionModel(pl.LightningModule):
             "t5_model_path", "PixArt-alpha/PixArt-XL-2-1024-MS"
         )
         vae_model_path = self.config.trainer.get(
-            "vae_model_path", "stabilityai/sd-vae-ft-mse"
+            "vae_model_path", "stabilityai/sdxl-vae"
         )
         self.tokenizer = T5Tokenizer.from_pretrained(
             t5_model_path, legacy=False, subfolder="tokenizer"
@@ -245,7 +245,7 @@ class DiffusionModel(pl.LightningModule):
 
         self.model.train()
         return image
-
+    
     def save_checkpoint(self, model_path, metadata):
         weight_to_save = None
         if hasattr(self, "_fsdp_engine"):

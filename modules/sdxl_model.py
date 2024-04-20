@@ -154,7 +154,7 @@ class StableDiffusionModel(pl.LightningModule):
                 latents.append(self.first_stage_model.encode(o).sample())
         z = torch.cat(latents, dim=0)
         return self._normliaze(z)
-
+    
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
         generator = torch.Generator(device="cpu").manual_seed(config.seed)
@@ -178,7 +178,7 @@ class StableDiffusionModel(pl.LightningModule):
                 Path(config.save_dir)
                 / f"sample_e{current_epoch}_s{global_step}_p{rank}_{idx}.png"
             )
-            images.append((image[0], prompt))
+            images.extend(image)
 
         gathered_images = [images]
         if dist.is_initialized() and world_size > 1:
@@ -187,18 +187,13 @@ class StableDiffusionModel(pl.LightningModule):
             
         if rank in [0, -1]:
             all_images = []
-            all_prompts = []
-            for entry in gathered_images:
-                if isinstance(entry, list):
-                    entry = entry[0]
-                imgs, prompts = entry
-                all_prompts.append(prompts)
-                all_images.append(imgs)
+            for imgs in gathered_images:
+                all_images.extend(imgs)
 
             self.model.train()
             if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
                 logger.log_image(
-                    key="samples", images=all_images, caption=all_prompts, step=global_step
+                    key="samples", images=all_images, caption=prompts, step=global_step
                 )
 
     @torch.inference_mode()
