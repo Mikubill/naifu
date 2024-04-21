@@ -20,46 +20,46 @@ from .alpha import *
 from .dist_ops import *
 
 
-# class FinalLayer(nn.Module):
-#     def __init__(self, hidden_size, patch_size, out_channels):
-#         super().__init__()
-#         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-#         self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
-#         self.scale_shift_table = nn.Parameter(torch.randn(2, hidden_size) / hidden_size ** 0.5)
-#         self.out_channels = out_channels
+class FinalLayer(nn.Module):
+    def __init__(self, hidden_size, patch_size, out_channels):
+        super().__init__()
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
+        self.scale_shift_table = nn.Parameter(torch.randn(2, hidden_size) / hidden_size ** 0.5)
+        self.out_channels = out_channels
 
-#     def forward(self, x, t):
-#         shift, scale = (self.scale_shift_table[None] + t[:, None]).chunk(2, dim=1)
-#         x = modulate(self.norm_final(x), shift, scale)
-#         x = self.linear(x)
-#         return x
+    def forward(self, x, t):
+        shift, scale = (self.scale_shift_table[None] + t[:, None]).chunk(2, dim=1)
+        x = modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        return x
 
     
-# class DiTBlock(nn.Module):
-#     """
-#     A DiT block with adaptive layer norm (adaLN-single) conditioning.
-#     """
+class DiTBlock(nn.Module):
+    """
+    A DiT block with adaptive layer norm (adaLN-single) conditioning.
+    """
 
-#     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, sr_ratio=1, sampling='conv', **block_kwargs):
-#         super().__init__()
-#         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, sr_ratio=1, sampling='conv', **block_kwargs):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         
-#         kv_compress_config = {} # {'sr_ratio': sr_ratio, 'sampling': sampling}
-#         self.attn = Attention(dim=hidden_size, num_heads=num_heads, qkv_bias=True, **kv_compress_config)
-#         self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), act_layer=lambda: nn.GELU(approximate="tanh"))
-#         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-#         self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, **block_kwargs)
-#         # self.xattn_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-#         self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size ** 0.5)
+        kv_compress_config = {} # {'sr_ratio': sr_ratio, 'sampling': sampling}
+        self.attn = Attention(dim=hidden_size, num_heads=num_heads, qkv_bias=True, **kv_compress_config)
+        self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), act_layer=lambda: nn.GELU(approximate="tanh"))
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, **block_kwargs)
+        # self.xattn_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size ** 0.5)
 
-#     def forward(self, x, t, y, mask):
-#         B, N, C = x.shape
-#         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
+    def forward(self, x, t, y, mask):
+        B, N, C = x.shape
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
             
-#         x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)).reshape(B, N, C)
-#         x = x + self.cross_attn(x, y, mask)
-#         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
-#         return x
+        x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)).reshape(B, N, C)
+        x = x + self.cross_attn(x, y, mask)
+        x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        return x
     
     
 

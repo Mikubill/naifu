@@ -25,6 +25,7 @@ model_params:
 #   tune_mm_mlp_adapter: true
 #   tune_mm_vision_tower: false
 #   freeze_backbone: true
+#   lazyload_vision_tower: false
 #   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 # finetune config
@@ -47,6 +48,7 @@ model_config:
   tune_mm_mlp_adapter: false
   tune_mm_vision_tower: true
   freeze_backbone: false
+  lazyload_vision_tower: true
   image_grid_pinpoints: [[336, 672], [672, 336], [672, 672], [1008, 336], [336, 1008]]
 
 use_lora: true

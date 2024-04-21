@@ -5,6 +5,10 @@ import lightning as pl
 from omegaconf import OmegaConf
 from common.utils import get_class, get_latest_checkpoint, load_torch_file
 from common.logging import logger
+
+import torch.distributed as dist
+from tqdm import tqdm
+from pathlib import Path
 from modules.sdxl_model import StableDiffusionModel
 from modules.scheduler_utils import apply_snr_weight
 from lightning.pytorch.utilities.model_summary import ModelSummary
@@ -254,7 +258,8 @@ class SupervisedFineTune(StableDiffusionModel):
         if dist.is_initialized() and world_size > 1:
             gathered_images = [None] * world_size
             dist.all_gather_object(gathered_images, images)
-            
+        
+        self.model.train()
         if rank in [0, -1]:
             all_images = []
             all_prompts = []
@@ -265,8 +270,8 @@ class SupervisedFineTune(StableDiffusionModel):
                 all_prompts.append(prompts)
                 all_images.append(imgs)
 
-            self.model.train()
             if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
                 logger.log_image(
                     key="samples", images=all_images, caption=all_prompts, step=global_step
                 )
+        

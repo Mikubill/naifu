@@ -155,6 +155,7 @@ class StableDiffusionModel(pl.LightningModule):
         z = torch.cat(latents, dim=0)
         return self._normliaze(z)
     
+    @rank_zero_only
     def generate_samples(self, logger, current_epoch, global_step):
         config = self.config.sampling
         generator = torch.Generator(device="cpu").manual_seed(config.seed)
@@ -163,38 +164,21 @@ class StableDiffusionModel(pl.LightningModule):
         size = (config.get("height", 1024), config.get("width", 1024))
         self.model.eval()
 
-        rank = 0
-        world_size = 1
-        if dist.is_initialized():
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
-
-        local_prompts = prompts[rank::world_size]
         for idx, prompt in tqdm(
-            enumerate(local_prompts), desc=f"Sampling (Process {rank})", total=len(local_prompts), leave=False
+            enumerate(prompts), desc="Sampling", total=len(prompts), leave=False
         ):
             image = self.sample(prompt, size=size, generator=generator)
             image[0].save(
                 Path(config.save_dir)
-                / f"sample_e{current_epoch}_s{global_step}_p{rank}_{idx}.png"
+                / f"sample_e{current_epoch}_s{global_step}_{idx}.png"
             )
             images.extend(image)
 
-        gathered_images = [images]
-        if dist.is_initialized() and world_size > 1:
-            gathered_images = [None] * world_size
-            dist.all_gather_object(gathered_images, images)
-            
-        if rank in [0, -1]:
-            all_images = []
-            for imgs in gathered_images:
-                all_images.extend(imgs)
-
-            self.model.train()
-            if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
-                logger.log_image(
-                    key="samples", images=all_images, caption=prompts, step=global_step
-                )
+        self.model.train()
+        if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
+            logger.log_image(
+                key="samples", images=images, caption=prompts, step=global_step
+            )
 
     @torch.inference_mode()
     def sample(

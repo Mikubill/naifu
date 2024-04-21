@@ -75,3 +75,16 @@ def _sd_hybrid_z2_mpi_strategy():
         activation_checkpointing=[ResBlock, SpatialTransformer],
     )
     return fsdp_strategy
+
+def _pixart_sigma_hybrid_strategy():
+    from models.pixart.sigma import DiTBlock
+    
+    fsdp_strategy = FSDPStrategy(
+        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2, 
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        forward_prefetch=True,
+        auto_wrap_policy={DiTBlock},
+        limit_all_gathers=True,
+        activation_checkpointing=[DiTBlock],
+    )
+    return fsdp_strategy

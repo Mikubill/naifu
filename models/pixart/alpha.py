@@ -554,7 +554,7 @@ def DiT_XL_2(**kwargs):
 
 @torch.no_grad()    
 def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderModel, \
-    negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None, max_token_length=120):
+    negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None, max_token_length=120, device="cuda"):
     
     assert type(prompt) == list, "Prompt must be a list of strings"
     if len(negative_prompt) != len(prompt):
@@ -572,12 +572,12 @@ def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderMo
         add_special_tokens=True,
         return_tensors="pt",
     ) 
-    prompt_attention_mask = text_inputs.attention_mask.cuda()
+    prompt_attention_mask = text_inputs.attention_mask.to(device)
     prompt_embeds = text_encoder(
-        input_ids=text_inputs.input_ids.cuda(), 
+        input_ids=text_inputs.input_ids.to(device), 
         attention_mask=prompt_attention_mask,
         return_dict=True
-    )['last_hidden_state']
+    )['last_hidden_state'] 
     
     # encode negative prompt
     uncond_input = tokenizer(
@@ -589,9 +589,9 @@ def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderMo
         add_special_tokens=True,
         return_tensors="pt",
     )
-    negative_prompt_attention_mask = uncond_input.attention_mask.cuda()
+    negative_prompt_attention_mask = uncond_input.attention_mask.to(device)
     negative_prompt_embeds = text_encoder(
-        input_ids=uncond_input.input_ids.cuda(), 
+        input_ids=uncond_input.input_ids.to(device), 
         attention_mask=negative_prompt_attention_mask,
         return_dict=True
     )['last_hidden_state']
@@ -601,7 +601,7 @@ def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderMo
     vae.to(model_dtype)
     
     latents_shape = (len(prompt), 4, size[0] // 8, size[1] // 8)
-    latents = torch.randn(latents_shape, generator=generator, dtype=torch.float16).cuda()
+    latents = torch.randn(latents_shape, generator=generator, dtype=torch.float16).to(device)
     latents = latents * scheduler.init_noise_sigma
         
     scheduler.set_timesteps(steps)
@@ -609,18 +609,18 @@ def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderMo
     num_latent_input = 2
     
     extra_kwargs = {
-        "y": torch.cat([negative_prompt_embeds, prompt_embeds]).cuda().to(model_dtype), 
-        "mask": torch.cat([negative_prompt_attention_mask, prompt_attention_mask]).cuda().to(model_dtype),
+        "y": torch.cat([negative_prompt_embeds, prompt_embeds]).to(device).to(model_dtype), 
+        "mask": torch.cat([negative_prompt_attention_mask, prompt_attention_mask]).to(device).to(model_dtype),
         **get_model_kwargs(latents, model),
     }        
-    for i, t in tqdm(enumerate(timesteps), total=steps, desc="Sampling"):
+    for i, t in tqdm(enumerate(timesteps), total=steps, desc="Sampling", leave=False):
         # expand the latents if we are doing classifier free guidance
         latent_model_input = torch.cat([latents] * 2)
         latent_model_input = scheduler.scale_model_input(latent_model_input, t)
 
         noise_pred = model(
             x=latent_model_input, 
-            t=torch.asarray([t] * latent_model_input.shape[0]).cuda(), 
+            t=torch.asarray([t] * latent_model_input.shape[0]).to(device), 
             **extra_kwargs
         )
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(num_latent_input)  # uncond by negative prompt

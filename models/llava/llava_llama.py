@@ -49,11 +49,21 @@ def build_vision_projector(config):
 class CLIPVisionTower(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.is_loaded = False
         self.vision_tower_name = config.mm_vision_tower
         self.select_layer = config.mm_vision_select_layer
         self.select_feature = getattr(config, 'mm_vision_select_feature', 'patch')
+        if not config.get("lazyload_vision_tower", False):
+            self.load_model()
+        
+    def load_model(self):
+        if self.is_loaded:
+            return
+        
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
         self.vision_tower = CLIPVisionModel.from_pretrained(self.vision_tower_name)
+        self.vision_tower.requires_grad_(False)
+        self.is_loaded = True
 
     def feature_select(self, image_forward_outs):
         image_features = image_forward_outs.hidden_states[self.select_layer]

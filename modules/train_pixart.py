@@ -3,25 +3,24 @@ import os
 import lightning as pl
 
 from omegaconf import OmegaConf
-from PIL import Image
 from pathlib import Path
 from tqdm import tqdm
 from safetensors.torch import save_file
 from transformers import T5EncoderModel, T5Tokenizer
-from diffusers import AutoencoderKL, DPMSolverMultistepScheduler
+from diffusers import AutoencoderKL
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch.utilities import rank_zero_only
 
 from common.utils import load_torch_file, get_class
 from common.logging import logger
 
-from nyanko.naifu.models.pixart.alpha import DiT_XL_2, get_model_kwargs
-from nyanko.naifu.models.pixart.diffusion import (
+from models.pixart.alpha import DiT_XL_2, get_model_kwargs, sample  
+from models.pixart.diffusion import (
     SpacedDiffusion,
     get_named_beta_schedule,
     space_timesteps,
 )
-from nyanko.naifu.models.pixart.diffusion import ModelVarType, ModelMeanType, LossType
+from models.pixart.diffusion import ModelVarType, ModelMeanType, LossType
 
 
 def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
@@ -50,6 +49,13 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
 
     model.model, optimizer = fabric.setup(model.model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
+    if hasattr(fabric.strategy, "_deepspeed_engine"):
+        model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    if hasattr(fabric.strategy, "_fsdp_kwargs"):
+        model._fsdp_engine = fabric.strategy
+        
+    # set here; 
+    model._fabric_wrapped = fabric
     return model, dataset, dataloader, optimizer, scheduler
 
 
@@ -109,8 +115,8 @@ class DiffusionModel(pl.LightningModule):
 
     @torch.no_grad()
     def encode_tokens(self, prompts):
+        self.text_encoder.to(self.target_device)
         with torch.autocast("cuda", enabled=False):
-            text_encoder = self.text_encoder
             text_inputs = self.tokenizer(
                 prompts,
                 padding="max_length",
@@ -119,12 +125,12 @@ class DiffusionModel(pl.LightningModule):
                 add_special_tokens=True,
                 return_tensors="pt",
             )
-            text_input_ids = text_inputs.input_ids.to(text_encoder.device)
-            prompt_attention_mask = text_inputs.attention_mask.to(text_encoder.device)
-
-            prompt_embeds = text_encoder(
-                text_input_ids, attention_mask=prompt_attention_mask
-            )[0]
+            prompt_attention_mask = text_inputs.attention_mask
+            prompt_embeds = self.text_encoder(
+                input_ids=text_inputs.input_ids.to(self.target_device), 
+                attention_mask=prompt_attention_mask.to(self.target_device),
+                return_dict=True
+            )['last_hidden_state']
             return prompt_embeds, prompt_attention_mask
 
     def forward(self, batch):
@@ -155,7 +161,7 @@ class DiffusionModel(pl.LightningModule):
             timesteps,
             model_kwargs=dict(
                 y=prompt_embeds.to(self.target_device, dtype=model_dtype),
-                encoder_mask=prompt_attention_mask.to(
+                mask=prompt_attention_mask.to(
                     self.target_device, dtype=model_dtype
                 ),
                 **model_kwg,
@@ -174,9 +180,22 @@ class DiffusionModel(pl.LightningModule):
         prompts = list(config.prompts)
         images = []
         size = (config.get("height", 1024), config.get("width", 1024))
-
-        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False):
-            image = self.sample(prompt, size=size, generator=generator)
+        self.model.eval()
+        current_device = self.vae.device
+        self.vae.to(self.target_device)
+        
+        for idx, prompt in tqdm(enumerate(prompts), desc="Sampling", leave=False, total=len(prompts)):
+            image = sample(
+                model=self.model,
+                vae=self.vae,
+                text_encoder=self.text_encoder,
+                tokenizer=self.tokenizer,
+                prompt=[prompt],
+                negative_prompt="bad quality, low quality",
+                size=size,
+                generator=generator,
+                device=self.target_device,
+            )
             image[0].save(
                 Path(config.save_dir)
                 / f"sample_e{current_epoch}_s{global_step}_{idx}.png"
@@ -185,66 +204,9 @@ class DiffusionModel(pl.LightningModule):
 
         if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
             logger.log_image(key="samples", images=images, caption=prompts, step=global_step)
-
-    @torch.no_grad()
-    def sample(
-        self,
-        prompt="1girl, solo",
-        negative_prompt="lowres, low quality, text, error, extra digit, cropped",
-        size=(1152, 832),
-        steps=28,
-        guidance_scale=6.5,
-    ):
-        self.model.eval()
-
-        prompt = (
-            prompt.replace("_", " ")
-            .replace("[", "")
-            .replace("]", "")
-            .replace("(", "")
-            .replace(")", "")
-            .replace("{", "")
-            .replace("}", "")
-            .lower()
-        )
-        scheduler = DPMSolverMultistepScheduler()
-        prompt_embeds, prompt_attention_mask = self.encode_tokens([negative_prompt, prompt])
-
-        latents = torch.randn(1, 4, size[0] // 8, size[1] // 8, device=self.target_device)
-        scheduler.set_timesteps(steps)
-        timesteps = scheduler.timesteps
-        latents = latents * scheduler.init_noise_sigma
-
-        for i, t in enumerate(timesteps):
-            # expand the latents if we are doing classifier free guidance
-            latent_model_input = torch.cat([latents] * 2)
-            latent_model_input = scheduler.scale_model_input(latent_model_input, t)
-
-            noise_pred = self.model(
-                x=latent_model_input,
-                t=torch.stack([t] * latents.shape[0]).to(latents.device),
-                y=prompt_embeds.to(latents.device, dtype=latents.dtype),
-                encoder_mask=prompt_attention_mask.to(
-                    latents.device, dtype=latents.dtype
-                ),
-                **get_model_kwargs(latents, self.model),
-            )
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)  # uncond by negative prompt
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-            # compute the previous noisy sample x_t -> x_t-1
-            noise_pred = noise_pred.chunk(2, dim=1)[0]
-            latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
-        decoded = self.vae.decode(latents / self.vae.config.scaling_factor).sample
-        image = torch.clamp((decoded + 1.0) / 2.0, min=0.0, max=1.0).detach().float()
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-
-        image = (image * 255).round().astype("uint8")
-        image = [Image.fromarray(im) for im in image]
-
+        
+        self.vae.to(current_device)
         self.model.train()
-        return image
 
     def save_checkpoint(self, model_path, metadata):
         weight_to_save = None
@@ -256,7 +218,7 @@ class DiffusionModel(pl.LightningModule):
             with _get_full_state_dict_context(self.model._forward_module, world_size=world_size):
                 weight_to_save = self.model._forward_module.state_dict()
         else:
-            weight_to_save = self.state_dict()
+            weight_to_save = self.model.state_dict()
                 
         self._save_checkpoint(model_path, weight_to_save, metadata)
 
