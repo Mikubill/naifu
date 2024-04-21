@@ -162,7 +162,7 @@ class LLaVAModel(pl.LightningModule):
             config=cfg_pretrained,
             **config.model_params
         )
-        model.get_vision_tower().load_model()
+        model.get_model().load_vision_model()
         
         mm_config = OmegaConf.create(cfg_pretrained.to_dict())
         model.enable_input_require_grads()

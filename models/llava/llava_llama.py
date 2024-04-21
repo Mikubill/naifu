@@ -53,8 +53,6 @@ class CLIPVisionTower(nn.Module):
         self.vision_tower_name = config.mm_vision_tower
         self.select_layer = config.mm_vision_select_layer
         self.select_feature = getattr(config, 'mm_vision_select_feature', 'patch')
-        if not config.get("lazyload_vision_tower", False):
-            self.load_model()
         
     def load_model(self):
         if self.is_loaded:
@@ -76,7 +74,7 @@ class CLIPVisionTower(nn.Module):
         return image_features
 
     @torch.no_grad()
-    def forward(self, images):
+    def forward(self, images):        
         if type(images) is list:
             image_features = []
             for image in images:
@@ -117,8 +115,13 @@ class LlamaLlavaModel(LlamaModel):
             self.image_newline = nn.Parameter(
                 torch.empty(config.hidden_size, dtype=self.dtype)
             )
-            
-        adapter_path = config.pretrain_mm_mlp_adapter
+        
+        if not getattr(config, "freeze_backbone", True) or not getattr(config, "lazyload_vision_tower", True):
+            # load model here, make sure every component is included in original checkpoint
+            self.load_model()
+    
+    def load_vision_model(self):
+        adapter_path = self.config.pretrain_mm_mlp_adapter
         if adapter_path is not None:
             logger.info(f"Loading pretrained mm_projector from {adapter_path}")
             mm_projector_weights = torch.load(adapter_path, map_location='cpu')
@@ -128,6 +131,9 @@ class LlamaLlavaModel(LlamaModel):
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
             if hasattr(self, "image_newline"):
                 self.image_newline.data = mm_projector_weights["model.image_newline"]
+        
+        self.vision_tower.load_model()
+        
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM):
     def __init__(self, config):
