@@ -260,10 +260,11 @@ class Trainer:
 
             for batch_idx, batch in enumerate(self.dataloader):  
                 # Skip the completed steps in the current epoch
-                if self.current_epoch == resume_epoch and batch_idx < resume_step:
-                    continue
-                local_step += 1    
                 local_acc_step = batch_idx // grad_accum_steps + 1
+                if self.current_epoch == resume_epoch and local_acc_step < resume_step:
+                    continue
+                
+                local_step += 1    
                 local_timer = time.perf_counter()
                 
                 is_accumulating = local_step % grad_accum_steps != 0
