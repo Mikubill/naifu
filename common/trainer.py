@@ -220,6 +220,18 @@ class Trainer:
                 logger.info(f"Loaded optimizer state from {opt_path}")
                 self.global_step = int(remainder.pop("global_step", self.global_step))
                 self.current_epoch = int(remainder.pop("current_epoch", self.current_epoch))
+            else:
+                if latest_ckpt.endswith(".ckpt"):
+                    sd = torch.load(latest_ckpt, map_location="cpu")
+                    self.global_step = int(sd.pop("global_step", self.global_step))
+                    self.current_epoch = int(sd.pop("current_epoch", self.current_epoch))
+                elif latest_ckpt.endswith(".safetensors"):
+                    with safetensors.torch.safe_open(latest_ckpt, framework="pt") as f:
+                        metadata = f.metadata()
+                        self.global_step = int(metadata.get("global_step", self.global_step))
+                        self.current_epoch = int(metadata.get("current_epoch", self.current_epoch))
+                
+            logger.info(f"Resuming training from step {self.global_step} and epoch {self.current_epoch}")
 
         should_stop = False
         if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:
