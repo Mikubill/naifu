@@ -162,8 +162,6 @@ class LLaVAModel(pl.LightningModule):
             config=cfg_pretrained,
             **config.model_params
         )
-        model.get_model().load_vision_model()
-        
         mm_config = OmegaConf.create(cfg_pretrained.to_dict())
         model.enable_input_require_grads()
         model.gradient_checkpointing_enable()

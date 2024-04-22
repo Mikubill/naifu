@@ -154,9 +154,59 @@ class StableDiffusionModel(pl.LightningModule):
                 latents.append(self.first_stage_model.encode(o).sample())
         z = torch.cat(latents, dim=0)
         return self._normliaze(z)
+
+    def generate_samples(self, logger, current_epoch, global_step):
+        if hasattr(self, "_fabric_wrapped"):
+            if self._fabric_wrapped.world_size > 2:
+                self.generate_samples_dist(logger, current_epoch, global_step)
+                return self._fabric_wrapped.barrier()
+                
+        return self.generate_samples_seq(logger, current_epoch, global_step)
+
+    def generate_samples_dist(self, logger, current_epoch, global_step):
+        config = self.config.sampling
+        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+        prompts = list(config.prompts)
+        images = []
+        size = (config.get("height", 1024), config.get("width", 1024))
+        self.model.eval()
+
+        rank = 0
+        world_size = self._fabric_wrapped.world_size
+        rank = self._fabric_wrapped.global_rank
+
+        local_prompts = prompts[rank::world_size]
+        for idx, prompt in tqdm(
+            enumerate(local_prompts), desc=f"Sampling (Process {rank})", total=len(local_prompts), leave=False
+        ):
+            image = self.sample(prompt, size=size, generator=generator)
+            image[0].save(
+                Path(config.save_dir)
+                / f"sample_e{current_epoch}_s{global_step}_p{rank}_{idx}.png"
+            )
+            images.append((image[0], prompt))
+
+        gathered_images = [None] * world_size
+        dist.all_gather_object(gathered_images, images)
+        
+        self.model.train()
+        if rank in [0, -1]:
+            all_images = []
+            all_prompts = []
+            for entry in gathered_images:
+                if isinstance(entry, list):
+                    entry = entry[0]
+                imgs, prompts = entry
+                all_prompts.append(prompts)
+                all_images.append(imgs)
+
+            if config.use_wandb and logger and "CSVLogger" != logger.__class__.__name__:
+                logger.log_image(
+                    key="samples", images=all_images, caption=all_prompts, step=global_step
+                )
     
     @rank_zero_only
-    def generate_samples(self, logger, current_epoch, global_step):
+    def generate_samples_seq(self, logger, current_epoch, global_step):
         config = self.config.sampling
         generator = torch.Generator(device="cpu").manual_seed(config.seed)
         prompts = list(config.prompts)

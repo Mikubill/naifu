@@ -109,9 +109,7 @@ class DiffusionModel(pl.LightningModule):
 
         logger.info("Loading weights from checkpoint: DiT-XL-2-1024-MS.pth")
         result = self.model.load_state_dict(dit_state_dict, strict=False)
-        assert result.unexpected_keys == [
-            "pos_embed"
-        ], f"Unexpected keys: {result.unexpected_keys}, Missing keys: {result.missing_keys}"
+        logger.info(result)
 
     @torch.no_grad()
     def encode_tokens(self, prompts):

@@ -85,6 +85,6 @@ def _pixart_sigma_hybrid_strategy():
         forward_prefetch=True,
         auto_wrap_policy={DiTBlock},
         limit_all_gathers=True,
-        activation_checkpointing=[DiTBlock],
+        # activation_checkpointing=[DiTBlock],
     )
     return fsdp_strategy

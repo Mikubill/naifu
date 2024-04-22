@@ -49,19 +49,12 @@ def build_vision_projector(config):
 class CLIPVisionTower(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.is_loaded = False
         self.vision_tower_name = config.mm_vision_tower
         self.select_layer = config.mm_vision_select_layer
         self.select_feature = getattr(config, 'mm_vision_select_feature', 'patch')
-        
-    def load_model(self):
-        if self.is_loaded:
-            return
-        
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
         self.vision_tower = CLIPVisionModel.from_pretrained(self.vision_tower_name)
         self.vision_tower.requires_grad_(False)
-        self.is_loaded = True
 
     def feature_select(self, image_forward_outs):
         image_features = image_forward_outs.hidden_states[self.select_layer]
@@ -113,14 +106,9 @@ class LlamaLlavaModel(LlamaModel):
         self.mm_projector = build_vision_projector(config)
         if 'unpad' in getattr(config, 'mm_patch_merge_type', ''):
             self.image_newline = nn.Parameter(
-                torch.empty(config.hidden_size, dtype=self.dtype)
+                torch.randn(config.hidden_size, dtype=self.dtype)
             )
-        
-        if not getattr(config, "freeze_backbone", True) or not getattr(config, "lazyload_vision_tower", True):
-            # load model here, make sure every component is included in original checkpoint
-            self.load_model()
     
-    def load_vision_model(self):
         adapter_path = self.config.pretrain_mm_mlp_adapter
         if adapter_path is not None:
             logger.info(f"Loading pretrained mm_projector from {adapter_path}")
@@ -131,8 +119,6 @@ class LlamaLlavaModel(LlamaModel):
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
             if hasattr(self, "image_newline"):
                 self.image_newline.data = mm_projector_weights["model.image_newline"]
-        
-        self.vision_tower.load_model()
         
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM):

@@ -73,7 +73,8 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         model._deepspeed_engine = fabric.strategy._deepspeed_engine
     if hasattr(fabric.strategy, "_fsdp_kwargs"):
         model._fsdp_engine = fabric.strategy
-        
+    
+    model._fabric_wrapped = fabric
     return model, dataset, dataloader, optimizer, scheduler
 
 def get_sigmas(sch, timesteps, n_dim=4, dtype=torch.float32, device="cuda:0"):

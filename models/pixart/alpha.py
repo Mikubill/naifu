@@ -554,7 +554,8 @@ def DiT_XL_2(**kwargs):
 
 @torch.no_grad()    
 def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderModel, \
-    negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None, max_token_length=120, device="cuda"):
+    negative_prompt, size=(1024,1024), steps=20, guidance_scale=7.5, generator=None, \
+    max_token_length=120, device="cuda", scheduler=None):
     
     assert type(prompt) == list, "Prompt must be a list of strings"
     if len(negative_prompt) != len(prompt):
@@ -596,7 +597,7 @@ def sample(model, vae, prompt, tokenizer: T5Tokenizer, text_encoder: T5EncoderMo
         return_dict=True
     )['last_hidden_state']
     
-    scheduler = DPMSolverMultistepScheduler()
+    scheduler = DPMSolverMultistepScheduler() if scheduler is None else scheduler
     model_dtype = next(model.parameters()).dtype
     vae.to(model_dtype)
     

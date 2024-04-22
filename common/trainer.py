@@ -157,6 +157,8 @@ class Trainer:
         sample_by_step = sampling_steps > 0 and self.global_step % sampling_steps == 0
         sampling_epochs = sampling_cfg.every_n_epochs
         sample_by_epoch = sampling_epochs > 0 and self.current_epoch % sampling_epochs == 0
+        sample_on_start = config.sampling.get("sample_on_start", False) \
+            and not getattr(self, "sampler_initialized", False)
 
         if not enabled_sampling or len(sampling_cfg.prompts) == 0:
             return
@@ -164,11 +166,12 @@ class Trainer:
         if sampling_cfg.get("save_dir", None):
             os.makedirs(sampling_cfg.save_dir, exist_ok=True)
 
-        if (is_last and sample_by_epoch) or sample_by_step:
+        if (is_last and sample_by_epoch) or sample_by_step or sample_on_start:
+            setattr(self, "sampler_initialized", True)
             
             if "schedulefree" in self.optimizer.__class__.__name__.lower():
                 self.optimizer.eval()
-                
+    
             torch.cuda.empty_cache()
             rng_state = torch.get_rng_state()
             cuda_rng_state = torch.cuda.get_rng_state()
@@ -231,6 +234,10 @@ class Trainer:
             disable=not fabric.is_global_zero,
         )
         assert len(self.dataloader) > 0, "Dataloader is empty"
+        
+        steps_per_epoch = len(self.dataloader)
+        resume_epoch = self.global_step // steps_per_epoch
+        resume_step = self.global_step % steps_per_epoch
         while not should_stop:
             desc = f"Epoch {self.current_epoch}"
             progress.update(desc, 0)
@@ -239,9 +246,11 @@ class Trainer:
             if "schedulefree" in self.optimizer.__class__.__name__.lower():
                 self.optimizer.train()
 
-            for batch_idx, batch in enumerate(self.dataloader):                
-                local_step += 1
-                    
+            for batch_idx, batch in enumerate(self.dataloader):  
+                # Skip the completed steps in the current epoch
+                if self.current_epoch == resume_epoch and batch_idx < resume_step:
+                    continue
+                local_step += 1    
                 local_acc_step = batch_idx // grad_accum_steps + 1
                 local_timer = time.perf_counter()
                 
