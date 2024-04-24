@@ -232,14 +232,14 @@ class Trainer:
                         self.current_epoch = int(metadata.get("current_epoch", self.current_epoch))
                 
             logger.info(f"Resuming training from step {self.global_step} and epoch {self.current_epoch}")
+        else:
+            logger.info(f"Starting training from epoch {self.current_epoch}")
 
         should_stop = False
         if cfg.max_epochs > 0 and self.current_epoch >= cfg.max_epochs:
             should_stop = True
 
-        logger.info(f"Starting training from epoch {self.current_epoch}")
         self.prepare_logger()
-
         loss_rec = LossRecorder()
         progress  = ProgressBar(
             total=len(self.dataloader) // config.trainer.accumulate_grad_batches,
@@ -247,7 +247,7 @@ class Trainer:
         )
         assert len(self.dataloader) > 0, "Dataloader is empty"
         
-        steps_per_epoch = len(self.dataloader)
+        steps_per_epoch = len(self.dataloader) // config.trainer.accumulate_grad_batches
         resume_epoch = self.global_step // steps_per_epoch
         resume_step = self.global_step % steps_per_epoch
         while not should_stop:
