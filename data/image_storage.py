@@ -81,7 +81,7 @@ class StoreBase(Dataset):
         root_path,
         rank=0,
         dtype=torch.float16,
-        process_batch_fn = lambda x: x,
+        process_batch_fn = "data.processors.identical",
         **kwargs,
     ):
         self.rank = rank
