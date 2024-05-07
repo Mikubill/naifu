@@ -89,8 +89,6 @@ class StoreBase(Dataset):
         self.dtype = dtype
         self.kwargs = kwargs
         self.process_batch_fn = process_batch_fn
-        if isinstance(self.process_batch_fn, str):
-            self.process_batch_fn = get_class(self.process_batch_fn)
             
         self.length = 0
         self.rand_list: list = []
@@ -178,6 +176,9 @@ class StoreBase(Dataset):
         return None
 
     def process_batch(self, inputs: Entry):
+        if isinstance(self.process_batch_fn, str):
+            self.process_batch_fn = get_class(self.process_batch_fn)
+            
         return self.process_batch_fn(inputs)
 
     def _get_entry(self, index) -> Entry:
