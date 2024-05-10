@@ -118,10 +118,17 @@ class SupervisedFineTune(StableDiffusionModel):
         # Sample a random timestep for each image
         timestep_start = advanced.get("timestep_start", 0)
         timestep_end = advanced.get("timestep_end", 1000)
-        do_edm_style_training = advanced.get("do_edm_style_training", False)
+        timestep_sampler_type = advanced.get("timestep_sampler_type", "uniform")
 
         # Sample a random timestep for each image
-        if not do_edm_style_training:
+        if timestep_sampler_type == "logit_normal":  
+            mu = advanced.get("timestep_sampler_mean", 0)
+            sigma = advanced.get("timestep_sampler_std", 1)
+            t = torch.sigmoid(mu + sigma * torch.randn(size=(bsz,), device=latents.device))
+            timesteps = t * (timestep_end - timestep_start) + timestep_start  # scale to [min_timestep, max_timestep)
+            timesteps = timesteps.long()
+        else:
+            # default impl
             timesteps = torch.randint(
                 low=timestep_start, 
                 high=timestep_end,
@@ -130,63 +137,17 @@ class SupervisedFineTune(StableDiffusionModel):
                 device=latents.device,
             )
             timesteps = timesteps.long()
-        else:
-            # in EDM formulation, the model is conditioned on the pre-conditioned noise levels
-            # instead of discrete timesteps, so here we sample indices to get the noise levels
-            # from `scheduler.timesteps`
-            indices = torch.randint(
-                low=timestep_start, 
-                high=timestep_end,
-                size=(bsz,),
-                dtype=torch.int64,
-            )
-            timesteps = self.noise_scheduler.timesteps[indices].to(device=latents.device)
-                    
+ 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-        
-        # For EDM-style training, we first obtain the sigmas based on the continuous timesteps.
-        # We then precondition the final model inputs based on these sigmas instead of the timesteps.
-        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
-        if do_edm_style_training:
-            sigmas = get_sigmas(self.noise_scheduler, timesteps, len(noisy_latents.shape), noisy_latents.dtype, latents.device)
-            if "EDM" in self.noise_scheduler.__class__.__name__:
-                inp_noisy_latents = self.noise_scheduler.precondition_inputs(noisy_latents, sigmas)
-            else:
-                inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
-        else:
-            inp_noisy_latents = noisy_latents
 
         # Predict the noise residual
-        noise_pred = self.model(inp_noisy_latents, timesteps, cond)
-        
-        weighting = None
-        if do_edm_style_training:
-            # Similar to the input preconditioning, the model predictions are also preconditioned
-            # on noised model inputs (before preconditioning) and the sigmas.
-            # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
-            if "EDM" in self.noise_scheduler.__class__.__name__:
-                noise_pred = self.noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
-            else:
-                if self.noise_scheduler.config.prediction_type == "epsilon":
-                    noise_pred = noise_pred * (-sigmas) + noisy_latents
-                elif self.noise_scheduler.config.prediction_type == "v_prediction":
-                    noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
-                        noisy_latents / (sigmas**2 + 1)
-                    )
-            # We are not doing weighting here because it tends result in numerical problems.
-            # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
-            # There might be other alternatives for weighting as well:
-            # https://github.com/huggingface/diffusers/pull/7126#discussion_r1505404686
-            if "EDM" not in self.noise_scheduler.__class__.__name__:
-                weighting = (sigmas**-2.0).float()
+        noise_pred = self.model(noisy_latents, timesteps, cond)
 
         # Get the target for loss depending on the prediction type
         is_v = advanced.get("v_parameterization", False)
-        if do_edm_style_training:
-            target = latents
-        elif is_v:
+        if is_v:
             target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
         else:
             target = noise
@@ -202,16 +163,7 @@ class SupervisedFineTune(StableDiffusionModel):
                 
             loss = loss.mean()  # mean over batch dimension
         else:
-            if weighting is not None:
-                loss = torch.mean(
-                    (weighting.float() * (noise_pred.float() - target.float()) ** 2).reshape(
-                        target.shape[0], -1
-                    ),
-                    1,
-                )
-                loss = loss.mean()
-            else:
-                loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="mean")
+            loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="mean")
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
             raise FloatingPointError("Error infinite or NaN loss detected")

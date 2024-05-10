@@ -143,8 +143,6 @@ def rand_log_normal(shape, loc=0., scale=1., device='cpu', dtype=torch.float32):
 
 class EDMPrecond:
     def __init__(self):
-        self.sigma_min = 0.002
-        self.sigma_max = 120.0
         self.sigma_data = 1.0
         self.prediction_type = "v_prediction"
         
@@ -181,8 +179,8 @@ class EDMLoss:
         self.sample_sigma = lambda y: rand_v_diffusion(
             shape=[y.shape[0],], 
             sigma_data=1.0, 
-            min_value=0.002, 
-            max_value=120.0
+            min_value=1e-3, #0.002, 
+            max_value=1e3, #120.0
         )
         self.sigma_data = 1.0
         self.precond = EDMPrecond()

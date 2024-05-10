@@ -127,11 +127,6 @@ Train language models with lora or qlora (For example, [Mistral](https://hugging
 python trainer.py config/train_mistral_lora.yaml
 ```
 
-Train [LLaVA](https://github.com/haotian-liu/LLaVA/tree/main) (1.5/1.6)
-```bash
-python trainer.py config/train_llava.yaml
-```
-
 ## Other branches
 
 * sgm - Uses the [sgm](https://github.com/Stability-AI/generative-models) to train SDXL models. 
