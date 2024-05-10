@@ -59,13 +59,10 @@ class StableDiffusionModel(pl.LightningModule):
             vae_config = model_params.first_stage_config.params
             unet_config = model_params.network_config.params
             cond_config = model_params.conditioner_config.params
-
-            vae = AutoencoderKLWrapper(**vae_config) if init_vae else None
             unet = UnetWrapper(unet_config) if init_unet else None
-            conditioner = (
-                GeneralConditioner(**cond_config) if init_conditioner else None
-            )
-            
+
+        vae = AutoencoderKLWrapper(**vae_config) if init_vae else None
+        conditioner = GeneralConditioner(**cond_config) if init_conditioner else None    
         self.scale_factor = advanced.get("scale_factor", model_params.scale_factor)            
         if advanced.get("latents_mean", None):
             self.latents_mean = torch.tensor(advanced.latents_mean)
