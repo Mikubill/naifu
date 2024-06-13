@@ -1,0 +1,60 @@
+model_path: /root/stable-diffusion-3-medium/sd3_medium.safetensors
+clip_l_path: /root/stable-diffusion-3-medium/text_encoders/clip_l.safetensors
+clip_g_path: /root/stable-diffusion-3-medium/text_encoders/clip_g.safetensors
+t5xxl_path: null # /root/stable-diffusion-3-medium/text_encoders/t5xxl_fp16.safetensors
+# set t5xxl to null if you don't want to use it
+
+trainer:
+  batch_size: 8
+  seed: 15523
+  checkpoint_dir: /storage/dev/nyanko/sd3
+  checkpoint_freq: 1
+  checkpoint_steps: 50
+  max_epochs: 200
+  max_steps: -1
+  precision: bf16-true
+
+advanced:
+  vae_encode_batch_size: 2 # same as batch_size
+  train_text_encoder_1: false
+  train_text_encoder_2: false
+  train_text_encoder_3: false
+  text_encoder_1_lr: 2e-5
+  text_encoder_2_lr: 2e-5
+  text_encoder_3_lr: 2e-5
+
+  weighting_scheme: logit_normal # [logit_normal, mode, sigma_sqrt]
+  logit_mean: 0.0
+  logit_std: 1.0
+
+dataset:
+  img_path: /tmp
+  store_cls: common.image_storage.DirectoryImageStore
+  target_area: 1_048_576 # 1024*1024
+  min_size: 512
+  max_size: 2048
+
+optimizer:
+  name: bitsandbytes.optim.AdamW8bit
+  params:
+    lr: 5e-6
+    weight_decay: 1e-2
+
+scheduler:
+  name: transformers.get_constant_schedule_with_warmup
+  params:
+    num_warmup_steps: 500
+
+sampling:
+  enabled: true 
+  sample_on_start: true
+  use_wandb: true
+  seed: 154623
+  height: 1216
+  width: 832
+  every_n_steps: -1
+  every_n_epochs: 1
+  save_dir: "samples"
+  prompts: 
+    - "artist:2drr, best quality, sensitive, 2020s, blue archive, takanashi hoshino, underwear"
+    - "hololive, rurudo, tokoyami towa, good quality"

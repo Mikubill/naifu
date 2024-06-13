@@ -1,13 +1,16 @@
 import logging
 import copy
-import os
 import sys
-from lightning.pytorch.utilities import rank_zero_only
+import torch.distributed as dist
 
 class RankZeroHandler(logging.StreamHandler):
-    @rank_zero_only
     def emit(self, record):
-        super().emit(record)
+        try:
+            if dist.get_rank() == 0:
+                super().emit(record)
+                
+        except Exception:
+            super().emit(record)
 
 class ColoredFormatter(logging.Formatter):
     COLORS = {

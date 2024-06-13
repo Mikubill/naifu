@@ -1,27 +1,14 @@
-numpy
-accelerate
-lightning>=2.0
-omegaconf>=2.1.1
-transformers>=4.25.1
-datasets>=2.17
-diffusers>=0.18
-bitsandbytes>=0.41
 wandb
-ftfy
-torchvision
-requests
-timm
-safetensors
-
+lightning
+tqdm
+omegaconf
 h5py
-open-clip-torch
+tqdm
+transformers
+diffusers
+safetensors
+open_clip_torch
+pandas
+pyarrow
+fairscale
 einops
-scipy
-opencv-python
-
-# python-rapidjson
-# xformers==0.0.22.post7
-# fairscale
-# prodigyopt
-# xformers
-# tensorboard

@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Any, Callable, List, Optional
 import torch
 import os
 import safetensors.torch
@@ -15,7 +15,6 @@ from diffusers.utils import logging as dsl
 tsl.disable_default_handler()
 tsl.get_logger().addHandler(logger.handlers[0])
 
-
 dsl.disable_default_handler()
 dsl.get_logger().addHandler(logger.handlers[0])
 
@@ -24,29 +23,20 @@ def get_world_size():
     return int(os.environ.get("WORLD_SIZE", 1))
 
 
-def create_scaled_precision_plugin():
-    from lightning.fabric.plugins.precision.amp import MixedPrecision
-    scaler = torch.cuda.amp.GradScaler()
-    org_unscale_grads = scaler._unscale_grads_
-    def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
-        return org_unscale_grads(optimizer, inv_scale, found_inf, True)
-    scaler._unscale_grads_ = _unscale_grads_replacer
-    return MixedPrecision("16-mixed", "cuda", scaler)
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--resume", action="store_true")
     first_args = sys.argv[1]
-    
+
     if first_args.startswith("--"):
         args = parser.parse_args()
     else:
         args = parser.parse_args(sys.argv[2:])
         args.config = first_args
     return args
+
 
 class ProgressBar:
     def __init__(self, total: int, disable=False):
@@ -176,3 +166,25 @@ def get_latest_checkpoint(checkpoint_dir: str):
     if not items:
         return None
     return os.path.join(checkpoint_dir, items[-1])
+
+
+def log_image(key: str, images: List[Any], step: Optional[int] = None, **kwargs: Any) -> None:
+    """Log images (tensors, numpy arrays, PIL Images or file paths).
+
+    Optional kwargs are lists passed to each image (ex: caption, masks, boxes).
+
+    """
+    if not isinstance(images, list):
+        raise TypeError(f'Expected a list as "images", found {type(images)}')
+    n = len(images)
+    for k, v in kwargs.items():
+        if len(v) != n:
+            raise ValueError(f"Expected {n} items but only found {len(v)} for {k}")
+    kwarg_list = [{k: kwargs[k][i] for k in kwargs} for i in range(n)]
+
+    import wandb
+
+    metrics = {
+        key: [wandb.Image(img, **kwarg) for img, kwarg in zip(images, kwarg_list)]
+    }
+    wandb.log(dict(metrics, **{"trainer/global_step": step}))
