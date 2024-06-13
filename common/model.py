@@ -29,14 +29,15 @@ class MMDITWrapper(torch.nn.Module):
         x, c, y = x.to(model_dtype), c.to(model_dtype), y.to(model_dtype)        
         return self.diffusion_model(x, t, context=c, y=y)
 
-def load_file_from_path(path, model, device):
+def load_file_from_path(path, model, device, extra_keys={}):
     sd = load_torch_file(path, device)
+    sd.update(extra_keys)
     missing, unexpected = model.load_state_dict(sd, strict=False)
     if len(missing) > 0:
         logger.info(f"Missing Keys: {missing}")
     if len(unexpected) > 0:
         logger.info(f"Unexpected Keys: {unexpected}")
-
+        
 # define the LightningModule
 class StableDiffusionModel(nn.Module):
     def __init__(self, config, device):
@@ -116,8 +117,12 @@ class StableDiffusionModel(nn.Module):
         
         assert self.config.clip_l_path is not None, "clip_l_path is required"
         logger.info(f"Loading clip_l model from {self.config.clip_l_path}")
-        load_file_from_path(self.config.clip_l_path, self.clip_l, self.target_device)
-        self.clip_l.requires_grad_(False)
+        
+        # https://github.com/huggingface/diffusers/blob/src/diffusers/loaders/single_file_utils.py#L1389
+        position_embedding_dim = self.clip_l.text_model.embeddings.position_embedding.weight.shape[-1]
+        extra_keys = {"text_projection.weight": torch.eye(position_embedding_dim)}
+        load_file_from_path(self.config.clip_l_path, self.clip_l, self.target_device, extra_keys=extra_keys)
+        self.clip_l.requires_grad_(False).to(self.target_device)
         if tte_1: 
             self.clip_l.requires_grad_(True)
             self.clip_l.gradient_checkpointing_enable()
