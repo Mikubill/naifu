@@ -43,7 +43,6 @@ def main():
     if fabric.is_global_zero:
         wandb.init(
             project="sd3",
-            entity="nyanko",
             config=OmegaConf.to_container(config, resolve=True),
         )
 
