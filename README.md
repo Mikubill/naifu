@@ -1,1 +1,1 @@
-# sdxl-colossalai-trainer
+# sd3-trainer
