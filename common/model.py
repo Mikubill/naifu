@@ -37,7 +37,7 @@ def load_file_from_path(path, model, device, extra_keys={}):
         logger.info(f"Missing Keys: {missing}")
     if len(unexpected) > 0:
         logger.info(f"Unexpected Keys: {unexpected}")
-        
+
 # define the LightningModule
 class StableDiffusionModel(nn.Module):
     def __init__(self, config, device):
@@ -101,7 +101,8 @@ class StableDiffusionModel(nn.Module):
             logger.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             logger.info(f"Unexpected Keys: {unexpected}")
-            
+        
+        logger.info(f"Loading tokenizers")
         df_model = "stabilityai/stable-diffusion-3-medium-diffusers"
         self.clip_l_tokenizer = CLIPTokenizer.from_pretrained(df_model, subfolder="tokenizer")
         self.clip_g_tokenizer = CLIPTokenizer.from_pretrained(df_model, subfolder="tokenizer_2")
@@ -130,7 +131,7 @@ class StableDiffusionModel(nn.Module):
         assert self.config.clip_g_path is not None, "clip_g_path is required"
         logger.info(f"Loading clip_g model from {self.config.clip_g_path}")
         load_file_from_path(self.config.clip_g_path, self.clip_g, self.target_device)
-        self.clip_g.requires_grad_(False)
+        self.clip_g.requires_grad_(False).to(self.target_device)
         if tte_2: 
             self.clip_g.requires_grad_(True)
             self.clip_g.gradient_checkpointing_enable()
@@ -138,7 +139,7 @@ class StableDiffusionModel(nn.Module):
         if self.config.t5xxl_path is not None:
             logger.info(f"Loading t5xxl model from {self.config.t5xxl_path}")
             load_file_from_path(self.config.t5xxl_path, self.t5xxl, self.target_device)
-            self.t5xxl.requires_grad_(False)
+            self.t5xxl.requires_grad_(False).to(self.target_device)
             if tte_3: 
                 self.t5xxl.requires_grad_(True)
                 self.t5xxl.gradient_checkpointing_enable()
@@ -292,9 +293,24 @@ class StableDiffusionModel(nn.Module):
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=torch.float32)
         bsz = latents.shape[0]
+        
+        # Sample a random timestep for each image
+        # for weighting schemes where we sample timesteps non-uniformly
+        weighting_scheme = advanced.get("weighting_scheme", "logit_normal")
+        if weighting_scheme == "logit_normal":
+            # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
+            logit_mean, logit_std = advanced.get("logit_mean", 0.0), advanced.get("logit_std", 1.0)
+            u = torch.normal(mean=logit_mean, std=logit_std, size=(bsz,), device=self.target_device)
+            u = torch.nn.functional.sigmoid(u)
+        elif weighting_scheme == "mode":
+            mode_scale = advanced.get("mode_scale", 1.29)
+            u = torch.rand(size=(bsz,), device=self.target_device)
+            u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
+        else:
+            u = torch.rand(size=(bsz,), device=self.target_device)
 
         # Sample a random timestep for each image
-        indices = torch.randint(0, self.noise_scheduler_copy.config.num_train_timesteps, (bsz,))
+        indices = (u * self.noise_scheduler_copy.config.num_train_timesteps).long().cpu()
         timesteps = self.noise_scheduler_copy.timesteps[indices].to(device=self.target_device)
 
         # Add noise to the latents according to the noise magnitude at each timestep
@@ -310,20 +326,13 @@ class StableDiffusionModel(nn.Module):
         # Preconditioning of the model outputs.
         model_pred = noise_pred * (-sigmas) + noisy_model_input
 
-        weighting_scheme = advanced.get("weighting_scheme", "logit_normal")
+        # Compute the loss
+        weighting = torch.ones_like(sigmas)
         if weighting_scheme == "sigma_sqrt":
             weighting = (sigmas**-2.0).float()
-        elif weighting_scheme == "logit_normal":
-            # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-            logit_mean = advanced.get("logit_mean", 0.0)
-            logit_std = advanced.get("logit_std", 1.0)
-            u = torch.normal(mean=logit_mean, std=logit_std, size=(bsz,), device=self.target_device)
-            weighting = torch.nn.functional.sigmoid(u)
-        elif weighting_scheme == "mode":
-            # See sec 3.1 in the SD3 paper (20).
-            mode_scale = advanced.get("mode_scale", 1.29)
-            u = torch.rand(size=(bsz,), device=self.target_device)
-            weighting = 1 - u - mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
+        elif weighting_scheme == "cosmap":
+            bot = 1 - 2 * sigmas + 2 * sigmas**2
+            weighting = 2 / (math.pi * bot)
 
         # simplified flow matching aka 0-rectified flow matching loss
         # target = model_input - noise
