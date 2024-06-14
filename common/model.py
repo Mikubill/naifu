@@ -269,17 +269,6 @@ class StableDiffusionModel(nn.Module):
         image = (image * 255).round().astype("uint8")
         image = [Image.fromarray(im) for im in image]
         return image
-    
-    def get_sigmas(self, timesteps, n_dim=4):
-        sigmas = self.noise_scheduler_copy.sigmas.to(device=self.target_device)
-        schedule_timesteps = self.noise_scheduler_copy.timesteps.to(device=self.target_device)
-        timesteps = timesteps.to(device=self.target_device)
-        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
-
-        sigma = sigmas[step_indices].flatten()
-        while len(sigma.shape) < n_dim:
-            sigma = sigma.unsqueeze(-1)
-        return sigma
 
     def forward(self, batch):
         advanced = self.config.get("advanced", {})
