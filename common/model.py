@@ -294,54 +294,23 @@ class StableDiffusionModel(nn.Module):
         noise = torch.randn_like(latents, dtype=torch.float32)
         bsz = latents.shape[0]
         
-        # Sample a random timestep for each image
-        # for weighting schemes where we sample timesteps non-uniformly
-        weighting_scheme = advanced.get("weighting_scheme", "logit_normal")
-        if weighting_scheme == "logit_normal":
-            # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-            logit_mean, logit_std = advanced.get("logit_mean", 0.0), advanced.get("logit_std", 1.0)
-            u = torch.normal(mean=logit_mean, std=logit_std, size=(bsz,), device=self.target_device)
-            u = torch.nn.functional.sigmoid(u)
-        elif weighting_scheme == "mode":
-            mode_scale = advanced.get("mode_scale", 1.29)
-            u = torch.rand(size=(bsz,), device=self.target_device)
-            u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
-        else:
-            u = torch.rand(size=(bsz,), device=self.target_device)
-
-        # Sample a random timestep for each image
-        indices = (u * self.noise_scheduler_copy.config.num_train_timesteps).long().cpu()
-        timesteps = self.noise_scheduler_copy.timesteps[indices].to(device=self.target_device)
-
-        # Add noise to the latents according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
-        sigmas = self.get_sigmas(timesteps, n_dim=latents.ndim)
+        # following sd3 paper
+        shift = 3.0 # 1024px
+        logit_mean, logit_std = advanced.get("logit_mean", 0.0), advanced.get("logit_std", 1.0)
+        u = torch.normal(mean=logit_mean, std=logit_std, size=(bsz,), device=self.target_device)
+        u = torch.nn.functional.sigmoid(u)
+        t = shift * u / (1 + (shift - 1) * u)
+        
+        sigmas = t.view([bsz, *([1] * len(latents.shape[1:]))])
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * latents
 
         # Predict the noise residual
         prompt_embeds, pooled_prompt_embeds  = self.encode_prompt(batch["prompts"])
-        noise_pred = self.model(noisy_model_input, timesteps, prompt_embeds, pooled_prompt_embeds)
-
-        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
-        # Preconditioning of the model outputs.
-        model_pred = noise_pred * (-sigmas) + noisy_model_input
-
-        # Compute the loss
-        weighting = torch.ones_like(sigmas)
-        if weighting_scheme == "sigma_sqrt":
-            weighting = (sigmas**-2.0).float()
-        elif weighting_scheme == "cosmap":
-            bot = 1 - 2 * sigmas + 2 * sigmas**2
-            weighting = 2 / (math.pi * bot)
-
-        # simplified flow matching aka 0-rectified flow matching loss
-        # target = model_input - noise
-        target = latents
+        model_pred = self.model(noisy_model_input, t*1e3, prompt_embeds, pooled_prompt_embeds)
         
-        # Compute regular loss.
-        loss = torch.nn.functional.mse_loss(model_pred.float(), target.float(), reduction="none")
-        loss = loss.mean([1, 2, 3]) * weighting
-        loss = loss.mean()  # mean over batch dimension
+        # simplified flow matching aka 0-rectified flow matching loss
+        target = noise - latents
+        loss = ((model_pred - target) ** 2).mean([1, 2, 3]).mean()
         return loss
 
     def generate_samples(self, current_epoch, global_step, world_size=1, rank=0):
