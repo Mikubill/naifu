@@ -271,3 +271,10 @@ class AdaptiveSizeDataset(RatioDataset):
             self.to_size[idx] = (img_width, img_height)
 
         self.bucket_content = [v for k, v in self.bucket_content.items()]
+
+
+def worker_init_fn(worker_id):
+    worker_info = get_worker_info()
+    random.seed(worker_info.seed)  # type: ignore
+    torch.manual_seed(worker_info.seed)
+    worker_info.dataset.init_batches()
