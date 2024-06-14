@@ -308,9 +308,12 @@ class StableDiffusionModel(nn.Module):
         prompt_embeds, pooled_prompt_embeds  = self.encode_prompt(batch["prompts"])
         model_pred = self.model(noisy_model_input, t*1e3, prompt_embeds, pooled_prompt_embeds)
         
+        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
+        # Preconditioning of the model outputs.
+        model_pred = model_pred * (-sigmas) + noisy_model_input
+        
         # simplified flow matching aka 0-rectified flow matching loss
-        target = noise - latents
-        loss = ((model_pred - target) ** 2).mean([1, 2, 3]).mean()
+        loss = ((model_pred.float() - latents.float()) ** 2).mean([1, 2, 3]).mean()
         return loss
 
     def generate_samples(self, current_epoch, global_step, world_size=1, rank=0):
