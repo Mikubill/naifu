@@ -21,7 +21,7 @@ from safetensors.torch import save_file
 from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import StableDiffusionModel
-from common.dataset import AspectRatioDataset
+from common.dataset import AspectRatioDataset, worker_init_fn
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -59,13 +59,6 @@ def main():
         dtype=torch.float32,
         **config.dataset,
     )
-
-    def worker_init_fn(worker_id):
-        worker_info = get_worker_info()
-        random.seed(worker_info.seed)  # type: ignore
-        torch.manual_seed(worker_info.seed)
-        worker_info.dataset.init_batches()
-
     dist_sampler = DistributedSampler(
         dataset,
         num_replicas=fabric.world_size,
