@@ -5,6 +5,7 @@ import random
 import torch
 from collections import defaultdict
 
+from torch.utils.data import get_worker_info
 from common.logging import logger
 from pathlib import Path
 from torch.utils.data import Dataset
