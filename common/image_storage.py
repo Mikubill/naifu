@@ -314,7 +314,7 @@ class DirectoryImageStore(StoreBase):
             self.length = new_length
             logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
-    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
+    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, str]:
         p = self.paths[index]
         prompt = self.prompts[index]
         _img = Image.open(p)
@@ -329,7 +329,5 @@ class DirectoryImageStore(StoreBase):
             img = np.array(_img.convert("RGB"))
 
         img = self.transforms(img)
-        h, w = img.shape[-2:]
-        dhdw = (0, 0)
         extras = self.get_batch_extras(p)
-        return False, img, prompt, (h, w), dhdw, extras
+        return False, img, prompt, extras
