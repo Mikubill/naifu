@@ -271,38 +271,29 @@ class StableDiffusionModel(nn.Module):
         return image
 
     def forward(self, batch):
-        advanced = self.config.get("advanced", {})
-        if not batch["is_latent"]:
-            self.first_stage_model.to(self.target_device)
-            latents = self.encode_first_stage(batch["pixels"].float())
-        else:
-            self.first_stage_model.cpu()
-            latents = SD3LatentFormat().process_in(batch["pixels"])
+        # advanced = self.config.get("advanced", {})
+        self.first_stage_model.to(self.target_device)
+        latents = self.encode_first_stage(batch["pixels"].float())
         
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=torch.float32)
         bsz = latents.shape[0]
         
-        # following sd3 paper
+        # sample t
+        u = torch.normal(mean=0.0, std=1.0, size=(bsz,), device=self.target_device)
+        t = torch.nn.functional.sigmoid(u)
+        
         shift = 3.0 # 1024px
-        logit_mean, logit_std = advanced.get("logit_mean", 0.0), advanced.get("logit_std", 1.0)
-        u = torch.normal(mean=logit_mean, std=logit_std, size=(bsz,), device=self.target_device)
-        u = torch.nn.functional.sigmoid(u)
-        t = shift * u / (1 + (shift - 1) * u)
+        t = shift * t / (1 + (shift - 1) * t)
         
-        sigmas = t.view([bsz, *([1] * len(latents.shape[1:]))])
-        noisy_model_input = sigmas * noise + (1.0 - sigmas) * latents
-
-        # Predict the noise residual
+        dims = [1] * (len(latents.size()) - 1)
+        t_ = t.view(t.size(0), *dims)
+        xt = t_ * latents + (1 - t_) * noise
+        ut = latents - noise
+        
         prompt_embeds, pooled_prompt_embeds  = self.encode_prompt(batch["prompts"])
-        model_pred = self.model(noisy_model_input, t*1e3, prompt_embeds, pooled_prompt_embeds)
-        
-        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
-        # Preconditioning of the model outputs.
-        model_pred = model_pred * (-sigmas) + noisy_model_input
-        
-        # simplified flow matching aka 0-rectified flow matching loss
-        loss = ((model_pred.float() - latents.float()) ** 2).mean([1, 2, 3]).mean()
+        model_pred = -self.model(xt, (1-t)*1000, c=prompt_embeds, y=pooled_prompt_embeds)
+        loss = ((model_pred.float() - ut.float()) ** 2).mean([1, 2, 3]).mean()
         return loss
 
     def generate_samples(self, current_epoch, global_step, world_size=1, rank=0):
