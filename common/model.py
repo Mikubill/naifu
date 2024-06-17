@@ -120,7 +120,7 @@ class StableDiffusionModel(nn.Module):
         logger.info(f"Loading clip_l model from {self.config.clip_l_path}")
         
         # https://github.com/huggingface/diffusers/blob/src/diffusers/loaders/single_file_utils.py#L1389
-                position_embedding_dim = self.clip_l.text_model.embeddings.position_embedding.weight.shape[-1]
+        position_embedding_dim = self.clip_l.text_model.embeddings.position_embedding.weight.shape[-1]
         extra_keys = {"text_projection.weight": torch.eye(position_embedding_dim)}
         load_file_from_path(self.config.clip_l_path, self.clip_l, self.target_device, extra_keys=extra_keys)
         self.clip_l.requires_grad_(False).to(self.target_device)
