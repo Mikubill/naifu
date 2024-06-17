@@ -120,13 +120,16 @@ class StableDiffusionModel(nn.Module):
         logger.info(f"Loading clip_l model from {self.config.clip_l_path}")
         
         # https://github.com/huggingface/diffusers/blob/src/diffusers/loaders/single_file_utils.py#L1389
-        position_embedding_dim = self.clip_l.text_model.embeddings.position_embedding.weight.shape[-1]
+                position_embedding_dim = self.clip_l.text_model.embeddings.position_embedding.weight.shape[-1]
         extra_keys = {"text_projection.weight": torch.eye(position_embedding_dim)}
         load_file_from_path(self.config.clip_l_path, self.clip_l, self.target_device, extra_keys=extra_keys)
         self.clip_l.requires_grad_(False).to(self.target_device)
         if tte_1: 
             self.clip_l.requires_grad_(True)
             self.clip_l.gradient_checkpointing_enable()
+        else:
+            self.clip_l.eval()
+            self.clip_l.to(torch.float16)
         
         assert self.config.clip_g_path is not None, "clip_g_path is required"
         logger.info(f"Loading clip_g model from {self.config.clip_g_path}")
@@ -135,6 +138,9 @@ class StableDiffusionModel(nn.Module):
         if tte_2: 
             self.clip_g.requires_grad_(True)
             self.clip_g.gradient_checkpointing_enable()
+        else:
+            self.clip_g.eval()
+            self.clip_g.to(torch.float16)
         
         if self.config.t5xxl_path is not None:
             logger.info(f"Loading t5xxl model from {self.config.t5xxl_path}")
@@ -143,6 +149,9 @@ class StableDiffusionModel(nn.Module):
             if tte_3: 
                 self.t5xxl.requires_grad_(True)
                 self.t5xxl.gradient_checkpointing_enable()
+            else:
+                self.t5xxl.eval()
+                self.t5xxl.to(torch.float16)
         else:
             self.t5xxl = None
 
