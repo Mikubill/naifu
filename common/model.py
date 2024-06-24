@@ -157,8 +157,11 @@ class StableDiffusionModel(nn.Module):
 
         self.batch_size = self.config.trainer.batch_size
         self.vae_encode_bsz = advanced.get("vae_encode_batch_size", self.batch_size)
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=3.0)
-        self.noise_scheduler_copy = copy.deepcopy(self.noise_scheduler)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            num_train_timesteps=1000,
+            shift=3.0
+        )
+        self.noise_scheduler.timesteps = self.noise_scheduler.timesteps.to(self.target_device)
 
     @torch.no_grad()
     def decode_first_stage(self, z):
@@ -279,30 +282,43 @@ class StableDiffusionModel(nn.Module):
         image = [Image.fromarray(im) for im in image]
         return image
 
+    def get_sigmas(self, timesteps, latents):
+        sigmas = self.noise_scheduler.sigmas.to(device=self.target_device, dtype=latents.dtype)
+        schedule_timesteps = self.noise_scheduler.timesteps.to(self.target_device)
+        timesteps = timesteps.to(self.target_device)
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < latents.ndim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma
+
     def forward(self, batch):
-        # advanced = self.config.get("advanced", {})
         self.first_stage_model.to(self.target_device)
         latents = self.encode_first_stage(batch["pixels"].float())
-        
-        # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, dtype=torch.float32)
         bsz = latents.shape[0]
         
-        # sample t
+        # sample t from lognorm(0.0, 1.0)
         u = torch.normal(mean=0.0, std=1.0, size=(bsz,), device=self.target_device)
-        t = torch.nn.functional.sigmoid(u)
+        u = torch.nn.functional.sigmoid(u)
         
-        shift = 3.0 # 1024px
-        t = shift * t / (1 + (shift - 1) * t)
-        
-        dims = [1] * (len(latents.size()) - 1)
-        t_ = t.view(t.size(0), *dims)
-        xt = t_ * latents + (1 - t_) * noise
-        ut = latents - noise
+        indices = (u * 1000).long()
+        timesteps = self.noise_scheduler.timesteps[indices].to(device=latents.device)
+        sigmas = self.get_sigmas(timesteps, latents)
+        noisy_latents = sigmas * noise + (1.0 - sigmas) * latents
         
         prompt_embeds, pooled_prompt_embeds  = self.encode_prompt(batch["prompts"])
-        model_pred = -self.model(xt, (1-t)*1000, c=prompt_embeds, y=pooled_prompt_embeds)
-        loss = ((model_pred.float() - ut.float()) ** 2).mean([1, 2, 3]).mean()
+        model_pred = self.model(noisy_latents, timesteps, c=prompt_embeds, y=pooled_prompt_embeds)
+        model_pred = model_pred * (-sigmas) + noisy_latents
+        weighting = torch.ones_like(sigmas)
+        loss = torch.mean(
+            (
+                weighting.float() * (model_pred.float() - latents.float()) ** 2
+            ).reshape(latents.shape[0], -1),
+            1,
+        )
+        loss = loss.mean()
         return loss
 
     def generate_samples(self, current_epoch, global_step, world_size=1, rank=0):
