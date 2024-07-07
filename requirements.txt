@@ -14,7 +14,7 @@ timm
 safetensors
 
 h5py
-open-clip-torch
+open-clip-torch==2.24.0
 einops
 scipy
 opencv-python
