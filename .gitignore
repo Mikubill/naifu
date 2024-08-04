@@ -24,5 +24,7 @@ build
 dist
 sagemaker*
 checkpoint
+*.pt
 .ipynb_checkpoints
 common/optimizers.py
+common/private_storage.py

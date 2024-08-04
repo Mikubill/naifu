@@ -1,9 +1,8 @@
 # python trainer.py --config config/test.yaml
+from contextlib import nullcontext
+import functools
 import os
 import time
-
-import random
-
 import torch.utils
 
 # Hide welcome message from bitsandbytes
@@ -14,7 +13,6 @@ import wandb
 import lightning as pl
 from pathlib import Path
 from omegaconf import OmegaConf
-from torch.utils.data import get_worker_info, DistributedSampler
 from lightning.fabric.wrappers import _unwrap_objects
 from safetensors.torch import save_file
 
@@ -22,6 +20,7 @@ from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import StableDiffusionModel
 from common.dataset import AspectRatioDataset, worker_init_fn
+from common.hydit import DiTBlock
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -36,37 +35,60 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    fabric = pl.Fabric(precision=config.trainer.precision)
+    all_devices_count = torch.cuda.device_count()
+
+    if all_devices_count > 1:
+        from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
+        from lightning.fabric.strategies import FSDPStrategy
+        from lightning.fabric.plugins.precision import FSDPPrecision
+        is_layer_moduule = lambda x: isinstance(x, DiTBlock)
+        fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
+        fsdp_strategy = FSDPStrategy(
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            auto_wrap_policy=fsdp_policy,
+            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+            # activation_checkpointing_policy=fsdp_policy,
+            state_dict_type="full",
+        )
+        fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
+        fsdp_precision.convert_input = lambda x: x
+        fabric = pl.Fabric(
+            plugins=[fsdp_precision],
+            strategy=fsdp_strategy,
+        )
+    else:
+        fabric = pl.Fabric(precision=config.trainer.precision)
+        
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
     if fabric.is_global_zero:
         wandb.init(
-            project="sd3",
+            project="hydit",
+            entity="nyanko",
             config=OmegaConf.to_container(config, resolve=True),
         )
 
     # ==============================
     # Initialize Model and Dataset
     # ==============================
-    model = StableDiffusionModel(
-        config=config,
-        device=fabric.device,
-    )
+    with fabric.rank_zero_first():
+        model = StableDiffusionModel(
+            config=config,
+            device=fabric.device,
+        )
+        
+    logger.info("Initializing dataset")
     dataset = AspectRatioDataset(
         batch_size=config.trainer.batch_size,
         rank=fabric.global_rank,
         dtype=torch.float32,
         **config.dataset,
     )
-    dist_sampler = DistributedSampler(
-        dataset,
-        num_replicas=fabric.world_size,
-        rank=fabric.local_rank,
-    )
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        sampler=dist_sampler,
         batch_size=None,
         num_workers=4,
         worker_init_fn=worker_init_fn,
@@ -79,15 +101,11 @@ def main():
     params_to_optim = [{'params': model.model.parameters()}]
     if config.advanced.get("train_text_encoder_1"):
         lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.clip_l.parameters(), "lr": lr})
+        params_to_optim.append({"params": model.clip_encoder.parameters(), "lr": lr})
 
     if config.advanced.get("train_text_encoder_2"):
         lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.clip_g.parameters(), "lr": lr})
-        
-    if config.advanced.get("train_text_encoder_3"):
-        lr = config.advanced.get("text_encoder_3_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.t5xxl.parameters(), "lr": lr})
+        params_to_optim.append({"params": model.mt5_embedder.parameters(), "lr": lr})
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)
@@ -96,6 +114,11 @@ def main():
     # Boost model for distributed training\
     model, optimizer = fabric.setup(model, optimizer)
     dataloader = fabric.setup_dataloaders(dataloader)
+    
+    if fabric.world_size > 1:
+        logger.info("Waiting for other processes")
+        fabric.barrier()
+        
     logger.info("Setup model for distributed training")
 
     # we dont need to use the model in the first stage
@@ -141,12 +164,14 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        _unwrap_objects(model).generate_samples(
-            world_size=fabric.world_size,
-            rank=fabric.global_rank,
-            current_epoch=current_epoch,
-            global_step=global_step,
-        )
+        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
+        with context:
+            _unwrap_objects(model).generate_samples(
+                world_size=fabric.world_size,
+                rank=fabric.global_rank,
+                current_epoch=current_epoch,
+                global_step=global_step,
+            )
         torch.cuda.empty_cache()
         torch.set_rng_state(rng_state)
         torch.cuda.set_rng_state(cuda_rng_state)
@@ -170,22 +195,20 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        # fir 1node only
-        if fabric.is_global_zero:
-            model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
-            vae_state_dict = {f"first_stage_model.{k}": v for k,v in model.first_stage_model.state_dict().items()}
-            model_state_dict.update(vae_state_dict)
-            save_file(model_state_dict, f"{ckpt_dir}/model_{postfix}.safetensors")
-            
-            if config.advanced.get("train_text_encoder_1"):
-                save_file(model.clip_l.state_dict(), f"{ckpt_dir}/clip_l_{postfix}.safetensors")
-            if config.advanced.get("train_text_encoder_2"):
-                save_file(model.clip_g.state_dict(), f"{ckpt_dir}/clip_g_{postfix}.safetensors")
-            if config.advanced.get("train_text_encoder_3"):
-                save_file(model.t5xxl.state_dict(), f"{ckpt_dir}/t5xxl_{postfix}.safetensors")
+        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
+        with context:
+            # fir 1node only
+            if fabric.is_global_zero:
+                model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
+                save_file(model_state_dict, f"{ckpt_dir}/model_{postfix}.safetensors")
                 
-            # handle optimizer and other states
-            torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
+                if config.advanced.get("train_text_encoder_1"):
+                    save_file(model.clip_encoder.state_dict(), f"{ckpt_dir}/clip_{postfix}.safetensors")
+                if config.advanced.get("train_text_encoder_2"):
+                    save_file(model.mt5_encoder.state_dict(), f"{ckpt_dir}/mt5_{postfix}.safetensors")
+                    
+                # handle optimizer and other states
+                torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
         fabric.barrier()
 
     # ==============================

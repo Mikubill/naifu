@@ -3,9 +3,6 @@ import json
 import h5py as h5
 import numpy as np
 import torch
-import pandas as pd
-import random
-import concurrent.futures
 
 from tqdm.auto import tqdm
 from dataclasses import dataclass
@@ -48,6 +45,9 @@ class Entry:
     is_latent: bool
     pixel: torch.Tensor
     prompt: str
+    original_size: tuple[int, int]  # h, w
+    cropped_size: Optional[tuple[int, int]]  # h, w
+    dhdw: Optional[tuple[int, int]]  # dh, dw
     extras: dict = None
     # mask: torch.Tensor | None = None
 
@@ -83,9 +83,8 @@ class StoreBase(Dataset):
         self.kwargs = kwargs
         self.process_batch_fn = process_batch_fn
         if isinstance(self.process_batch_fn, str):
-            logger.debug(f"Using process_batch_fn: {self.process_batch_fn}")
             self.process_batch_fn = get_class(self.process_batch_fn)
-
+            
         self.length = 0
         self.rand_list: list = []
         self.raw_res: list[tuple[int, int]] = []
@@ -98,25 +97,43 @@ class StoreBase(Dataset):
 
     def fix_aspect_randomness(self, rng: np.random.Generator):
         raise NotImplementedError
-
+    
     def crop(self, entry: Entry, index: int) -> Entry:
         return entry, 0, 0
-
+    
     @torch.no_grad()
     def get_batch(self, indices: list[int]) -> Entry:
-        
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            entries = list(executor.map(self._get_entry, indices))
-        
-        entries = [e for e in entries if e is not None]
+        entries = [self._get_entry(i) for i in indices]
+        crop_pos = []
         pixels = []
         prompts = []
+        original_sizes = []
+        cropped_sizes = []
         extras = []
 
         for e, i in zip(entries, indices):
             e = self.process_batch(e)
             e, dh, dw = self.crop(e, i)
             pixels.append(e.pixel)
+            original_size = torch.asarray(e.original_size)
+            original_sizes.append(original_size)
+
+            cropped_size = e.pixel.shape[-2:]
+            cropped_size = (
+                (cropped_size[0] * 8, cropped_size[1] * 8)
+                if e.is_latent
+                else cropped_size
+            )
+            cropped_size = torch.asarray(cropped_size)
+            cropped_sizes.append(cropped_size)
+
+            cropped_pos = (dh, dw)
+            cropped_pos = (
+                (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
+            )
+            cropped_pos = (cropped_pos[0] + e.dhdw[0], cropped_pos[1] + e.dhdw[1])
+            cropped_pos = torch.asarray(cropped_pos)
+            crop_pos.append(cropped_pos)
             prompts.append(e.prompt)
             extras.append(e.extras)
 
@@ -130,10 +147,17 @@ class StoreBase(Dataset):
             ), f"{e.pixel.shape} != {shape} for the same batch"
 
         pixel = torch.stack(pixels, dim=0).contiguous()
+        cropped_sizes = torch.stack(cropped_sizes)
+        original_sizes = torch.stack(original_sizes)
+        crop_pos = torch.stack(crop_pos)
+
         return {
             "prompts": prompts,
             "pixels": pixel,
             "is_latent": is_latent,
+            "target_sizes_hw": cropped_sizes,
+            "original_sizes_hw": original_sizes,
+            "crop_top_lefts": crop_pos,
             "extras": extras,
         }
 
@@ -150,17 +174,15 @@ class StoreBase(Dataset):
         return self.process_batch_fn(inputs)
 
     def _get_entry(self, index) -> Entry:
-        result = self.get_raw_entry(index)
-        if not result:
-            return None
-        
-        is_latent, pixel, prompt, extras = result
+        is_latent, pixel, prompt, original_size, dhdw, extras = self.get_raw_entry(
+            index
+        )
         pixel = pixel.to(dtype=self.dtype)
         shape = pixel.shape
         if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:
             pixel = pixel.permute(2, 0, 1)  # HWC -> CHW
 
-        return Entry(is_latent, pixel, prompt, extras)
+        return Entry(is_latent, pixel, prompt, original_size, None, dhdw, extras)
 
     def repeat_entries(self, k, res, index=None):
         repeat_strategy = self.kwargs.get("repeat_strategy", None)
@@ -178,6 +200,7 @@ class StoreBase(Dataset):
             index_new = index
         return k, res, index_new
 
+
 class LatentStore(StoreBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -190,48 +213,39 @@ class LatentStore(StoreBase):
                 lambda p: p.suffix == ".h5" and "prompt_cache" not in p.stem,
             )
         )
-
         self.h5_keymap = {}
         self.h5_filehandles = {}
         self.paths = []
-        self.keys = []
-        progress = tqdm(
-            total=len(prompt_mapping),
-            desc=f"Loading latents",
-            disable=self.rank != 0,
-            leave=False,
-            ascii=True,
-        )
-
-        has_h5_loc = "h5_path" in next(iter(prompt_mapping.values()))
+        total_latents = len(self.h5_paths)
         for idx, h5_path in enumerate(self.h5_paths):
             fs = h5.File(h5_path, "r", libver="latest")
-            h5_name = h5_path.name
-
-            for k in fs.keys():
+            for k in tqdm(
+                fs.keys(),
+                desc=f"Loading latents {idx+1}/{total_latents}",
+                disable=self.rank != 0,
+                leave=False,
+                ascii=True,
+            ):
                 hashkey = k[:-8]  # ".latents"
-                if hashkey not in prompt_mapping:
-                    logger.warning(f"Key {k} not found in prompt_mapping")
-                    continue
-
+                assert hashkey in prompt_mapping, f"Key {k} not found in prompt_mapping"
                 it = prompt_mapping[hashkey]
-                if not it["train_use"] or (has_h5_loc and it["h5_path"] != h5_name):
+                if not it["train_use"]:
                     continue
-
-                height, width, fp = it["train_height"], it["train_width"], it["file_path"]
-                self.paths.append(fp)
-                self.keys.append(k)
+                prompt, it_path = it["train_caption"], it["file_path"]
+                height, width = it["train_height"], it["train_width"]
+                self.paths.append(it_path)
                 self.raw_res.append((height, width))
-                self.h5_keymap[k] = (h5_path, it, (height, width))
-                progress.update(1)
+                self.h5_keymap[k] = (h5_path, prompt, (height, width))
 
-        progress.close()
+        self.keys = list(self.h5_keymap.keys())
         self.length = len(self.keys)
         self.scale_factor = 0.13025
         logger.debug(f"Loaded {self.length} latent codes from {self.root_path}")
 
-        self.keys, self.raw_res, self.paths = self.repeat_entries(self.keys, self.raw_res, index=self.paths)
-        new_length = len(self.keys)
+        self.keys, self.raw_res, self.paths = self.repeat_entries(
+            self.keys, self.raw_res, index=self.paths
+        )
+        new_length = len(self.paths)
         if new_length != self.length:
             self.length = new_length
             logger.debug(f"Using {self.length} entries after applied repeat strategy")
@@ -244,22 +258,15 @@ class LatentStore(StoreBase):
     def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         if len(self.h5_filehandles) == 0:
             self.setup_filehandles()
-
         latent_key = self.keys[index]
-        h5_path, entry, original_size = self.h5_keymap[latent_key]
-
-        # modify here if you want to use a different format
-        prompt = entry["train_caption"]
+        h5_path, prompt, original_size = self.h5_keymap[latent_key]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
-        dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
-
-        # if scaled, we need to unscale the latent (training process will scale it back)
         scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
-        if scaled:
-            latent = 1.0 / self.scale_factor * latent
+        dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
+        latent = latent * self.scale_factor if not scaled else latent
 
         extras = self.get_batch_extras(self.paths[index])
-        return True, latent, prompt, extras
+        return True, latent, prompt, original_size, dhdw, extras
 
 
 class DirectoryImageStore(StoreBase):
@@ -305,7 +312,7 @@ class DirectoryImageStore(StoreBase):
             except Exception as e:
                 logger.warning(f"Skipped: error processing {p}: {e}")
                 self.prompts.append("")
-
+                
         self.prompts, self.raw_res, self.paths = self.repeat_entries(
             self.prompts, self.raw_res, index=self.paths
         )
@@ -314,7 +321,7 @@ class DirectoryImageStore(StoreBase):
             self.length = new_length
             logger.debug(f"Using {self.length} entries after applied repeat strategy")
 
-    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, str]:
+    def get_raw_entry(self, index) -> tuple[bool, torch.tensor, str, (int, int)]:
         p = self.paths[index]
         prompt = self.prompts[index]
         _img = Image.open(p)
@@ -329,5 +336,7 @@ class DirectoryImageStore(StoreBase):
             img = np.array(_img.convert("RGB"))
 
         img = self.transforms(img)
+        h, w = img.shape[-2:]
+        dhdw = (0, 0)
         extras = self.get_batch_extras(p)
-        return False, img, prompt, extras
+        return False, img, prompt, (h, w), dhdw, extras
