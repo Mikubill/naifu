@@ -1,1 +1,1 @@
-# sd3-trainer
+# hydit-trainer
