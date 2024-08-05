@@ -8,7 +8,7 @@ To get started with Naifu, follow these steps to install the necessary dependenc
 
 ```bash
 # Clone the Naifu repository:
-git clone --depth 1 https://github.com/mikubill/naifu
+git clone --depth 1 -b hydit https://github.com/mikubill/naifu
 
 # Install the required Python packages:
 cd naifu && pip install -r requirements.txt
