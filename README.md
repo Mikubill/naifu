@@ -129,5 +129,9 @@ python trainer.py config/train_mistral_lora.yaml
 
 ## Other branches
 
-* sgm - Uses the [sgm](https://github.com/Stability-AI/generative-models) to train SDXL models. 
+* sgm - Uses the [sgm](https://github.com/Stability-AI/generative-models) to train SDXL models.
+* sd3 - Trainer for SD3 models - use with caution: may produce undesired result
+* hydit - Trainer for hunyuan dit models (v1.1 and v1.2)
 * main-archived - Contains the original naifu-diffusion code for training Stable Diffusion 1.x models.
+
+For branches without documentation, please follow the installation instructions provided above.
