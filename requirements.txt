@@ -12,3 +12,5 @@ pandas
 pyarrow
 fairscale
 einops
+fire
+streamlit-keyup

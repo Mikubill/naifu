@@ -1,163 +1,266 @@
-import random
-import torch
-from diffusers import HunyuanDiTPipeline
-from transformers import T5EncoderModel
+from dataclasses import dataclass
+import os
+import re
 import time
-from loguru import logger
-import gc
-import sys
+from glob import iglob
+from io import BytesIO
 
-NEGATIVE_PROMPT = '错误的眼睛，糟糕的人脸，毁容，糟糕的艺术，变形，多余的肢体，模糊的颜色，模糊，重复，病态，残缺'
+import streamlit as st
+import torch
+from einops import rearrange
+from fire import Fire
+from PIL import Image
+from st_keyup import st_keyup
+from torchvision import transforms
+
+from common.model_utils import load_models, configs
+from common.model_utils import denoise, get_noise, get_schedule, prepare, unpack
+
+# pip install fire streamlit-keyup
+
+
+@dataclass
+class SamplingOptions:
+    prompt: str
+    width: int
+    height: int
+    num_steps: int
+    guidance: float
+    seed: int | None
+
+@st.cache_resource()
+def get_models(name: str, ckpt_path: str, ae_path: str, device: torch.device):
+    return load_models(name, ckpt_path, ae_path, device)
+
+
+def get_image() -> torch.Tensor | None:
+    image = st.file_uploader("Input", type=["jpg", "JPEG", "png"])
+    if image is None:
+        return None
+    image = Image.open(image).convert("RGB")
+
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: 2.0 * x - 1.0),
+        ]
+    )
+    img: torch.Tensor = transform(image)
+    return img[None, ...]
+
+
+@torch.inference_mode()
+def main(
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    output_dir: str = "output",
+):
+    torch_device = torch.device(device)
+    names = list(configs.keys())
+    name = st.selectbox("Which model to load?", names)
+    if name is None or not st.checkbox("Load model", False):
+        return
+
+    is_schnell = name == "flux-schnell"
+    ckpt_path = "/storage/dev/nyanko/flux-dev/flux1-dev.sft"
+    ae_path = "/storage/dev/nyanko/flux-dev/ae.sft"
+    if is_schnell:
+        ckpt_path = "/storage/dev/nyanko/flux-dev/flux1-schnell.sft"
     
-TEXT_ENCODER_CONF = {
-    "negative_prompt": NEGATIVE_PROMPT,
-    "prompt_embeds": None,
-    "negative_prompt_embeds": None,
-    "prompt_attention_mask": None,
-    "negative_prompt_attention_mask": None,
-    "max_sequence_length": 256,
-    "text_encoder_index": 1,
-}
+    model, ae, t5, clip = get_models(
+        name,
+        ckpt_path=ckpt_path,
+        ae_path=ae_path,
+        device=torch_device,
+    )
 
-def flush():
-    gc.collect()
-    torch.cuda.empty_cache()
+    do_img2img = (
+        st.checkbox(
+            "Image to Image",
+            False,
+            disabled=is_schnell,
+            help="Partially noise an image and denoise again to get variations.\n\nOnly works for flux-dev",
+        )
+        and not is_schnell
+    )
+    if do_img2img:
+        init_image = get_image()
+        if init_image is None:
+            st.warning("Please add an image to do image to image")
+        image2image_strength = st.number_input("Noising strength", min_value=0.0, max_value=1.0, value=0.8)
+        if init_image is not None:
+            h, w = init_image.shape[-2:]
+            st.write(f"Got image of size {w}x{h} ({h*w/1e6:.2f}MP)")
+        resize_img = st.checkbox("Resize image", False) or init_image is None
+    else:
+        init_image = None
+        resize_img = True
+        image2image_strength = 0.0
 
+    # allow for packing and conversion to latent space
+    width = int(
+        16 * (st.number_input("Width", min_value=128, value=1360, step=16, disabled=not resize_img) // 16)
+    )
+    height = int(
+        16 * (st.number_input("Height", min_value=128, value=768, step=16, disabled=not resize_img) // 16)
+    )
+    num_steps = int(st.number_input("Number of steps", min_value=1, value=(4 if is_schnell else 50)))
+    guidance = float(st.number_input("Guidance", min_value=1.0, value=3.5, disabled=is_schnell))
+    seed_str = st.text_input("Seed", disabled=is_schnell)
+    if seed_str.isdecimal():
+        seed = int(seed_str)
+    else:
+        st.info("No seed set, set to positive integer to enable")
+        seed = None
+    save_samples = st.checkbox("Save samples?", not is_schnell)
 
-class End2End(object):
-    def __init__(self, model_id="Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers"):
-        self.model_id = model_id
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        # ========================================================================
-        self.default_negative_prompt = NEGATIVE_PROMPT
-        logger.info("==================================================")
-        logger.info(f"                Model is ready.                  ")
-        logger.info("==================================================")
+    default_prompt = (
+        "a photo of a forest with mist swirling around the tree trunks. The word "
+        '"FLUX" is painted over it in big, red brush strokes with visible texture'
+    )
+    prompt = st_keyup("Enter a prompt", value=default_prompt, debounce=300, key="interactive_text")
 
-    def load_pipeline(self):
-        self.pipeline= HunyuanDiTPipeline.from_pretrained(
-            self.model_id,
-            text_encoder=None,
-            text_encoder_2=None,
-            torch_dtype=torch.float16,
-        ).to(self.device)
+    output_name = os.path.join(output_dir, "img_{idx}.jpg")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        idx = 0
+    else:
+        fns = [fn for fn in iglob(output_name.format(idx="*")) if re.search(r"img_[0-9]\.jpg$", fn)]
+        if len(fns) > 0:
+            idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
+        else:
+            idx = 0
 
-    
-    def get_text_emb(self, prompts):
-        with torch.no_grad():
-            text_encoder_2 = T5EncoderModel.from_pretrained(
-                self.model_id,
-                subfolder="text_encoder_2",
-            )
-            encoder_pipeline = HunyuanDiTPipeline.from_pretrained(
-                self.model_id, 
-                text_encoder_2=text_encoder_2,
-                transformer=None,
-                vae=None,
-                torch_dtype=torch.float16,
-            )
-            TEXT_ENCODER_CONF["negative_prompt"]=self.default_negative_prompt
-            prompt_emb1 = encoder_pipeline.encode_prompt(prompts, negative_prompt=self.default_negative_prompt)
-            prompt_emb2 = encoder_pipeline.encode_prompt(prompts, **TEXT_ENCODER_CONF)
-            del text_encoder_2
-            del encoder_pipeline
-        flush()
-        return prompt_emb1, prompt_emb2
+    rng = torch.Generator(device="cpu")
 
-    def predict(self,
-                user_prompt,
-                seed=None,
-                enhanced_prompt=None,
-                negative_prompt=None,
-                infer_steps=50,
-                guidance_scale=6,
-                batch_size=1,
-                ):
-        # ========================================================================
-        # Arguments: seed
-        # ========================================================================
-        if seed is None:
-            seed = random.randint(0, 1_000_000)
-        if not isinstance(seed, int):
-            raise TypeError(f"`seed` must be an integer, but got {type(seed)}")
-        generator = torch.Generator(device=self.device).manual_seed(seed)
+    if "seed" not in st.session_state:
+        st.session_state.seed = rng.seed()
 
-        # ========================================================================
-        # Arguments: prompt, new_prompt, negative_prompt
-        # ========================================================================
-        if not isinstance(user_prompt, str):
-            raise TypeError(f"`user_prompt` must be a string, but got {type(user_prompt)}")
-        user_prompt = user_prompt.strip()
-        prompt = user_prompt
+    def increment_counter():
+        st.session_state.seed += 1
 
-        if enhanced_prompt is not None:
-            if not isinstance(enhanced_prompt, str):
-                raise TypeError(f"`enhanced_prompt` must be a string, but got {type(enhanced_prompt)}")
-            enhanced_prompt = enhanced_prompt.strip()
-            prompt = enhanced_prompt
+    def decrement_counter():
+        if st.session_state.seed > 0:
+            st.session_state.seed -= 1
 
-        # negative prompt
-        if negative_prompt is not None and negative_prompt != '':
-            self.default_negative_prompt = negative_prompt
-        if not isinstance(self.default_negative_prompt, str):
-            raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
+    opts = SamplingOptions(
+        prompt=prompt,
+        width=width,
+        height=height,
+        num_steps=num_steps,
+        guidance=guidance,
+        seed=seed,
+    )
 
+    if name == "flux-schnell":
+        cols = st.columns([5, 1, 1, 5])
+        with cols[1]:
+            st.button("↩", on_click=increment_counter)
+        with cols[2]:
+            st.button("↪", on_click=decrement_counter)
+            
+    if is_schnell or st.button("Sample"):
+        if is_schnell:
+            opts.seed = st.session_state.seed
+        elif opts.seed is None:
+            opts.seed = rng.seed()
+        print(f"Generating '{opts.prompt}' with seed {opts.seed}")
+        t0 = time.perf_counter()
 
-        # ========================================================================
-        
-        logger.debug(f"""
-                       prompt: {user_prompt}
-              enhanced prompt: {enhanced_prompt}
-                         seed: {seed}
-              negative_prompt: {negative_prompt}
-                   batch_size: {batch_size}
-               guidance_scale: {guidance_scale}
-                  infer_steps: {infer_steps}
-        """)
+        if init_image is not None:
+            if resize_img:
+                init_image = torch.nn.functional.interpolate(init_image, (opts.height, opts.width))
+            else:
+                h, w = init_image.shape[-2:]
+                init_image = init_image[..., : 16 * (h // 16), : 16 * (w // 16)]
+                opts.height = init_image.shape[-2]
+                opts.width = init_image.shape[-1]
+                
+            init_image = ae.encode(init_image.to(torch_device))
 
-        
-        # get text embeding 
-        flush()
-        prompt_emb1, prompt_emb2 = self.get_text_emb(prompt)
-        prompt_embeds, negative_prompt_embeds, prompt_attention_mask, negative_prompt_attention_mask = prompt_emb1
-        prompt_embeds_2,negative_prompt_embeds_2,prompt_attention_mask_2,negative_prompt_attention_mask_2 = prompt_emb2
-        # print(prompt_emb1, prompt_emb2)
-        del prompt_emb1
-        del prompt_emb2
-        # get pipeline
-        self.load_pipeline()
-        
-        print(prompt_embeds, prompt_embeds_2)
-        samples = self.pipeline(
-            prompt_embeds=prompt_embeds,
-            prompt_embeds_2=prompt_embeds_2,
-            negative_prompt_embeds=negative_prompt_embeds,
-            negative_prompt_embeds_2=negative_prompt_embeds_2,
-            prompt_attention_mask=prompt_attention_mask,
-            prompt_attention_mask_2=prompt_attention_mask_2,
-            negative_prompt_attention_mask=negative_prompt_attention_mask,
-            negative_prompt_attention_mask_2=negative_prompt_attention_mask_2,
-            num_images_per_prompt=batch_size,
-            guidance_scale=guidance_scale,
-            num_inference_steps=infer_steps,
-            generator=generator, 
-            height=1280,
-            width=768
-        ).images[0]
-        
-        return {
-            'images': samples,
-            'seed': seed,
+        # prepare input
+        x = get_noise(
+            1,
+            opts.height,
+            opts.width,
+            device=torch_device,
+            dtype=torch.bfloat16,
+            seed=opts.seed,
+        )
+        # divide pixel space by 16**2 to acocunt for latent space conversion
+        timesteps = get_schedule(
+            opts.num_steps,
+            (x.shape[-1] * x.shape[-2]) // 4,
+            shift=(not is_schnell),
+        )
+        if init_image is not None:
+            t_idx = int((1 - image2image_strength) * num_steps)
+            t = timesteps[t_idx]
+            timesteps = timesteps[t_idx:]
+            x = t * x + (1.0 - t) * init_image.to(x.dtype)
+
+        inp = prepare(t5=t5, clip=clip, img=x, prompt=opts.prompt)
+
+        # denoise initial noise
+        x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
+
+        # decode latents to pixel space
+        x = unpack(x.float(), opts.height, opts.width)
+        with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
+            x = ae.decode(x)
+
+        t1 = time.perf_counter()
+        fn = output_name.format(idx=idx)
+        print(f"Done in {t1 - t0:.1f}s.")
+        # bring into PIL format and save
+        x = x.clamp(-1, 1)
+        x = rearrange(x[0], "c h w -> h w c")
+        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+        # buffer = BytesIO()
+        # exif_data = Image.Exif()
+        # if init_image is None:
+        #     exif_data[ExifTags.Base.Software] = "AI generated;txt2img;flux"
+        # else:
+        #     exif_data[ExifTags.Base.Software] = "AI generated;img2img;flux"
+        # exif_data[ExifTags.Base.Make] = "Black Forest Labs"
+        # exif_data[ExifTags.Base.Model] = name
+        # if add_sampling_metadata:
+        #     exif_data[ExifTags.Base.ImageDescription] = prompt
+        # img.save(buffer, format="jpeg", exif=exif_data, quality=95, subsampling=0)
+        buffer = BytesIO()
+        img.save(buffer, format="webp", quality=95)
+        img_bytes = buffer.getvalue()
+        if save_samples:
+            print(f"Saving {fn}")
+            with open(fn, "wb") as file:
+                file.write(img_bytes)
+            idx += 1
+
+        st.session_state["samples"] = {
+            "prompt": opts.prompt,
+            "img": img,
+            "seed": opts.seed,
+            "bytes": img_bytes,
         }
+        opts.seed = None
+        # else:
+        #     st.warning("Your generated image may contain NSFW content.")
+        #     st.session_state["samples"] = None
+
+    samples = st.session_state.get("samples", None)
+    if samples is not None:
+        st.image(samples["img"], caption=samples["prompt"])
+        st.download_button(
+            "Download full-resolution",
+            samples["bytes"],
+            file_name="generated.jpg",
+            mime="image/jpg",
+        )
+        st.write(f"Seed: {samples['seed']}")
+
+
+def app():
+    Fire(main)
 
 
 if __name__ == "__main__":
-    gen = End2End()
-    seed = 42
-    results = gen.predict(
-        "best quality, 1girl, solo, loli, cat girl, silver hair ,blue eyes, flat chest, solo, beautiful detailed background, messy hair, long hair",
-        seed=1,
-        infer_steps=40,
-        guidance_scale=6,
-    )
-    results['images'].save('./lite_image.png')
+    app()

@@ -18,9 +18,18 @@ from safetensors.torch import save_file
 
 from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
-from common.model import StableDiffusionModel
+from common.model import FluxModel
+from common.flux import DoubleStreamBlock, SingleStreamBlock
 from common.dataset import AspectRatioDataset, worker_init_fn
-from common.hydit import DiTBlock
+
+from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
+from lightning.fabric.strategies import FSDPStrategy
+from lightning.fabric.plugins.precision import FSDPPrecision
+
+is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
+fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -35,38 +44,27 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    all_devices_count = torch.cuda.device_count()
-
-    if all_devices_count > 1:
-        from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
-        from lightning.fabric.strategies import FSDPStrategy
-        from lightning.fabric.plugins.precision import FSDPPrecision
-        is_layer_moduule = lambda x: isinstance(x, DiTBlock)
-        fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
-        fsdp_strategy = FSDPStrategy(
-            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-            auto_wrap_policy=fsdp_policy,
-            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-            # activation_checkpointing_policy=fsdp_policy,
-            state_dict_type="full",
-        )
-        fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
-        fsdp_precision.convert_input = lambda x: x
-        fabric = pl.Fabric(
-            plugins=[fsdp_precision],
-            strategy=fsdp_strategy,
-        )
-    else:
-        fabric = pl.Fabric(precision=config.trainer.precision)
+    fsdp_strategy = FSDPStrategy(
+        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        auto_wrap_policy=fsdp_policy,
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        activation_checkpointing_policy=fsdp_policy,
+        state_dict_type="full",
+    )
+    fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
+    fsdp_precision.convert_input = lambda x: x
+    fabric = pl.Fabric(
+        plugins=[fsdp_precision],
+        strategy=fsdp_strategy,
+        num_nodes=os.environ.get("NUM_NODES", 1)
+    )
         
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
     
     if fabric.is_global_zero:
         wandb.init(
-            project="hydit",
+            project="flux",
             entity="nyanko",
             config=OmegaConf.to_container(config, resolve=True),
         )
@@ -75,7 +73,7 @@ def main():
     # Initialize Model and Dataset
     # ==============================
     with fabric.rank_zero_first():
-        model = StableDiffusionModel(
+        model = FluxModel(
             config=config,
             device=fabric.device,
         )
@@ -99,13 +97,6 @@ def main():
     # Initialize Optimizer
     # ==============================
     params_to_optim = [{'params': model.model.parameters()}]
-    if config.advanced.get("train_text_encoder_1"):
-        lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.clip_encoder.parameters(), "lr": lr})
-
-    if config.advanced.get("train_text_encoder_2"):
-        lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.mt5_embedder.parameters(), "lr": lr})
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)
@@ -125,26 +116,6 @@ def main():
     max_epoch = config.trainer.max_epochs
     current_epoch = global_step = 0
     
-    def log_lr_values(optimizer, config, global_step):
-        """
-        Log learning rate values for the optimizer.
-        """
-        optimizer_name = config.optimizer.name
-        last_lr = [group.get("lr", 0) for group in optimizer.param_groups]
-        ocls = optimizer.__class__.__name__
-
-        for i, lr in enumerate(last_lr):
-            fabric.log_dict({f"lr/{ocls}-{i}": lr}, step=global_step)
-
-        is_da = optimizer_name.startswith("DAdapt")
-        is_prodigy = optimizer_name.startswith("prodigyopt")
-        if not (is_da or is_prodigy):
-            return
-
-        last_d_lr = [(g["d"] * g["lr"]) for g in optimizer.param_groups]
-        for i, lr in enumerate(last_d_lr):
-            fabric.log_dict({f"d*lr/{ocls}-{i}": lr}, step=global_step)
-
     def perform_sampling(forced=False, is_last=False):
         """
         Perform image/text sampling.
@@ -164,8 +135,7 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
-        with context:
+        with FSDP.summon_full_params(model, writeback=False):
             _unwrap_objects(model).generate_samples(
                 world_size=fabric.world_size,
                 rank=fabric.global_rank,
@@ -195,18 +165,12 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
-        with context:
+        with FSDP.summon_full_params(model, writeback=False):
             # fir 1node only
             if fabric.is_global_zero:
                 model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
                 save_file(model_state_dict, f"{ckpt_dir}/model_{postfix}.safetensors")
-                
-                if config.advanced.get("train_text_encoder_1"):
-                    save_file(model.clip_encoder.state_dict(), f"{ckpt_dir}/clip_{postfix}.safetensors")
-                if config.advanced.get("train_text_encoder_2"):
-                    save_file(model.mt5_encoder.state_dict(), f"{ckpt_dir}/mt5_{postfix}.safetensors")
-                    
+                             
                 # handle optimizer and other states
                 torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
         fabric.barrier()
@@ -251,7 +215,6 @@ def main():
             save_model(is_last=False)
             
             if fabric.is_global_zero:
-                log_lr_values(optimizer, config, global_step)
                 wandb.log({
                     "train/loss": loss,
                     "train/grad_norm": grad_norm,

@@ -28,3 +28,8 @@ checkpoint
 .ipynb_checkpoints
 common/optimizers.py
 common/private_storage.py
+output/
+*.ipynb
+cluster4-training.yaml
+distributed_train_py310.sh
+*.nsys-rep

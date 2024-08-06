@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 from typing import Callable, Generator, Optional  # type: ignore
 from torchvision import transforms
 from common.logging import logger
+import concurrent.futures
 
 
 image_suffix = set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"])
@@ -45,9 +46,6 @@ class Entry:
     is_latent: bool
     pixel: torch.Tensor
     prompt: str
-    original_size: tuple[int, int]  # h, w
-    cropped_size: Optional[tuple[int, int]]  # h, w
-    dhdw: Optional[tuple[int, int]]  # dh, dw
     extras: dict = None
     # mask: torch.Tensor | None = None
 
@@ -74,16 +72,12 @@ class StoreBase(Dataset):
         root_path,
         rank=0,
         dtype=torch.float16,
-        process_batch_fn = lambda x: x,
         **kwargs,
     ):
         self.rank = rank
         self.root_path = Path(root_path)
         self.dtype = dtype
         self.kwargs = kwargs
-        self.process_batch_fn = process_batch_fn
-        if isinstance(self.process_batch_fn, str):
-            self.process_batch_fn = get_class(self.process_batch_fn)
             
         self.length = 0
         self.rand_list: list = []
@@ -103,63 +97,30 @@ class StoreBase(Dataset):
     
     @torch.no_grad()
     def get_batch(self, indices: list[int]) -> Entry:
-        entries = [self._get_entry(i) for i in indices]
-        crop_pos = []
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            entries = list(executor.map(self._get_entry, indices))
+        
+        entries = [e for e in entries if e is not None]
         pixels = []
         prompts = []
-        original_sizes = []
-        cropped_sizes = []
         extras = []
 
         for e, i in zip(entries, indices):
-            e = self.process_batch(e)
             e, dh, dw = self.crop(e, i)
             pixels.append(e.pixel)
-            original_size = torch.asarray(e.original_size)
-            original_sizes.append(original_size)
-
-            cropped_size = e.pixel.shape[-2:]
-            cropped_size = (
-                (cropped_size[0] * 8, cropped_size[1] * 8)
-                if e.is_latent
-                else cropped_size
-            )
-            cropped_size = torch.asarray(cropped_size)
-            cropped_sizes.append(cropped_size)
-
-            cropped_pos = (dh, dw)
-            cropped_pos = (
-                (cropped_pos[0] * 8, cropped_pos[1] * 8) if e.is_latent else cropped_pos
-            )
-            cropped_pos = (cropped_pos[0] + e.dhdw[0], cropped_pos[1] + e.dhdw[1])
-            cropped_pos = torch.asarray(cropped_pos)
-            crop_pos.append(cropped_pos)
             prompts.append(e.prompt)
             extras.append(e.extras)
 
         is_latent = entries[0].is_latent
-        shape = entries[0].pixel.shape
-
-        for e in entries[1:]:
-            assert e.is_latent == is_latent
-            assert (
-                e.pixel.shape == shape
-            ), f"{e.pixel.shape} != {shape} for the same batch"
-
         pixel = torch.stack(pixels, dim=0).contiguous()
-        cropped_sizes = torch.stack(cropped_sizes)
-        original_sizes = torch.stack(original_sizes)
-        crop_pos = torch.stack(crop_pos)
-
-        return {
+        result = {
             "prompts": prompts,
             "pixels": pixel,
             "is_latent": is_latent,
-            "target_sizes_hw": cropped_sizes,
-            "original_sizes_hw": original_sizes,
-            "crop_top_lefts": crop_pos,
             "extras": extras,
         }
+        return result
 
     def __len__(self):
         return self.length
@@ -170,19 +131,18 @@ class StoreBase(Dataset):
     def get_batch_extras(self, path):
         return None
 
-    def process_batch(self, inputs: Entry):
-        return self.process_batch_fn(inputs)
-
     def _get_entry(self, index) -> Entry:
-        is_latent, pixel, prompt, original_size, dhdw, extras = self.get_raw_entry(
-            index
-        )
+        result = self.get_raw_entry(index)
+        if not result:
+            return None
+        
+        is_latent, pixel, prompt, extras = result
         pixel = pixel.to(dtype=self.dtype)
         shape = pixel.shape
         if shape[-1] == 3 and shape[-1] < shape[0] and shape[-1] < shape[1]:
             pixel = pixel.permute(2, 0, 1)  # HWC -> CHW
 
-        return Entry(is_latent, pixel, prompt, original_size, None, dhdw, extras)
+        return Entry(is_latent, pixel, prompt, extras)
 
     def repeat_entries(self, k, res, index=None):
         repeat_strategy = self.kwargs.get("repeat_strategy", None)
@@ -261,12 +221,8 @@ class LatentStore(StoreBase):
         latent_key = self.keys[index]
         h5_path, prompt, original_size = self.h5_keymap[latent_key]
         latent = torch.asarray(self.h5_filehandles[h5_path][latent_key][:]).float()
-        scaled = self.h5_filehandles[h5_path][latent_key].attrs.get("scale", True)
-        dhdw = self.h5_filehandles[h5_path][latent_key].attrs.get("dhdw", (0, 0))
-        latent = latent * self.scale_factor if not scaled else latent
-
         extras = self.get_batch_extras(self.paths[index])
-        return True, latent, prompt, original_size, dhdw, extras
+        return True, latent, prompt, extras
 
 
 class DirectoryImageStore(StoreBase):
@@ -336,7 +292,5 @@ class DirectoryImageStore(StoreBase):
             img = np.array(_img.convert("RGB"))
 
         img = self.transforms(img)
-        h, w = img.shape[-2:]
-        dhdw = (0, 0)
         extras = self.get_batch_extras(p)
-        return False, img, prompt, (h, w), dhdw, extras
+        return False, img, prompt, extras
