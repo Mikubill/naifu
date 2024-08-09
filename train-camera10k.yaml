@@ -1,0 +1,54 @@
+name: test-run
+model_name: flux-dev
+
+trainer:
+  precision: bf16-mixed
+  batch_size: 8
+  seed: 1138
+  wandb_id: ""
+  accumulate_grad_batches: 1
+  gradient_clip_val: 0.0
+
+  save_format: safetensors
+  checkpoint_dir: /storage/local/tmpfiles/checkpoint
+  checkpoint_freq: 10
+  checkpoint_steps: 500
+  save_weights_only: true
+  max_epochs: 10
+  max_steps: -1
+  
+dataset:
+  # store_cls: common.private_storage.ParquetImageClustered
+  img_path: "/storage/dev/nyanko/pseudo-camera-10k/train"
+
+optimizer:
+  name: deepspeed.ops.lion.FusedLion
+  params:
+    lr: 2e-6
+    weight_decay: 0.1
+    betas: [0.9, 0.99]
+
+scheduler:
+  name: transformers.get_constant_schedule_with_warmup
+  params:
+    num_warmup_steps: 0
+    last_epoch: -1
+
+sampling:
+  enabled: true
+  use_wandb: true
+  seed: 42
+  height: 1024
+  width: 1024
+  every_n_steps: 250
+  every_n_epochs: 1
+  save_dir: "/storage/local/tmpfiles/samples"
+  prompts: 
+    - "A majestic dragon soaring above a medieval castle at sunset, with mountains in the background and a river flowing below."
+    - "A serene forest during autumn, with colorful leaves, a clear stream, and a wooden bridge."
+    - "An ancient Roman marketplace with vendors selling goods, people in traditional attire, and stone buildings."
+    - "A vibrant coral reef teeming with colorful fish, sea turtles, and a scuba diver exploring the area."
+    - "A steampunk adventurer with goggles, a mechanical arm, and a leather jacket, standing in a cluttered workshop."
+    - "A graceful unicorn standing in a moonlit clearing, with flowers blooming around it and fireflies in the air."
+    - "A cozy cabin in a snowy forest, with smoke coming from the chimney, twinkling lights, and a snowman in the yard."
+    - "A cozy living room with a fireplace, a comfortable sofa, a coffee table with books, and a large window showing a snowy landscape outside."

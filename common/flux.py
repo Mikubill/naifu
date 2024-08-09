@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 
 import torch
+import deepspeed
 from einops import rearrange
 from torch import Tensor, nn
 
@@ -180,7 +181,7 @@ class DoubleStreamBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
         )
 
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> tuple[Tensor, Tensor]:
+    def _forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> tuple[Tensor, Tensor]:
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
@@ -214,6 +215,12 @@ class DoubleStreamBlock(nn.Module):
         txt = txt + txt_mod1.gate * self.txt_attn.proj(txt_attn)
         txt = txt + txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
         return img, txt
+    
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+        if self.training:
+            return deepspeed.checkpointing.checkpoint(self._forward, img, txt, vec, pe)
+        return self._forward(img, txt, vec, pe)
+
 
 
 class SingleStreamBlock(nn.Module):
@@ -249,7 +256,7 @@ class SingleStreamBlock(nn.Module):
         self.mlp_act = nn.GELU(approximate="tanh")
         self.modulation = Modulation(hidden_size, double=False)
 
-    def forward(self, x: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+    def _forward(self, x: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
         mod, _ = self.modulation(vec)
         x_mod = (1 + mod.scale) * self.pre_norm(x) + mod.shift
         qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
@@ -262,6 +269,11 @@ class SingleStreamBlock(nn.Module):
         # compute activation in mlp stream, cat again and run second linear layer
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
         return x + mod.gate * output
+    
+    def forward(self, x: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+        if self.training:
+            return deepspeed.checkpointing.checkpoint(self._forward, x, vec, pe)
+        return self._forward(x, vec, pe)
 
 
 class LastLayer(nn.Module):

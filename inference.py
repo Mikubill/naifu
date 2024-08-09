@@ -73,6 +73,7 @@ def main(
         device=torch_device,
     )
 
+    model = model.eval()
     do_img2img = (
         st.checkbox(
             "Image to Image",

@@ -26,7 +26,7 @@ class FluxModel(nn.Module):
         timer = time.perf_counter()
         
         model_name = self.config.get("model_name", "")
-        assert model_name in ["flux-schnell", "flux-dev"], f"Invalid model name: {model_name}"
+        assert model_name in ["flux-schnell", "flux-dev", "flux-dev-cfg"], f"Invalid model name: {model_name}"
         
         logger.info(f"Initializing model {model_name}")
         self.model, ae, t5, clip = load_models(
@@ -35,17 +35,10 @@ class FluxModel(nn.Module):
             ae_path=self.config.get("ae_path", "/storage/dev/nyanko/flux-dev/ae.sft"),
             device=self.target_device,
         )
+        
         self.ae, self.t5, self.clip = [ae], [t5], [clip]
         self.vae_encode_bsz = 8
         logger.info("Model initialized in {:.2f}s".format(time.perf_counter() - timer))
-        
-    @torch.no_grad()
-    def encode_first_stage(self, x):
-        latents = []
-        for i in range(0, x.shape[0], self.vae_encode_bsz):
-            o = x[i : i + self.vae_encode_bsz]
-            latents.append(self.ae.encode(o))
-        return torch.cat(latents, dim=0)
 
     @torch.inference_mode()
     def sample(
@@ -55,20 +48,20 @@ class FluxModel(nn.Module):
         size=(1024, 1024),
         steps=28,
     ):
-        self.t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
-        self.clip = self.clip[0] if isinstance(self.clip, list) else self.clip
-        self.ae = self.ae[0] if isinstance(self.ae, list) else self.ae
+        t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
+        clip = self.clip[0] if isinstance(self.clip, list) else self.clip
+        ae = self.ae[0] if isinstance(self.ae, list) else self.ae
         
-        self.ae.to(self.target_device)
+        ae.to(self.target_device)
         height, width = size
         x = get_noise(1, height, width, device=self.target_device, dtype=torch.bfloat16, seed=seed)
         timesteps = get_schedule(steps, (x.shape[-1] * x.shape[-2]) // 4, shift=True)
-        inp = prepare(t5=self.t5, clip=self.clip, img=x, prompt=prompt)
+        inp = prepare(t5=t5, clip=clip, img=x, prompt=prompt)
         
-        x = denoise(self.model, **inp, timesteps=timesteps, guidance=3)
-        x = unpack(x.float(), height, width)
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            latents = self.ae.decode(x)
+            x = denoise(self.model, **inp, timesteps=timesteps, guidance=3)
+            x = unpack(x.float(), height, width)
+            latents = ae.decode(x)
             
         image = torch.clamp((latents + 1.0) / 2.0, min=0.0, max=1.0).cpu().float()
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
@@ -77,40 +70,47 @@ class FluxModel(nn.Module):
         return image
 
     def forward(self, batch):
-        self.t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
-        self.clip = self.clip[0] if isinstance(self.clip, list) else self.clip
-        self.ae = self.ae[0] if isinstance(self.ae, list) else self.ae
+        t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
+        clip = self.clip[0] if isinstance(self.clip, list) else self.clip
+        ae = self.ae[0] if isinstance(self.ae, list) else self.ae
         
-        if "latent" in batch["extras"]:
-            latents = torch.stack([t["latent"] for t in batch["extras"]])
-        else:
-            self.ae.to(self.target_device)
-            latents = self.encode_first_stage(batch["pixels"].float())
+        with torch.no_grad():
+            if "latent" in batch["extras"]:
+                latents = torch.stack([t["latent"] for t in batch["extras"]])
+            else:
+                ae = ae.to(self.target_device)
+                x = batch["pixels"].float()
+                latents = []
+                for i in range(0, x.shape[0], self.vae_encode_bsz):
+                    o = x[i : i + self.vae_encode_bsz]
+                    latents.append(ae.encode(o))
+                latents = torch.cat(latents, dim=0)
 
-        bsz, c, h, w = latents.shape 
-        model_dtype = next(self.model.parameters()).dtype
-        latents = latents.to(model_dtype)
-        
-        # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-        u = torch.normal(mean=0.0, std=1.0, size=(len(latents),), device=self.target_device)
-        t = torch.nn.functional.sigmoid(u)
-        # t = torch.rand((len(latents),), device=self.target_device)
+            bsz, c, h, w = latents.shape 
+            # model_dtype = next(self.model.parameters()).dtype 
+            # latents = latents.to(torch.bfloat16)
+            
+            # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
+            u = torch.normal(mean=0.0, std=1.0, size=(len(latents),), device=self.target_device)
+            t = torch.nn.functional.sigmoid(u)
+            # t = torch.randn((len(latents),), device=self.target_device)
 
-        # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents, dtype=model_dtype)
-        t_ = t.view(t.size(0), *([1] * (len(latents.size()) - 1)))
-        noised_latents = (1 - t_) * latents + t_ * noise
+            # Sample noise that we'll add to the latents
+            noise = torch.randn_like(latents, dtype=torch.bfloat16)
+            t_ = t.view(t.size(0), *([1] * (len(latents.size()) - 1)))
+            noised_latents = (1 - t_) * latents + t_ * noise
+            
+            forward_args = prepare(t5, clip, noised_latents, batch["prompts"])
+            forward_args = {
+                "img": forward_args["img"].to(torch.bfloat16),
+                "img_ids": forward_args["img_ids"],
+                "txt": forward_args["txt"],
+                "txt_ids": forward_args["txt_ids"],
+                "y": forward_args["vec"],
+                "guidance": torch.tensor([4.0] * bsz, device=self.target_device, dtype=torch.bfloat16),
+                "timesteps": t.to(torch.bfloat16)
+            }
         
-        forward_args = prepare(self.t5, self.clip, noised_latents, batch["prompts"])
-        forward_args = {
-            "img": forward_args["img"],
-            "img_ids": forward_args["img_ids"],
-            "txt": forward_args["txt"],
-            "txt_ids": forward_args["txt_ids"],
-            "y": forward_args["vec"],
-            "guidance": torch.tensor([3.0] * bsz, device=self.target_device),
-            "timesteps": t
-        }
         model_pred = self.model(**forward_args)
         model_pred = unpack(model_pred, h*8, w*8)
         
@@ -135,6 +135,7 @@ class FluxModel(nn.Module):
         size = (config.get("height", 1024), config.get("width", 1024))
         self.model.eval()
 
+        prompts = prompts[:world_size]
         local_prompts = prompts[rank::world_size]
         save_dir = Path(config.save_dir)
         for idx, prompt in tqdm(

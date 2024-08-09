@@ -1,5 +1,4 @@
 # python trainer.py --config config/test.yaml
-from contextlib import nullcontext
 import functools
 import os
 import time
@@ -22,14 +21,11 @@ from common.model import FluxModel
 from common.flux import DoubleStreamBlock, SingleStreamBlock
 from common.dataset import AspectRatioDataset, worker_init_fn
 
-from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
-from lightning.fabric.strategies import FSDPStrategy
-from lightning.fabric.plugins.precision import FSDPPrecision
+from lightning.fabric.strategies import DeepSpeedStrategy
+from lightning.fabric.plugins import DeepSpeedPrecision
+from deepspeed import zero
 
 is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
-fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -44,18 +40,31 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        auto_wrap_policy=fsdp_policy,
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        activation_checkpointing_policy=fsdp_policy,
-        state_dict_type="full",
-    )
-    fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
-    fsdp_precision.convert_input = lambda x: x
+    ds_precision = DeepSpeedPrecision(precision="bf16-mixed")
+    ds_precision.convert_input = lambda x: x
     fabric = pl.Fabric(
-        plugins=[fsdp_precision],
-        strategy=fsdp_strategy,
+        plugins=[ds_precision],
+        strategy=DeepSpeedStrategy(
+            config={
+                "bf16": {
+                    "enabled": True
+                },
+                "zero_optimization": {
+                    "stage": 3,
+                    "overlap_comm": True,
+                    "contiguous_gradients": True,
+                    "sub_group_size": 1e9,
+                    "reduce_bucket_size": "auto",
+                    "stage3_prefetch_bucket_size": "auto",
+                    "stage3_param_persistence_threshold": "auto",
+                    "stage3_max_live_parameters": 1e9,
+                    "stage3_max_reuse_distance": 1e9,
+                    "stage3_gather_16bit_weights_on_model_save": True,
+                    "ignore_unused_parameters": True,
+                },
+                "zero_allow_untested_optimizer": True,
+            }
+        ),
         num_nodes=os.environ.get("NUM_NODES", 1)
     )
         
@@ -135,7 +144,7 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        with FSDP.summon_full_params(model, writeback=False):
+        with zero.GatheredParameters(model.model.parameters()):
             _unwrap_objects(model).generate_samples(
                 world_size=fabric.world_size,
                 rank=fabric.global_rank,
@@ -165,7 +174,7 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        with FSDP.summon_full_params(model, writeback=False):
+        with zero.GatheredParameters(model.model.parameters()):
             # fir 1node only
             if fabric.is_global_zero:
                 model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
@@ -201,12 +210,12 @@ def main():
             # forward pass + backward pass
             loss = model(batch)    
             fabric.backward(loss)
-            grad_norm = fabric.clip_gradients(
-                module=model, 
-                optimizer=optimizer, 
-                max_norm=1.0,
-                error_if_nonfinite=False,
-            )
+            # grad_norm = fabric.clip_gradients(
+            #     module=model, 
+            #     optimizer=optimizer, 
+            #     max_norm=1.0,
+            #     error_if_nonfinite=False,
+            # )
             optimizer.step()
             lr_scheduler.step()
 
@@ -217,7 +226,7 @@ def main():
             if fabric.is_global_zero:
                 wandb.log({
                     "train/loss": loss,
-                    "train/grad_norm": grad_norm,
+                    # "train/grad_norm": grad_norm,
                     "trainer/step_t": time.perf_counter() - local_timer,
                     "trainer/global_step": global_step,
                     "trainer/current_epoch": current_epoch,
