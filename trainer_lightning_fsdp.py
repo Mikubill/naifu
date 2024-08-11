@@ -21,17 +21,19 @@ from common.model import FluxModel
 from common.flux import DoubleStreamBlock, SingleStreamBlock
 from common.dataset import AspectRatioDataset, worker_init_fn
 
-from lightning.fabric.strategies import DeepSpeedStrategy
-from lightning.fabric.plugins import DeepSpeedPrecision
-from deepspeed import zero
+from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
+from lightning.fabric.strategies import FSDPStrategy
+from lightning.fabric.plugins.precision import FSDPPrecision
 
 is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
+fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+
 ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm]
-
-
 def get_parameter_names(model, forbidden_layer_types):
     """
     Returns the names of the model parameters that are not inside a forbidden layer.
@@ -48,6 +50,7 @@ def get_parameter_names(model, forbidden_layer_types):
     return result
 
 
+
 def main():
     """
     Trains a new SDXL model.
@@ -58,33 +61,18 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    ds_precision = DeepSpeedPrecision(precision="bf16-mixed")
-    ds_precision.convert_input = lambda x: x
+    fsdp_strategy = FSDPStrategy(
+        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        auto_wrap_policy=fsdp_policy,
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        activation_checkpointing_policy=fsdp_policy,
+        state_dict_type="full",
+    )
+    fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
+    fsdp_precision.convert_input = lambda x: x
     fabric = pl.Fabric(
-        plugins=[ds_precision],
-        strategy=DeepSpeedStrategy(
-            config={
-                "gradient_clipping": 1.0,
-                "bf16": {
-                    "enabled": True
-                },
-                "zero_optimization": {
-                    "stage": 3,
-                    "overlap_comm": True,
-                    "reduce_scatter": False,
-                    "contiguous_gradients": True,
-                    "sub_group_size": 1e9,
-                    "reduce_bucket_size": "auto",
-                    "stage3_prefetch_bucket_size": "auto",
-                    "stage3_param_persistence_threshold": "auto",
-                    "stage3_max_live_parameters": 1e9,
-                    "stage3_max_reuse_distance": 1e9,
-                    "stage3_gather_16bit_weights_on_model_save": True,
-                    "ignore_unused_parameters": True,
-                },
-                "zero_allow_untested_optimizer": True,
-            }
-        ),
+        plugins=[fsdp_precision],
+        strategy=fsdp_strategy,
         num_nodes=os.environ.get("NUM_NODES", 1)
     )
         
@@ -125,8 +113,6 @@ def main():
     # ==============================
     # Initialize Optimizer
     # ==============================
-        
-    # params_to_optim = [{'params': model.model.parameters()}]
     decay_parameters = get_parameter_names(model.model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     optimizer_grouped_parameters = [
@@ -147,7 +133,6 @@ def main():
     logger.info("Optimizer grouped parameters:")
     for idx, group in enumerate(optimizer_grouped_parameters):
         logger.info(f"Group {idx}: {len(group['params'])} parameters")
-
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
@@ -186,7 +171,7 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        with zero.GatheredParameters(model.model.parameters()):
+        with FSDP.summon_full_params(model, writeback=False):
             _unwrap_objects(model).generate_samples(
                 world_size=fabric.world_size,
                 rank=fabric.global_rank,
@@ -216,14 +201,12 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        with zero.GatheredParameters(model.model.parameters()):
+        with FSDP.summon_full_params(model, writeback=False):
             # fir 1node only
             if fabric.is_global_zero:
-                model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
-                save_file(model_state_dict, f"{ckpt_dir}/model_{postfix}.safetensors")
-                             
-                # handle optimizer and other states
+                save_file(model.model.state_dict(), f"{ckpt_dir}/model_{postfix}.safetensors")
                 torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
+                
         fabric.barrier()
 
     # ==============================
@@ -234,7 +217,6 @@ def main():
         total=len(dataloader),
         disable=not fabric.is_global_zero,
     )
-    model.model = model.model.train().float()
     for current_epoch in range(max_epoch):
         # here we can use the dataloader directly
         desc = f"Epoch {current_epoch}"
@@ -253,12 +235,12 @@ def main():
             # forward pass + backward pass
             loss = model(batch)    
             fabric.backward(loss)
-            # grad_norm = fabric.clip_gradients(
-            #     module=model, 
-            #     optimizer=optimizer, 
-            #     max_norm=1.0,
-            #     error_if_nonfinite=False,
-            # )
+            grad_norm = fabric.clip_gradients(
+                module=model, 
+                optimizer=optimizer, 
+                max_norm=1.0,
+                error_if_nonfinite=False,
+            )
             optimizer.step()
             lr_scheduler.step()
 
@@ -269,7 +251,7 @@ def main():
             if fabric.is_global_zero:
                 wandb.log({
                     "train/loss": loss,
-                    # "train/grad_norm": grad_norm,
+                    "train/grad_norm": grad_norm,
                     "trainer/step_t": time.perf_counter() - local_timer,
                     "trainer/global_step": global_step,
                     "trainer/current_epoch": current_epoch,

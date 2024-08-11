@@ -264,7 +264,15 @@ class DirectoryImageStore(StoreBase):
             p = path.with_suffix(label_ext)
             try:
                 with open(p, "r") as f:
-                    self.prompts.append(f.read())
+                    prompt = f.read()
+                
+                # if path.with_suffix(".floerence2.txt").exists():
+                #     with open(path.with_suffix(".floerence2.txt"), "r") as f:
+                #         prompt = f.read() + " " + prompt
+                # else:
+                #     print(f"warn: no ext for {p}")
+                
+                self.prompts.append(prompt)
             except Exception as e:
                 logger.warning(f"Skipped: error processing {p}: {e}")
                 self.prompts.append("")

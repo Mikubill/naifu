@@ -87,36 +87,34 @@ class FluxModel(nn.Module):
                 latents = torch.cat(latents, dim=0)
 
             bsz, c, h, w = latents.shape 
-            # model_dtype = next(self.model.parameters()).dtype 
-            # latents = latents.to(torch.bfloat16)
+            model_dtype = torch.bfloat16 #next(self.model.parameters()).dtype 
             
             # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-            u = torch.normal(mean=0.0, std=1.0, size=(len(latents),), device=self.target_device)
-            t = torch.nn.functional.sigmoid(u)
-            # t = torch.randn((len(latents),), device=self.target_device)
+            # u = torch.normal(mean=0.0, std=1.0, size=(len(latents),), device=self.target_device)
+            # t = torch.nn.functional.sigmoid(u)
+            t = torch.sigmoid(torch.randn((bsz,), device=self.target_device))
+            # t = torch.rand((bsz,), device=self.target_device)
 
             # Sample noise that we'll add to the latents
-            noise = torch.randn_like(latents, dtype=torch.bfloat16)
+            noise = torch.randn_like(latents)
             t_ = t.view(t.size(0), *([1] * (len(latents.size()) - 1)))
             noised_latents = (1 - t_) * latents + t_ * noise
             
             forward_args = prepare(t5, clip, noised_latents, batch["prompts"])
             forward_args = {
-                "img": forward_args["img"].to(torch.bfloat16),
+                "img": forward_args["img"].to(model_dtype),
                 "img_ids": forward_args["img_ids"],
                 "txt": forward_args["txt"],
                 "txt_ids": forward_args["txt_ids"],
                 "y": forward_args["vec"],
-                "guidance": torch.tensor([4.0] * bsz, device=self.target_device, dtype=torch.bfloat16),
-                "timesteps": t.to(torch.bfloat16)
+                "guidance": torch.tensor([1.0] * bsz, device=self.target_device, dtype=model_dtype),
+                "timesteps": t.to(model_dtype)
             }
         
         model_pred = self.model(**forward_args)
         model_pred = unpack(model_pred, h*8, w*8)
         
-        # target = noise - latents # for loss v
-        target = latents
-        model_pred = model_pred * (-t_) + noised_latents
+        target = noise - latents # for loss v
         loss = torch.mean(((model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1), 1)
         return loss.mean()
 

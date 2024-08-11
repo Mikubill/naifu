@@ -28,6 +28,7 @@ checkpoint
 .ipynb_checkpoints
 common/optimizers.py
 common/private_storage.py
+*styles*
 output/
 *.ipynb
 cluster4-training.yaml
