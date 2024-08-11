@@ -11,7 +11,7 @@ import time
 import torch.distributed as dist
 
 from common.hydit import DiTModel, MT5Embedder
-from common.utils import get_class, load_torch_file, EmptyInitWrapper
+from common.utils import load_torch_file, EmptyInitWrapper
 from common.logging import logger
 
 from diffusers import DDPMScheduler, AutoencoderKL
@@ -255,7 +255,7 @@ class StableDiffusionModel(nn.Module):
             snr_w = 1.0
             min_snr_gamma = advanced.get("min_snr", False)     
             if min_snr_gamma:
-                snr_w = calc_snr_weight(loss, timesteps, self.noise_scheduler, advanced.min_snr_val, True)
+                snr_w = calc_snr_weight(self.target_device, timesteps, self.noise_scheduler, advanced.min_snr_val, True)
 
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         noise_pred = self.model(noisy_latents.to(torch.float16), timesteps, **cond).chunk(2, dim=1)[0]

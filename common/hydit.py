@@ -5,16 +5,12 @@ import torch
 import torch.utils
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.utils.checkpoint as checkpoint
+# import torch.utils.checkpoint as checkpoint
 
-from diffusers import AutoencoderKL
+from deepspeed import checkpointing as checkpoint
 from timm.models.vision_transformer import Mlp
 from timm.models.layers import to_2tuple
-from transformers import (
-    AutoTokenizer,
-    MT5EncoderModel,
-    BertModel,
-)
+from transformers import AutoTokenizer, MT5EncoderModel
 
 
 class MT5Embedder(nn.Module):
@@ -94,7 +90,7 @@ class MT5Embedder(nn.Module):
                         use_cache,
                         output_attentions,
                         return_dict,
-                        use_reentrant=False,
+                        # use_reentrant=False,
                     )
                 return mt5_block_forward
 
@@ -770,7 +766,7 @@ class DiTBlock(nn.Module):
                 text_states,
                 freq_cis_img,
                 skip,
-                use_reentrant=False,
+                # use_reentrant=False,
             )
         else:
             return self._forward(x, c, text_states, freq_cis_img, skip)
@@ -1103,28 +1099,3 @@ class DiTModel(nn.Module):
         x = torch.einsum("nhwpqc->nchpwq", x)
         imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
-
-
-if __name__ == "__main__":
-    denoiser = DiTModel(
-        depth=40,
-        hidden_size=1408,
-        patch_size=2,
-        num_heads=16,
-        mlp_ratio=4.3637,
-        input_size=(128, 128)
-    )
-    sd = torch.load("./model/denoiser/pytorch_model_module.pt")
-    denoiser.load_state_dict(sd)
-    denoiser.half().cuda()
-    denoiser.enable_gradient_checkpointing()
-
-    clip_tokenizer = AutoTokenizer.from_pretrained("./model/clip")
-    clip_encoder = BertModel.from_pretrained("./model/clip").half().cuda()
-    mt5_embedder = MT5Embedder("./model/mt5", torch_dtype=torch.float16, max_length=256)
-    vae = AutoencoderKL.from_pretrained("./model/vae").half().cuda()
-
-    print(sum(p.numel() for p in denoiser.parameters()) / 1e6)
-    print(sum(p.numel() for p in mt5_embedder.parameters()) / 1e6)
-    print(sum(p.numel() for p in clip_encoder.parameters()) / 1e6)
-    print(sum(p.numel() for p in vae.parameters()) / 1e6)
