@@ -985,23 +985,28 @@ class DiTModel(nn.Module):
         # Support for "CLIP Concat" trick
         # We allow user to use multiple CLIP embed concat together
         # Which means the learanble pad for CLIP only apply on last 76 tokens
-        padding = self.text_embedding_padding.to(text_states)
-        padding_clip = torch.concat(
-            [padding[:1], padding[1:76].repeat((l_cl - 2) // 75, 1), padding[76:77]],
-            dim=0,
-        )
-        text_states = torch.where(
-            text_states_mask.unsqueeze(2),
-            text_states,
-            padding_clip,
-        )
-        text_states_t5 = torch.where(
-            text_states_t5_mask.unsqueeze(2),
-            text_states_t5,
-            padding[77:],
-        )
-        text_states = torch.cat([text_states, text_states_t5], dim=1)
+        # padding = self.text_embedding_padding.to(text_states)
+        # padding_clip = torch.concat(
+        #     [padding[:1], padding[1:76].repeat((l_cl - 2) // 75, 1), padding[76:77]],
+        #     dim=0,
+        # )
+        # text_states = torch.where(
+        #     text_states_mask.unsqueeze(2),
+        #     text_states,
+        #     padding_clip,
+        # )
+        # text_states_t5 = torch.where(
+        #     text_states_t5_mask.unsqueeze(2),
+        #     text_states_t5,
+        #     padding[77:],
+        # )
+        # text_states = torch.cat([text_states, text_states_t5], dim=1)
         # MODIFIED END
+        text_states = torch.cat([text_states, text_states_t5.view(b_t5, l_t5, -1)], dim=1)  # 2,205，1024
+        clip_t5_mask = torch.cat([text_states_mask, text_states_t5_mask], dim=-1)
+
+        clip_t5_mask = clip_t5_mask
+        text_states = torch.where(clip_t5_mask.unsqueeze(2), text_states, self.text_embedding_padding.to(text_states))
 
         _, _, oh, ow = x.shape
         th, tw = oh // self.patch_size, ow // self.patch_size

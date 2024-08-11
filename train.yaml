@@ -1,12 +1,12 @@
 name: test-run
-model_path: hydit_v1.2.pt
+model_path: /storage/dev/nyanko/HunyuanDiT-v1.2/t2i/model/pytorch_model_module.pt
 version: hydit_1.2 # hydit_v1.1, hydit_v1.2 
-use_kdiffusion_loss: false
+use_kdiffusion_loss: true
 # clip_path: ...
 # mt5_path: ...
 
 trainer:
-  precision: bf16-mixed
+  precision: 16-mixed
   batch_size: 4
   seed: 1138
   wandb_id: ""
@@ -18,7 +18,7 @@ trainer:
   checkpoint_freq: 1
   checkpoint_steps: -1
   save_weights_only: true
-  max_epochs: 1
+  max_epochs: 10
   max_steps: -1
 
 advanced:
@@ -34,13 +34,14 @@ advanced:
 
 dataset:
   # store_cls: common.private_storage.ParquetImageClustered
-  img_path: "/storage/dev/nyanko/niji-anime-1"
+  img_path: "/storage/dev/nyanko/pseudo-camera-10k/train"
 
 optimizer:
-  name: bitsandbytes.optim.Lion8bit
+  name: deepspeed.ops.lion.FusedLion
   params:
-    lr: 5e-6
-    weight_decay: 1e-2
+    lr: 2e-6
+    weight_decay: 0.1
+    betas: [0.9, 0.99]
 
 scheduler:
   name: transformers.get_constant_schedule_with_warmup
@@ -66,6 +67,3 @@ sampling:
     - artist:ran'ou_(tamago_no_kimi), best quality, sensitive, 1girl, pointy ears, long hair, jewelry, looking at viewer, earrings, black gloves, thigh strap, bare shoulders, parted lips, underwear, see-through, off shoulder, bangs, mole on thigh, brown hair, on back, blue jacket, open clothes, pillow, barefoot, long sleeves, open jacket, eyebrows visible through hair, hands up, clothing cutout, half gloves, hot elf, black tight wear, pointed ears, lying down, highres, 2020s
     - best quality, 1girl, japanese clothes, wind chime, looking at viewer, smile, long hair, hair ornament, silver hair, white kimono, ponytail, hair between eyes, yukata, blue sky, floral print, bangs, hair flower, closed mouth, hair ribbon, long sleeves, looking back, alternate costume, signature, sidelocks, print kimono, white flower, blush, wide sleeves, red ribbon, cloudy sky, outdoors, 25-ji, Night Code de., Yoisaki Kanade, Project Sekai, absurdres, 2020s
     - best quality, 1girl, solo, loli, cat girl, silver hair ,blue eyes, flat chest, solo, beautiful detailed background, messy hair, long hair
-    - masterpiece, best quality, 1girl, solo,loli,wedding dress|see-through highleg leotard, veil, elbow gloves, white thighhighs, crown, earrings, bow on waist, sideboob, lace
-    - 1girl, solo, shirt, thighhighs, skirt, hands on hips, white shirt, crystal, flandre scarlet, blonde hair, grey skirt, red bow, red eyes, black thighhighs, wings, white background,
-    - 1girl,sitting,fantasy,masterpiece,best quality,(long blonde hair),(blue eyes),(floating hair),(black ribbed sweater:1.1),(red plaid skirt:1.1),(cat ears)

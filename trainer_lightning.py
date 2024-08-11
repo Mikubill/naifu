@@ -20,10 +20,31 @@ from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import StableDiffusionModel
 from common.dataset import AspectRatioDataset, worker_init_fn
-from common.hydit import DiTBlock
+
+from lightning.fabric.strategies import DeepSpeedStrategy
+from lightning.fabric.plugins import DeepSpeedPrecision
+from deepspeed import zero
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm]
+
+
+def get_parameter_names(model, forbidden_layer_types):
+    """
+    Returns the names of the model parameters that are not inside a forbidden layer.
+    """
+    result = []
+    for name, child in model.named_children():
+        result += [
+            f"{name}.{n}"
+            for n in get_parameter_names(child, forbidden_layer_types)
+            if not isinstance(child, tuple(forbidden_layer_types))
+        ]
+    # Add model specific parameters (defined with nn.Parameter) since they are not in any child.
+    result += list(model._parameters.keys())
+    return result
+
 
 def main():
     """
@@ -35,31 +56,39 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    all_devices_count = torch.cuda.device_count()
-
-    if all_devices_count > 1:
-        from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
-        from lightning.fabric.strategies import FSDPStrategy
-        from lightning.fabric.plugins.precision import FSDPPrecision
-        is_layer_moduule = lambda x: isinstance(x, DiTBlock)
-        fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
-        fsdp_strategy = FSDPStrategy(
-            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-            auto_wrap_policy=fsdp_policy,
-            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-            # activation_checkpointing_policy=fsdp_policy,
-            state_dict_type="full",
-        )
-        fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
-        fsdp_precision.convert_input = lambda x: x
-        fabric = pl.Fabric(
-            plugins=[fsdp_precision],
-            strategy=fsdp_strategy,
-        )
-    else:
-        fabric = pl.Fabric(precision=config.trainer.precision)
+    ds_precision = DeepSpeedPrecision(precision="16-mixed")
+    ds_precision.convert_input = lambda x: x
+    fabric = pl.Fabric(
+        plugins=[ds_precision],
+        strategy=DeepSpeedStrategy(
+            config={
+                "fp16": {
+                    "enabled": True,
+                    "loss_scale": 0,
+                    "loss_scale_window": 1000,
+                    "initial_scale_power": 16,
+                    "hysteresis": 2,
+                    "min_loss_scale": 1
+                },
+                "gradient_clipping": 1.0,
+                "zero_optimization": {
+                    "stage": 2,
+                    "overlap_comm": True,
+                    "contiguous_gradients": True,
+                    "sub_group_size": 1e9,
+                    "reduce_bucket_size": "auto",
+                    "stage3_prefetch_bucket_size": "auto",
+                    "stage3_param_persistence_threshold": "auto",
+                    "stage3_max_live_parameters": 1e9,
+                    "stage3_max_reuse_distance": 1e9,
+                    "stage3_gather_16bit_weights_on_model_save": True,
+                    "ignore_unused_parameters": True,
+                },
+                "zero_allow_untested_optimizer": True,
+            }
+        ),
+        num_nodes=os.environ.get("NUM_NODES", 1)
+    )
         
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
@@ -79,7 +108,7 @@ def main():
             config=config,
             device=fabric.device,
         )
-        
+    
     logger.info("Initializing dataset")
     dataset = AspectRatioDataset(
         batch_size=config.trainer.batch_size,
@@ -91,6 +120,7 @@ def main():
         dataset,
         batch_size=None,
         num_workers=4,
+        prefetch_factor=4,
         worker_init_fn=worker_init_fn,
         pin_memory=True,
     )
@@ -98,21 +128,29 @@ def main():
     # ==============================
     # Initialize Optimizer
     # ==============================
-    params_to_optim = [{'params': model.model.parameters()}]
-    if config.advanced.get("train_text_encoder_1"):
-        lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.clip_encoder.parameters(), "lr": lr})
-
-    if config.advanced.get("train_text_encoder_2"):
-        lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
-        params_to_optim.append({"params": model.mt5_embedder.parameters(), "lr": lr})
-
+    decay_parameters = get_parameter_names(model.model, ALL_LAYERNORM_LAYERS)
+    decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p for n, p in model.model.named_parameters() if (n in decay_parameters and p.requires_grad)
+            ],
+            "weight_decay": config.optimizer.params.weight_decay,
+        },
+        {
+            "params": [
+                p for n, p in model.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    
     optim_param = config.optimizer.params
-    optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)
+    optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
     lr_scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
 
     # Boost model for distributed training\
-    model, optimizer = fabric.setup(model, optimizer)
+    model, optimizer = fabric.setup(model, optimizer)    
     dataloader = fabric.setup_dataloaders(dataloader)
     
     if fabric.world_size > 1:
@@ -124,26 +162,6 @@ def main():
     # we dont need to use the model in the first stage
     max_epoch = config.trainer.max_epochs
     current_epoch = global_step = 0
-    
-    def log_lr_values(optimizer, config, global_step):
-        """
-        Log learning rate values for the optimizer.
-        """
-        optimizer_name = config.optimizer.name
-        last_lr = [group.get("lr", 0) for group in optimizer.param_groups]
-        ocls = optimizer.__class__.__name__
-
-        for i, lr in enumerate(last_lr):
-            fabric.log_dict({f"lr/{ocls}-{i}": lr}, step=global_step)
-
-        is_da = optimizer_name.startswith("DAdapt")
-        is_prodigy = optimizer_name.startswith("prodigyopt")
-        if not (is_da or is_prodigy):
-            return
-
-        last_d_lr = [(g["d"] * g["lr"]) for g in optimizer.param_groups]
-        for i, lr in enumerate(last_d_lr):
-            fabric.log_dict({f"d*lr/{ocls}-{i}": lr}, step=global_step)
 
     def perform_sampling(forced=False, is_last=False):
         """
@@ -164,8 +182,7 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
-        with context:
+        with zero.GatheredParameters(model.model.parameters()):
             _unwrap_objects(model).generate_samples(
                 world_size=fabric.world_size,
                 rank=fabric.global_rank,
@@ -195,18 +212,13 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        context = FSDP.summon_full_params(model, writeback=False) if fabric.world_size > 1 else nullcontext()
-        with context:
+        with zero.GatheredParameters(model.model.parameters()):
             # fir 1node only
             if fabric.is_global_zero:
                 model_state_dict = {f"model.{k}": v for k,v in model.model.state_dict().items()}
                 save_file(model_state_dict, f"{ckpt_dir}/model_{postfix}.safetensors")
                 
-                if config.advanced.get("train_text_encoder_1"):
-                    save_file(model.clip_encoder.state_dict(), f"{ckpt_dir}/clip_{postfix}.safetensors")
-                if config.advanced.get("train_text_encoder_2"):
-                    save_file(model.mt5_encoder.state_dict(), f"{ckpt_dir}/mt5_{postfix}.safetensors")
-                    
+                 
                 # handle optimizer and other states
                 torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
         fabric.barrier()
@@ -237,12 +249,6 @@ def main():
             # forward pass + backward pass
             loss = model(batch)    
             fabric.backward(loss)
-            grad_norm = fabric.clip_gradients(
-                module=model, 
-                optimizer=optimizer, 
-                max_norm=1.0,
-                error_if_nonfinite=False,
-            )
             optimizer.step()
             lr_scheduler.step()
 
@@ -251,10 +257,9 @@ def main():
             save_model(is_last=False)
             
             if fabric.is_global_zero:
-                log_lr_values(optimizer, config, global_step)
                 wandb.log({
                     "train/loss": loss,
-                    "train/grad_norm": grad_norm,
+                    # "train/grad_norm": grad_norm,
                     "trainer/step_t": time.perf_counter() - local_timer,
                     "trainer/global_step": global_step,
                     "trainer/current_epoch": current_epoch,

@@ -28,3 +28,5 @@ checkpoint
 .ipynb_checkpoints
 common/optimizers.py
 common/private_storage.py
+*dist*
+*styles.yaml
