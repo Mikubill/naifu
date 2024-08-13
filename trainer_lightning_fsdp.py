@@ -1,4 +1,5 @@
 # python trainer.py --config config/test.yaml
+from collections import defaultdict
 import functools
 import os
 import time
@@ -18,7 +19,8 @@ from safetensors.torch import save_file
 from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import FluxModel
-from common.flux import DoubleStreamBlock, SingleStreamBlock
+from common.flux_optim import DoubleStreamBlock, SingleStreamBlock, RMSNorm
+# from common.flux_optim import DoubleStreamBlock as OptDoubleStreamBlock, SingleStreamBlock as OptSingleStreamBlock
 from common.dataset import AspectRatioDataset, worker_init_fn
 
 from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
@@ -28,12 +30,14 @@ from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.plugins.precision import FSDPPrecision
 
 is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
+# is_opt_layer_moduule = lambda x: isinstance(x, OptSingleStreamBlock) or isinstance(x, OptDoubleStreamBlock)
+# is_module = lambda x: is_layer_moduule(x) or is_opt_layer_moduule(x)
 fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
-ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm]
+ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm, RMSNorm]
 def get_parameter_names(model, forbidden_layer_types):
     """
     Returns the names of the model parameters that are not inside a forbidden layer.
@@ -48,7 +52,6 @@ def get_parameter_names(model, forbidden_layer_types):
     # Add model specific parameters (defined with nn.Parameter) since they are not in any child.
     result += list(model._parameters.keys())
     return result
-
 
 
 def main():
@@ -114,25 +117,52 @@ def main():
     # Initialize Optimizer
     # ==============================
     decay_parameters = get_parameter_names(model.model, ALL_LAYERNORM_LAYERS)
-    decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    decay_parameters = [name for name in decay_parameters if "bias" not in name and "norm" not in name]
+    
+    lr_groups = defaultdict(list)
     optimizer_grouped_parameters = [
-        {
-            "params": [
-                p for n, p in model.model.named_parameters() if (n in decay_parameters and p.requires_grad)
-            ],
-            "weight_decay": config.optimizer.params.weight_decay,
-        },
         {
             "params": [
                 p for n, p in model.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
             ],
             "weight_decay": 0.0,
-        },
+            "lr": config.optimizer.params.lr * 0.033,
+        }
     ]
-    # print parameters group info
-    logger.info("Optimizer grouped parameters:")
-    for idx, group in enumerate(optimizer_grouped_parameters):
-        logger.info(f"Group {idx}: {len(group['params'])} parameters")
+    lr_groups[config.optimizer.params.lr * 0.033].append("non_decay_params")
+    
+    base_lr_value = config.optimizer.params.lr
+    for n, p in model.model.named_parameters():
+        if n in decay_parameters and p.requires_grad:
+            input_dim = p.shape[-1]
+            lr_value = base_lr_value * (32 / input_dim)
+            
+            # for blocks like img_in.weight
+            if "img_in" in n:
+                lr_value = base_lr_value * (4 / input_dim)
+            
+            # for blocks like double_blocks.1.img_mlp.2.weight
+            if "img_" in n and "double_blocks" in n:
+                lr_value = 0.9 * base_lr_value * (32 / input_dim)
+                
+            optimizer_grouped_parameters.append({
+                "params": [p],
+                "weight_decay": config.optimizer.params.weight_decay,
+                "lr": lr_value,
+            })
+            lr_groups[lr_value].append(n)
+    
+    # Print parameters group info
+    logger.info(f"Optimizer grouped parameters: total {len(optimizer_grouped_parameters)} groups")
+    
+    # Print LR statistics
+    logger.info("Learning rate groups statistics:")
+    for lr, params in lr_groups.items():
+        logger.info(f"  LR {lr:.2e}: {len(params)} parameters")
+        if len(params) <= 4:  # If there are 5 or fewer parameters, list them
+            logger.info(f"    Parameters: {', '.join(params)}")
+        else:  # If there are more than 5, show the first 5 and indicate there are more
+            logger.info(f"    Parameters: {', '.join(params[:4])} ... and {len(params)-4} more")
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
@@ -248,6 +278,7 @@ def main():
             perform_sampling(is_last=False)
             save_model(is_last=False)
             
+            loss = loss.item()
             if fabric.is_global_zero:
                 wandb.log({
                     "train/loss": loss,

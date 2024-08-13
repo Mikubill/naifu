@@ -2,7 +2,7 @@ name: test-run
 model_name: flux-dev
 
 trainer:
-  precision: bf16-true
+  precision: bf16-mixed
   batch_size: 16
   seed: 1138
   wandb_id: ""
@@ -22,12 +22,11 @@ dataset:
   img_path: "/storage/dev/nyanko/niji-anime-1"
 
 optimizer:
-  name: lion_pytorch.Lion
+  name: torch.optim.AdamW
   params:
-    lr: 2e-5
-    weight_decay: 0.1
-    use_triton: True
-    betas: [0.9, 0.99]
+    lr: 1e-3
+    fused: True
+    weight_decay: 0.01
 
 scheduler:
   name: transformers.get_constant_schedule_with_warmup

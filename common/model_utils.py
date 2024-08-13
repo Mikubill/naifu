@@ -7,7 +7,7 @@ import torch
 from einops import rearrange, repeat
 from torch import Tensor
 
-from .flux import Flux, FluxParams
+from .flux_optim import Flux, FluxParams
 from .autoencoder import AutoEncoder, AutoEncoderParams
 from torch import Tensor, nn
 from transformers import CLIPTextModel, CLIPTokenizer
