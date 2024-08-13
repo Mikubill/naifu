@@ -126,24 +126,19 @@ def main():
                 p for n, p in model.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
             ],
             "weight_decay": 0.0,
-            "lr": config.optimizer.params.lr * 0.033,
+            "lr": config.optimizer.params.lr * 1.25,
         }
     ]
-    lr_groups[config.optimizer.params.lr * 0.033].append("non_decay_params")
+    lr_groups[config.optimizer.params.lr].append("non_decay_params")
     
     base_lr_value = config.optimizer.params.lr
     for n, p in model.model.named_parameters():
         if n in decay_parameters and p.requires_grad:
-            input_dim = p.shape[-1]
-            lr_value = base_lr_value * (32 / input_dim)
-            
-            # for blocks like img_in.weight
-            if "img_in" in n:
-                lr_value = base_lr_value * (4 / input_dim)
-            
-            # for blocks like double_blocks.1.img_mlp.2.weight
-            if "img_" in n and "double_blocks" in n:
-                lr_value = 0.9 * base_lr_value * (32 / input_dim)
+            lr_value = base_lr_value 
+                
+            # for blocks like img_in.weight (scaling to 1/8)
+            if "img_in" in n or "single_blocks" in n:
+                lr_value = base_lr_value * 0.25
                 
             optimizer_grouped_parameters.append({
                 "params": [p],
