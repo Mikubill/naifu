@@ -1,8 +1,9 @@
 name: test-run
 model_name: flux-dev
+optimize_target: double_blocks_txtattn
 
 trainer:
-  precision: bf16-mixed
+  precision: bf16-true
   batch_size: 16
   seed: 1138
   wandb_id: ""
@@ -24,7 +25,7 @@ dataset:
 optimizer:
   name: torch.optim.AdamW
   params:
-    lr: 1e-3
+    lr: 1e-5
     fused: True
     weight_decay: 0.01
 

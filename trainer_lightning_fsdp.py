@@ -20,7 +20,6 @@ from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import FluxModel
 from common.flux_optim import DoubleStreamBlock, SingleStreamBlock, RMSNorm
-# from common.flux_optim import DoubleStreamBlock as OptDoubleStreamBlock, SingleStreamBlock as OptSingleStreamBlock
 from common.dataset import AspectRatioDataset, worker_init_fn
 
 from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
@@ -30,8 +29,6 @@ from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.plugins.precision import FSDPPrecision
 
 is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
-# is_opt_layer_moduule = lambda x: isinstance(x, OptSingleStreamBlock) or isinstance(x, OptDoubleStreamBlock)
-# is_module = lambda x: is_layer_moduule(x) or is_opt_layer_moduule(x)
 fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -119,45 +116,42 @@ def main():
     decay_parameters = get_parameter_names(model.model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name and "norm" not in name]
     
-    lr_groups = defaultdict(list)
+    optimize_target = config.get("optimize_target", "all")
+    for n, p in model.model.named_parameters():
+        match optimize_target:
+            case "all":
+                pass
+            case "double_blocks":
+                if "double_blocks" not in n:
+                    p.requires_grad = False
+            case "single_blocks":
+                if "single_blocks" not in n:
+                    p.requires_grad = False
+            case "double_blocks_txtattn":
+                if "double_blocks" not in n and "txt_attn" not in n:
+                    p.requires_grad = False    
+            case "double_blocks_txt":
+                if "double_blocks" not in n and "txt_" not in n:
+                    p.requires_grad = False
+    
     optimizer_grouped_parameters = [
         {
             "params": [
                 p for n, p in model.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
             ],
             "weight_decay": 0.0,
-            "lr": config.optimizer.params.lr * 1.25,
-        }
+            "lr": config.optimizer.params.lr,
+        },
+        {
+            "params": [
+                p for n, p in model.model.named_parameters() if (n in decay_parameters and p.requires_grad)
+            ],
+            "weight_decay": config.optimizer.params.weight_decay,
+            "lr": config.optimizer.params.lr,
+        },
     ]
-    lr_groups[config.optimizer.params.lr].append("non_decay_params")
-    
-    base_lr_value = config.optimizer.params.lr
-    for n, p in model.model.named_parameters():
-        if n in decay_parameters and p.requires_grad:
-            lr_value = base_lr_value 
-                
-            # for blocks like img_in.weight (scaling to 1/8)
-            if "img_in" in n or "single_blocks" in n:
-                lr_value = base_lr_value * 0.25
-                
-            optimizer_grouped_parameters.append({
-                "params": [p],
-                "weight_decay": config.optimizer.params.weight_decay,
-                "lr": lr_value,
-            })
-            lr_groups[lr_value].append(n)
-    
     # Print parameters group info
     logger.info(f"Optimizer grouped parameters: total {len(optimizer_grouped_parameters)} groups")
-    
-    # Print LR statistics
-    logger.info("Learning rate groups statistics:")
-    for lr, params in lr_groups.items():
-        logger.info(f"  LR {lr:.2e}: {len(params)} parameters")
-        if len(params) <= 4:  # If there are 5 or fewer parameters, list them
-            logger.info(f"    Parameters: {', '.join(params)}")
-        else:  # If there are more than 5, show the first 5 and indicate there are more
-            logger.info(f"    Parameters: {', '.join(params[:4])} ... and {len(params)-4} more")
 
     optim_param = config.optimizer.params
     optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
