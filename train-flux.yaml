@@ -1,6 +1,6 @@
 name: test-run
 model_name: flux-dev
-optimize_target: double_blocks_txtattn
+# use_attention_mask: True
 
 trainer:
   precision: bf16-true
@@ -25,7 +25,7 @@ dataset:
 optimizer:
   name: torch.optim.AdamW
   params:
-    lr: 1e-5
+    lr: 2e-5
     fused: True
     weight_decay: 0.01
 

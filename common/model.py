@@ -9,6 +9,7 @@ import torch.nn as nn
 from tqdm import tqdm
 import time
 import torch.distributed as dist
+import torch.nn.functional as F
 
 from common.logging import logger
 from common.model_utils import *
@@ -34,6 +35,7 @@ class FluxModel(nn.Module):
             ckpt_path=self.config.get("ckpt_path", "/storage/dev/nyanko/flux-dev/flux1-dev.sft"),
             ae_path=self.config.get("ae_path", "/storage/dev/nyanko/flux-dev/ae.sft"),
             device=self.target_device,
+            use_attention_mask=self.config.get("use_attention_mask", False),
         )
         
         self.ae, self.t5, self.clip = [ae], [t5], [clip]

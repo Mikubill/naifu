@@ -1,6 +1,7 @@
 # python trainer.py --config config/test.yaml
 from collections import defaultdict
 import functools
+import io
 import os
 import time
 import torch.utils
@@ -62,10 +63,10 @@ def main():
     # Initialize Distributed Training
     # ==============================
     fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2,
         auto_wrap_policy=fsdp_policy,
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        activation_checkpointing_policy=fsdp_policy,
+        # activation_checkpointing_policy=fsdp_policy,
         state_dict_type="full",
     )
     fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
@@ -113,48 +114,8 @@ def main():
     # ==============================
     # Initialize Optimizer
     # ==============================
-    decay_parameters = get_parameter_names(model.model, ALL_LAYERNORM_LAYERS)
-    decay_parameters = [name for name in decay_parameters if "bias" not in name and "norm" not in name]
-    
-    optimize_target = config.get("optimize_target", "all")
-    for n, p in model.model.named_parameters():
-        match optimize_target:
-            case "all":
-                pass
-            case "double_blocks":
-                if "double_blocks" not in n:
-                    p.requires_grad = False
-            case "single_blocks":
-                if "single_blocks" not in n:
-                    p.requires_grad = False
-            case "double_blocks_txtattn":
-                if "double_blocks" not in n and "txt_attn" not in n:
-                    p.requires_grad = False    
-            case "double_blocks_txt":
-                if "double_blocks" not in n and "txt_" not in n:
-                    p.requires_grad = False
-    
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p for n, p in model.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
-            ],
-            "weight_decay": 0.0,
-            "lr": config.optimizer.params.lr,
-        },
-        {
-            "params": [
-                p for n, p in model.model.named_parameters() if (n in decay_parameters and p.requires_grad)
-            ],
-            "weight_decay": config.optimizer.params.weight_decay,
-            "lr": config.optimizer.params.lr,
-        },
-    ]
-    # Print parameters group info
-    logger.info(f"Optimizer grouped parameters: total {len(optimizer_grouped_parameters)} groups")
-
     optim_param = config.optimizer.params
-    optimizer = get_class(config.optimizer.name)(optimizer_grouped_parameters, **optim_param)
+    optimizer = get_class(config.optimizer.name)(model.model.parameters(), **optim_param)
     lr_scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
 
     # Boost model for distributed training\
@@ -220,12 +181,16 @@ def main():
         Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
         logger.info("Saving model checkpoint")
         
-        with FSDP.summon_full_params(model, writeback=False):
-            # fir 1node only
-            if fabric.is_global_zero:
-                save_file(model.model.state_dict(), f"{ckpt_dir}/model_{postfix}.safetensors")
-                torch.save(optimizer.state_dict(), f"{ckpt_dir}/optimizer_{postfix}.pt")
-                
+        model_state = {
+            "state_dict": model,
+            "optimizer": optimizer,
+            "global_step": global_step,
+            "current_epoch": current_epoch,
+        }
+        exclude = lambda k, v: False
+        
+        fabric.save(f"{ckpt_dir}/model_{postfix}.pt", model_state, filter={"optimizer": exclude})
+        fabric.save(f"{ckpt_dir}/optimizer_{postfix}.pt", model_state, filter={"state_dict": exclude})
         fabric.barrier()
 
     # ==============================

@@ -12,7 +12,15 @@ from .autoencoder import AutoEncoder, AutoEncoderParams
 from torch import Tensor, nn
 from transformers import CLIPTextModel, CLIPTokenizer
 from transformers import T5EncoderModel, T5Tokenizer
-from safetensors.torch import load_file
+from safetensors.torch import load_file as load_sft_file
+
+def load_file(s: str):
+    if s.endswith("sft") or s.endswith("safetensors"):
+        return load_sft_file(s)
+    
+    sd = torch.load(s)
+    sd = {k.replace("model.", "").replace("module.", ""): sd[k] for k in sd.keys()}
+    return sd
 
 @dataclass
 class ModelSpec:
@@ -99,6 +107,7 @@ class HFEmbedder(nn.Module):
         self.is_clip = version.startswith("openai")
         self.max_length = max_length
         self.output_key = "pooler_output" if self.is_clip else "last_hidden_state"
+        self.use_attention_mask = hf_kwargs.pop("use_attention_mask", False)
 
         if self.is_clip:
             self.tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(version, max_length=max_length)
@@ -116,23 +125,24 @@ class HFEmbedder(nn.Module):
             max_length=self.max_length,
             return_length=False,
             return_overflowing_tokens=False,
-            padding="max_length",
+            padding="max_length" if not self.use_attention_mask else True,
             return_tensors="pt",
         )
 
+        attention_mask = batch_encoding["attention_mask"].to(self.hf_module.device) if self.use_attention_mask else None
         outputs = self.hf_module(
             input_ids=batch_encoding["input_ids"].to(self.hf_module.device),
-            attention_mask=None,
+            attention_mask=attention_mask,
             output_hidden_states=False,
         )
         return outputs[self.output_key]
     
     
 
-def load_models(name: str, ckpt_path: str, ae_path: str, device: torch.device = "meta"):
+def load_models(name: str, ckpt_path: str, ae_path: str, device: torch.device = "meta", use_attention_mask: bool = False):
     is_schnell = "schnell" in name
-    t5 = HFEmbedder("google/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16).to(device)
-    clip = HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
+    t5 = HFEmbedder("google/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16, use_attention_mask=use_attention_mask).to(device)
+    clip = HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16, use_attention_mask=use_attention_mask).to(device)
 
     with torch.device(device):
         model = Flux(configs[name].params).to(torch.bfloat16)
