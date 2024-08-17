@@ -63,7 +63,7 @@ def main():
     # Initialize Distributed Training
     # ==============================
     fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2,
+        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
         auto_wrap_policy=fsdp_policy,
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         # activation_checkpointing_policy=fsdp_policy,

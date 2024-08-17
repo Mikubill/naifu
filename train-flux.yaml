@@ -21,6 +21,8 @@ trainer:
 dataset:
   # store_cls: common.private_storage.ParquetImageClustered
   img_path: "/storage/dev/nyanko/niji-anime-1"
+  repeat_strategy:
+    - ["", 10]
 
 optimizer:
   name: torch.optim.AdamW

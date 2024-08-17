@@ -19,6 +19,7 @@ def load_file(s: str):
         return load_sft_file(s)
     
     sd = torch.load(s)
+    sd = sd["state_dict"] if "state_dict" in sd else  sd
     sd = {k.replace("model.", "").replace("module.", ""): sd[k] for k in sd.keys()}
     return sd
 
