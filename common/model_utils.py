@@ -108,7 +108,6 @@ class HFEmbedder(nn.Module):
         self.is_clip = version.startswith("openai")
         self.max_length = max_length
         self.output_key = "pooler_output" if self.is_clip else "last_hidden_state"
-        self.use_attention_mask = hf_kwargs.pop("use_attention_mask", False)
 
         if self.is_clip:
             self.tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(version, max_length=max_length)
@@ -119,31 +118,33 @@ class HFEmbedder(nn.Module):
 
         self.hf_module = self.hf_module.eval().requires_grad_(False)
 
-    def forward(self, text: list[str]) -> Tensor:
+    def forward(self, text: list[str], return_mask=False) -> Tensor:
         batch_encoding = self.tokenizer(
             text,
             truncation=True,
             max_length=self.max_length,
             return_length=False,
             return_overflowing_tokens=False,
-            padding="max_length" if not self.use_attention_mask else True,
+            padding="max_length",
             return_tensors="pt",
         )
 
-        attention_mask = batch_encoding["attention_mask"].to(self.hf_module.device) if self.use_attention_mask else None
         outputs = self.hf_module(
             input_ids=batch_encoding["input_ids"].to(self.hf_module.device),
-            attention_mask=attention_mask,
+            attention_mask=None,
             output_hidden_states=False,
         )
+        
+        if return_mask:
+            return outputs[self.output_key], batch_encoding["attention_mask"].to(self.hf_module.device)
         return outputs[self.output_key]
     
     
 
-def load_models(name: str, ckpt_path: str, ae_path: str, device: torch.device = "meta", use_attention_mask: bool = False):
+def load_models(name: str, ckpt_path: str, ae_path: str, device: torch.device = "meta"):
     is_schnell = "schnell" in name
-    t5 = HFEmbedder("google/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16, use_attention_mask=use_attention_mask).to(device)
-    clip = HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16, use_attention_mask=use_attention_mask).to(device)
+    t5 = HFEmbedder("google/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16).to(device)
+    clip = HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
 
     with torch.device(device):
         model = Flux(configs[name].params).to(torch.bfloat16)
@@ -210,9 +211,11 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
 
     if isinstance(prompt, str):
         prompt = [prompt]
-    txt = t5(prompt)
+        
+    txt, txtmask = t5(prompt, return_mask=True)
     if txt.shape[0] == 1 and bs > 1:
         txt = repeat(txt, "1 ... -> bs ...", bs=bs)
+        txtmask = repeat(txtmask, "1 ... -> bs ...", bs=bs)
     txt_ids = torch.zeros(bs, txt.shape[1], 3)
 
     vec = clip(prompt)
@@ -224,6 +227,7 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
         "img_ids": img_ids.to(img.device),
         "txt": txt.to(img.device),
         "txt_ids": txt_ids.to(img.device),
+        "txt_attn_mask": txtmask.to(img.device),
         "vec": vec.to(img.device),
     }
 
@@ -266,24 +270,38 @@ def denoise(
     img_ids: Tensor,
     txt: Tensor,
     txt_ids: Tensor,
+    txt_attn_mask: Tensor,
     vec: Tensor,
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
+    use_cfg_guidance = False,
 ):
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+        
+        if use_cfg_guidance:
+            half_x = img[:len(img)//2]
+            img = torch.cat([half_x, half_x], dim=0)
+            t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+        
         pred = model(
             img=img,
             img_ids=img_ids,
             txt=txt,
             txt_ids=txt_ids,
+            txt_attn_mask=txt_attn_mask,
             y=vec,
             timesteps=t_vec,
             guidance=guidance_vec,
         )
+        
+        if use_cfg_guidance:
+            uncond, cond = pred.chunk(2, dim=0)
+            model_output = uncond + guidance * (cond - uncond)
+            pred = torch.cat([model_output, model_output], dim=0)
 
         img = img + (t_prev - t_curr) * pred
 

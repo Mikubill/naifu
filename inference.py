@@ -201,12 +201,12 @@ def main(
 
         inp = prepare(t5=t5, clip=clip, img=x, prompt=opts.prompt)
 
-        # denoise initial noise
-        x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
-
-        # decode latents to pixel space
-        x = unpack(x.float(), opts.height, opts.width)
         with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
+            # denoise initial noise
+            x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
+
+            # decode latents to pixel space
+            x = unpack(x.float(), opts.height, opts.width)
             x = ae.decode(x)
 
         t1 = time.perf_counter()

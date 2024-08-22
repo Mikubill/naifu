@@ -7,13 +7,24 @@ import torch.utils.checkpoint as checkpoint
 from torch import Tensor, nn
 
 
-def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
-    q, k = apply_rope(q, k, pe)
+def expand_flux_attention_mask(residual_seq_len: int, attn_mask: torch.Tensor) -> torch.Tensor:
+    """
+    Expand a mask so that the image is included.
+    """
+    bsz = attn_mask.shape[0]
+    mask_seq_len = attn_mask.shape[1]
 
+    expanded_mask = torch.ones(bsz, residual_seq_len)
+    start_index = residual_seq_len - mask_seq_len
+    expanded_mask[:, start_index:] = attn_mask
+    return expanded_mask
+
+
+def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor, attn_mask=None) -> Tensor:
+    q, k = apply_rope(q, k, pe)
     x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
     # x = rearrange(x, "B H L D -> B L (H D)")
     x = x.permute(0, 2, 1, 3).reshape(x.size(0), x.size(2), -1)
-
     return x
 
 
@@ -195,7 +206,7 @@ class DoubleStreamBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, hidden_size, bias=True),
         )
 
-    def _forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> tuple[Tensor, Tensor]:
+    def _forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, attn_mask: Tensor = None) -> tuple[Tensor, Tensor]:
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
@@ -223,8 +234,11 @@ class DoubleStreamBlock(nn.Module):
         q = torch.cat((txt_q, img_q), dim=2)
         k = torch.cat((txt_k, img_k), dim=2)
         v = torch.cat((txt_v, img_v), dim=2)
+        
+        if attn_mask is not None:
+            attn_mask = expand_flux_attention_mask(txt_qkv.shape[1] + img_qkv.shape[1], attn_mask)
 
-        attn = attention(q, k, v, pe=pe)
+        attn = attention(q, k, v, pe=pe, attn_mask=attn_mask)
         txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
 
         # calculate the img bloks
@@ -236,10 +250,10 @@ class DoubleStreamBlock(nn.Module):
         txt = txt + txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
         return img, txt
     
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, attn_mask: Tensor = None) -> Tensor:
         if self.training:
-            return checkpoint.checkpoint(self._forward, img, txt, vec, pe)
-        return self._forward(img, txt, vec, pe)
+            return checkpoint.checkpoint(self._forward, img, txt, vec, pe, attn_mask)
+        return self._forward(img, txt, vec, pe, attn_mask)
 
 
 class SingleStreamBlock(nn.Module):
@@ -275,7 +289,7 @@ class SingleStreamBlock(nn.Module):
         self.mlp_act = nn.GELU(approximate="tanh")
         self.modulation = Modulation(hidden_size, double=False)
 
-    def _forward(self, x: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+    def _forward(self, x: Tensor, vec: Tensor, pe: Tensor, attn_mask: Tensor = None) -> Tensor:
         mod, _ = self.modulation(vec)
         x_mod = (1 + mod.scale) * self.pre_norm(x) + mod.shift
         qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
@@ -285,16 +299,19 @@ class SingleStreamBlock(nn.Module):
         q, k, v = qkv.permute(2, 0, 3, 1, 4)
         q, k = self.norm(q, k, v)
 
+        if attn_mask is not None:
+            attn_mask = expand_flux_attention_mask(qkv.shape[1], attn_mask)
+
         # compute attention
-        attn = attention(q, k, v, pe=pe)
+        attn = attention(q, k, v, pe=pe, attn_mask=attn_mask)
         # compute activation in mlp stream, cat again and run second linear layer
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
         return x + mod.gate * output
     
-    def forward(self, x: Tensor, vec: Tensor, pe: Tensor) -> Tensor:
+    def forward(self, x: Tensor, vec: Tensor, pe: Tensor, attn_mask: Tensor = None) -> Tensor:
         if self.training:
-            return checkpoint.checkpoint(self._forward, x, vec, pe)
-        return self._forward(x, vec, pe)
+            return checkpoint.checkpoint(self._forward, x, vec, pe, attn_mask)
+        return self._forward(x, vec, pe, attn_mask)
     
 
 class LastLayer(nn.Module):
@@ -383,6 +400,7 @@ class Flux(nn.Module):
         img_ids: Tensor,
         txt: Tensor,
         txt_ids: Tensor,
+        txt_attn_mask: Tensor,
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor | None = None,
@@ -404,12 +422,12 @@ class Flux(nn.Module):
         pe = self.pe_embedder(ids)
 
         for block in self.double_blocks:
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
-
+            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, attn_mask=txt_attn_mask)
+            
         img = torch.cat((txt, img), 1)
         for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe)
+            img = block(img, vec=vec, pe=pe, attn_mask=txt_attn_mask)
+            
         img = img[:, txt.shape[1] :, ...]
-
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
         return img

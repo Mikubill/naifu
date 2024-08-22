@@ -35,9 +35,9 @@ class FluxModel(nn.Module):
             ckpt_path=self.config.get("ckpt_path", "/storage/dev/nyanko/flux-dev/flux1-dev.sft"),
             ae_path=self.config.get("ae_path", "/storage/dev/nyanko/flux-dev/ae.sft"),
             device=self.target_device,
-            use_attention_mask=self.config.get("use_attention_mask", False),
         )
         
+        self.use_attention_mask = self.config.get("use_attention_mask", False)
         self.ae, self.t5, self.clip = [ae], [t5], [clip]
         self.vae_encode_bsz = 8
         logger.info("Model initialized in {:.2f}s".format(time.perf_counter() - timer))
@@ -59,6 +59,8 @@ class FluxModel(nn.Module):
         x = get_noise(1, height, width, device=self.target_device, dtype=torch.bfloat16, seed=seed)
         timesteps = get_schedule(steps, (x.shape[-1] * x.shape[-2]) // 4, shift=True)
         inp = prepare(t5=t5, clip=clip, img=x, prompt=prompt)
+        if not self.use_attention_mask:
+            inp["txt_attn_mask"] = None
         
         with torch.autocast("cuda", dtype=torch.bfloat16):
             x = denoise(self.model, **inp, timesteps=timesteps, guidance=3)
@@ -108,6 +110,7 @@ class FluxModel(nn.Module):
                 "img_ids": forward_args["img_ids"],
                 "txt": forward_args["txt"],
                 "txt_ids": forward_args["txt_ids"],
+                "txt_attn_mask": forward_args["txt_attn_mask"] if self.use_attention_mask else None,
                 "y": forward_args["vec"],
                 "guidance": torch.tensor([1.0] * bsz, device=self.target_device, dtype=model_dtype),
                 "timesteps": t.to(model_dtype)

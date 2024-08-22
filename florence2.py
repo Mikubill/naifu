@@ -19,8 +19,8 @@ def main():
     fabric.launch()
     fabric.seed_everything(42)
     
-    model = AutoModelForCausalLM.from_pretrained("gokaygokay/Florence-2-SD3-Captioner", trust_remote_code=True).to(fabric.device).eval()
-    processor = AutoProcessor.from_pretrained("gokaygokay/Florence-2-SD3-Captioner", trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-large", trust_remote_code=True).to(fabric.device).eval()
+    processor = AutoProcessor.from_pretrained("microsoft/Florence-2-large", trust_remote_code=True)
     
     def process_batch(task_prompt, text_input, images):
         prompts = [task_prompt + text_input] * len(images)
@@ -43,22 +43,22 @@ def main():
     image_paths = list(glob.glob("/storage/training/nyanko/special-groups/**/*.webp", recursive=True))
     image_paths = image_paths[fabric.global_rank::fabric.world_size]
     
-    batch_size = 16  # Adjust this based on your GPU memory
+    batch_size = 64  # Adjust this based on your GPU memory
     for i in trange(0, len(image_paths), batch_size):
         batch_paths = image_paths[i:i+batch_size]
         batch_images = [Image.open(path) for path in batch_paths]
         
-        results = process_batch("<DESCRIPTION>", "Describe this image in brief detail.", batch_images)
+        results = process_batch("<DETAILED_CAPTION>", "", batch_images)
         
         for path, result in zip(batch_paths, results):
-            result = result['<DESCRIPTION>'].replace("An animated image of ", "").replace("Captured from a low-angle perspective", "").replace("Captured from a high-angle perspective", "")\
+            result = result['<DETAILED_CAPTION>'].replace("The image shows ", "").replace("An animated image of ", "").replace("Captured from a low-angle perspective", "").replace("Captured from a high-angle perspective", "")\
                 .replace("cartoon", "").replace("women", "girl").replace("Japanese", "").replace("woman", "girl").replace("female", "girl").replace("an Asian", "a").strip(",").strip()
                 
             txtpath = Path(path).with_suffix(".floerence2.txt")
             with open(txtpath, "w") as f:
                 f.write(result)
             
-            # print(path, result)
+            print(path, result)
 
 if __name__ == "__main__":
     main()

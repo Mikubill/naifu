@@ -34,3 +34,6 @@ output/
 cluster4-training.yaml
 distributed_train_py310.sh
 *.nsys-rep
+ema*
+combined*
+florence2_parquet.py
