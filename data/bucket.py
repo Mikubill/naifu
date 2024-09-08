@@ -272,7 +272,7 @@ class AdaptiveSizeDataset(RatioDataset):
         img_res = np.array(self.store.raw_res)
         self.to_size = {}
         self.bucket_content = defaultdict(list)
-        
+
         # Assign images to buckets
         for idx, (img_width, img_height) in enumerate(img_res):
             img_area = img_width * img_height
@@ -287,6 +287,6 @@ class AdaptiveSizeDataset(RatioDataset):
             bucket_height = img_height - img_height % self.divisible
             reso = (bucket_width, bucket_height)
             self.bucket_content[reso].append(idx)
-            self.to_size[idx] = (img_width, img_height)
-            
+            self.to_size[idx] = (bucket_width, bucket_height)
+
         self.bucket_content = [v for k, v in self.bucket_content.items()]
