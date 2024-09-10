@@ -97,6 +97,10 @@ class FluxModel(nn.Module):
             # u = torch.normal(mean=0.0, std=1.0, size=(len(latents),), device=self.target_device)
             # t = torch.nn.functional.sigmoid(u)
             t = torch.sigmoid(torch.randn((bsz,), device=self.target_device))
+
+            image_seq_len = latents.shape[1] * latents.shape[2] // 4
+            mu = get_lin_function(y1=0.5, y2=1.15)(image_seq_len)
+            t = time_shift(mu, 1.0, t)
             # t = torch.rand((bsz,), device=self.target_device)
 
             # Sample noise that we'll add to the latents
