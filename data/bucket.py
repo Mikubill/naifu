@@ -80,7 +80,6 @@ class RatioDataset(Dataset):
             self,
             sampler=None,
             batch_size=None,
-            persistent_workers=False,
             num_workers=self.num_workers,
             worker_init_fn=worker_init_fn,
             shuffle=True,
