@@ -26,7 +26,7 @@ def is_latent_folder(path: Path):
 def worker_init_fn(worker_id):
     worker_info = get_worker_info()
     dataset: RatioDataset = worker_info.dataset  # type: ignore
-    random.seed(worker_info.seed)  # type: ignore
+    # random.seed(worker_info.seed)  # type: ignore
     dataset.init_batches()
 
 
@@ -128,7 +128,7 @@ class RatioDataset(Dataset):
                 self.batch_idxs.extend(bucket[:-reminder].reshape(-1, self.batch_size))
                 self.batch_idxs.append(bucket[-reminder:])
 
-        np.random.shuffle(self.batch_idxs)
+        self.rng.shuffle(self.batch_idxs)
 
     def __getitem__(self, idx):
         img_idxs = self.batch_idxs[idx]

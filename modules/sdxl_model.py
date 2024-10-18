@@ -145,6 +145,7 @@ class StableDiffusionModel(pl.LightningModule):
     @torch.no_grad()
     def encode_first_stage(self, x):
         latents = []
+        self.first_stage_model = self.first_stage_model.float()
         with torch.autocast("cuda", enabled=False):
             for i in range(0, x.shape[0], self.vae_encode_bsz):
                 o = x[i : i + self.vae_encode_bsz]
@@ -330,6 +331,23 @@ class StableDiffusionModel(pl.LightningModule):
             vae_weight = self.first_stage_model.state_dict()
             for key in vae_weight.keys():
                 weight_to_save[f"first_stage_model.{key}"] = vae_weight[key]
+        elif hasattr(self, "_deepspeed_engine"):
+            from deepspeed import zero
+            weight_to_save = {}
+            with zero.GatheredParameters(self.model.parameters()):
+                unet_weight = self.model.state_dict()
+                for key in unet_weight.keys():
+                    weight_to_save[f"model.{key}"] = unet_weight[key]
+                
+            with zero.GatheredParameters(self.conditioner.parameters()):
+                cond_weight = self.conditioner.state_dict()
+                for key in cond_weight.keys():
+                    weight_to_save[f"conditioner.{key}"] = cond_weight[key]
+                
+            vae_weight = self.first_stage_model.state_dict()
+            for key in vae_weight.keys():
+                weight_to_save[f"first_stage_model.{key}"] = vae_weight[key]
+                
         else:
             weight_to_save = self.state_dict()
                 

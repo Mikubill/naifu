@@ -352,8 +352,8 @@ class DirectoryImageStore(StoreBase):
             img = np.array(_img)
         elif _img.mode == "RGBA":
             # transparent images
-            baimg = Image.new('RGB', img.size, (255, 255, 255))
-            baimg.paste(img, (0, 0), img)
+            baimg = Image.new('RGB', _img.size, (255, 255, 255))
+            baimg.paste(_img, (0, 0), _img)
             img = np.array(baimg)
         else:
             img = np.array(_img.convert("RGB"))

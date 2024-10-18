@@ -1,0 +1,75 @@
+name: test-run
+target: modules.train_sdxl.setup
+
+trainer:
+  model_path: ../test.safetensors
+  batch_size: 4
+  seed: 1138
+  wandb_id: ""
+  use_xformers: false
+  accumulate_grad_batches: 1
+  gradient_clip_val: 0.0
+
+  save_format: safetensors
+  checkpoint_dir: checkpoint
+  checkpoint_freq: 1
+  checkpoint_steps: -1
+  save_weights_only: true
+  max_epochs: 60
+  max_steps: -1
+
+advanced:
+  vae_encode_batch_size: -1 # same as batch_size
+  train_text_encoder_1: true
+  train_text_encoder_2: true
+  text_encoder_1_lr: 3e-6
+  text_encoder_2_lr: 3e-6
+  offset_noise: true
+  offset_noise_val: 0.0375
+  min_snr: true
+  min_snr_val: 5
+  timestep_start: 0
+  timestep_end: 1000
+  v_parameterization: false
+  zero_terminal_snr: false
+  
+lightning:
+  accelerator: gpu
+  devices: -1
+  strategy: common.deepspeed._sdxl_strategy
+  precision: bf16
+
+dataset:
+  name: data.bucket.AdaptiveSizeDataset
+  target_area: 1_048_576 # 1024*1024
+  img_path: "/storage/dev/nyanko/cc"
+  # process_batch_fn: data.processors.shuffle_prompts_sdstyle
+  max_token_length: 225 # [75, 150, 225]
+
+optimizer:
+  name: torch.optim.AdamW
+  params:
+    lr: 5e-6
+    weight_decay: 1e-2
+
+scheduler:
+  name: transformers.get_constant_schedule_with_warmup
+  params:
+    num_warmup_steps: 0
+    last_epoch: -1
+
+sampling:
+  enabled: false
+  use_wandb: true
+  seed: 1234
+  height: 1280
+  width: 768
+  every_n_steps: -1
+  every_n_epochs: 1
+  save_dir: "samples"
+  prompts: 
+    - "best quality, a girl with a yellow hat and a yellow shirt, sitting, white legwear, uniform, jacket, thighhighs, bare shoulders, high contrast, paint splatter"
+    - "best quality, 1girl, solo, loli, cat girl, silver hair ,blue eyes, flat chest, solo, beautiful detailed background, messy hair, long hair"
+    - "masterpiece, best quality, 1girl, solo,loli,wedding dress|see-through highleg leotard, veil, elbow gloves, white thighhighs, crown, earrings, bow on waist, sideboob, lace,"
+    - "1girl, solo, shirt, thighhighs, skirt, hands on hips, white shirt, crystal, flandre scarlet, blonde hair, grey skirt, red bow, red eyes, black thighhighs, wings, white background,"
+    - "1girl,sitting,fantasy,masterpiece,best quality,(long blonde hair),(blue eyes),(floating hair),(black ribbed sweater:1.1),(red plaid skirt:1.1),(cat ears)"

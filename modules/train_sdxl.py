@@ -64,16 +64,20 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
     if fabric.is_global_zero and os.name != "nt":
         print(f"\n{ModelSummary(model, max_depth=1)}\n")
         
-    model.model, optimizer = fabric.setup(model.model, optimizer)
-    if config.advanced.get("train_text_encoder_1") or config.advanced.get("train_text_encoder_2"):
-        model.conditioner = fabric.setup(model.conditioner)
+    if hasattr(fabric.strategy, "_deepspeed_engine"):
+        model, optimizer = fabric.setup(model, optimizer)
+        model.get_module = lambda: model
+        model._deepspeed_engine = fabric.strategy._deepspeed_engine
+    elif hasattr(fabric.strategy, "_fsdp_kwargs"):
+        model, optimizer = fabric.setup(model, optimizer)
+        model.get_module = lambda: model
+        model._fsdp_engine = fabric.strategy
+    else:
+        model.model, optimizer = fabric.setup(model.model, optimizer)
+        if config.advanced.get("train_text_encoder_1") or config.advanced.get("train_text_encoder_2"):
+            model.conditioner = fabric.setup(model.conditioner)
         
     dataloader = fabric.setup_dataloaders(dataloader)
-    if hasattr(fabric.strategy, "_deepspeed_engine"):
-        model._deepspeed_engine = fabric.strategy._deepspeed_engine
-    if hasattr(fabric.strategy, "_fsdp_kwargs"):
-        model._fsdp_engine = fabric.strategy
-    
     model._fabric_wrapped = fabric
     return model, dataset, dataloader, optimizer, scheduler
 
@@ -143,6 +147,7 @@ class SupervisedFineTune(StableDiffusionModel):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
+        noisy_latents = noisy_latents.to(model_dtype)
         noise_pred = self.model(noisy_latents, timesteps, cond)
 
         # Get the target for loss depending on the prediction type

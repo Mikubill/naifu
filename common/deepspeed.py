@@ -43,3 +43,31 @@ ds_strategy = DeepSpeedStrategy(
 
 def _strategy():
     return ds_strategy
+
+
+sdxl_ds_strategy = DeepSpeedStrategy(
+    stage=2,
+    config={
+        # "fp16": {
+        #     "enabled": "auto",
+        #     "loss_scale": 0,
+        #     "loss_scale_window": 1000,
+        #     "initial_scale_power": 16,
+        #     "hysteresis": 2,
+        #     "min_loss_scale": 1
+        # },
+        "bf16": {
+            "enabled": True,
+        },
+        "zero_optimization": {
+            "stage": 2,
+            "reduce_scatter": False,
+            "overlap_comm": True,
+        },
+        "zero_allow_untested_optimizer": True,
+    }
+)   
+
+
+def _sdxl_strategy():
+    return sdxl_ds_strategy
