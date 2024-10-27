@@ -5,6 +5,7 @@ import random
 import torch
 from collections import defaultdict
 
+import cv2
 from pathlib import Path
 from torch.utils.data import Dataset, get_worker_info
 from data.image_storage import DirectoryImageStore, Entry, LatentStore
@@ -165,12 +166,20 @@ class AspectRatioDataset(RatioDataset):
         h, w = self.ratio_to_bucket[target_ratio]
         if not entry.is_latent:
             resize_h, resize_w = self.fit_dimensions(base_ratio, h, w)
-            interp = InterpolationMode.BILINEAR if resize_h < H else InterpolationMode.BICUBIC
-            entry.pixel = Resize(
-                size=(resize_h, resize_w), 
-                interpolation=interp, 
-                antialias=None
-            )(entry.pixel)
+            # interp = InterpolationMode.BILINEAR if resize_h < H else InterpolationMode.BICUBIC
+            # entry.pixel = Resize(
+            #     size=(resize_h, resize_w), 
+            #     interpolation=interp, 
+            #     antialias=None
+            # )(entry.pixel)
+            
+            pixel = entry.pixel
+            if isinstance(pixel, torch.Tensor):
+                pixel = pixel.permute(1, 2, 0).cpu().numpy()
+                
+            interp = cv2.INTER_AREA if resize_h < H else cv2.INTER_LANCZOS4
+            pixel = cv2.resize(pixel.astype(float), (resize_w, resize_h), interpolation=interp)
+            entry.pixel = torch.from_numpy(pixel).permute(2, 0, 1)
         else:
             h, w = h // 8, w // 8
 
@@ -246,11 +255,19 @@ class AdaptiveSizeDataset(RatioDataset):
         
         if not entry.is_latent:
             resize_h, resize_w = h, w
-            entry.pixel = Resize(
-                size=(resize_h, resize_w), 
-                interpolation=InterpolationMode.BILINEAR, 
-                antialias=None
-            )(entry.pixel)
+            # entry.pixel = Resize(
+            #     size=(resize_h, resize_w), 
+            #     interpolation=InterpolationMode.BILINEAR, 
+            #     antialias=None
+            # )(entry.pixel)
+
+            pixel = entry.pixel
+            if isinstance(pixel, torch.Tensor):
+                pixel = pixel.permute(1, 2, 0).cpu().numpy()
+                
+            interp = cv2.INTER_AREA if resize_h < H else cv2.INTER_LANCZOS4
+            pixel = cv2.resize(pixel.astype(float), (resize_w, resize_h), interpolation=interp)
+            entry.pixel = torch.from_numpy(pixel).permute(2, 0, 1)
         else:
             h, w = bucket_height // 8, bucket_width // 8
 

@@ -168,7 +168,7 @@ class LatentEncodingDataset(Dataset):
         target_ratio = self.to_ratio[idx]
         target_h, target_w = self.ratio_to_bucket[target_ratio]
         resize_h, resize_w = self.fit_dimensions(base_ratio, target_h, target_w)
-        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
+        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_LANCZOS4
         img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
 
         dh, dw = abs(target_h - img.shape[0]) // 2, abs(target_w - img.shape[1]) // 2
@@ -191,7 +191,7 @@ class LatentEncodingDataset(Dataset):
         target_w = resize_w - resize_w % self.divisible
         target_h = resize_h - resize_h % self.divisible
             
-        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_CUBIC
+        interp = cv2.INTER_AREA if resize_h < h else cv2.INTER_LANCZOS4
         img = cv2.resize(img, (resize_w, resize_h), interpolation=interp)
 
         dh, dw = abs(target_h - img.shape[0]) // 2, abs(target_w - img.shape[1]) // 2
