@@ -134,7 +134,7 @@ class LatentEncodingDataset(Dataset):
 
         # Assign images to buckets
         for idx, img_ratio in enumerate(img_ratios):
-            diff = np.abs(self.bucket_ratios - img_ratio)
+            diff = np.abs(np.log(self.bucket_ratios) - np.log(img_ratio))
             bucket_idx = np.argmin(diff)
             self.bucket_content[bucket_idx].append(idx)
             self.to_ratio[idx] = self.bucket_ratios[bucket_idx]
