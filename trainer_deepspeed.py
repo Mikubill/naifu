@@ -97,7 +97,24 @@ def main():
 
     optim_param = config.optimizer.params
     # modify here to use text encoder
-    optimizer = get_class(config.optimizer.name)(model.model.parameters(), **optim_param)
+
+    params_to_optim = [{'params': model.model.parameters()}]
+    if config.advanced.get("train_text_encoder_1"):
+        logger.info(f"Adding text encoder 1 params to optimizer")
+        lr = config.advanced.get("text_encoder_1_lr", config.optimizer.params.lr)
+        params_to_optim.append({"params": model.clip_l.parameters(), "lr": lr})
+
+    if config.advanced.get("train_text_encoder_2"):
+        logger.info(f"Adding text encoder 2 params to optimizer")
+        lr = config.advanced.get("text_encoder_2_lr", config.optimizer.params.lr)
+        params_to_optim.append({"params": model.clip_g.parameters(), "lr": lr})
+        
+    if config.advanced.get("train_text_encoder_3"):
+        logger.info(f"Adding text encoder 3 params to optimizer")
+        lr = config.advanced.get("text_encoder_3_lr", config.optimizer.params.lr)
+        params_to_optim.append({"params": model.t5xxl.parameters(), "lr": lr})    
+        
+    optimizer = get_class(config.optimizer.name)(params_to_optim, **optim_param)
     lr_scheduler = get_class(config.scheduler.name)(optimizer, **config.scheduler.params)
 
     # Boost model for distributed training\
