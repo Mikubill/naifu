@@ -75,6 +75,7 @@ class StableDiffusionModel(nn.Module):
                 # dtype=torch.float16
             )
             
+            qk_norm = "rms" if depth == 38 else None
             self.model = MMDITWrapper(
                 input_size=None, 
                 pos_embed_scaling_factor=None, 
@@ -89,7 +90,8 @@ class StableDiffusionModel(nn.Module):
                 device=self.target_device, 
                 # dtype=torch.float16,
                 compile_core=False,
-                use_checkpoint=True
+                use_checkpoint=True,
+                qk_norm=qk_norm,
             )
         
         self.first_stage_model.eval()
