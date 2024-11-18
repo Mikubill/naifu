@@ -76,7 +76,10 @@ def setup(fabric: pl.Fabric, config: OmegaConf) -> tuple:
         model.model, optimizer = fabric.setup(model.model, optimizer)
         if config.advanced.get("train_text_encoder_1") or config.advanced.get("train_text_encoder_2"):
             model.conditioner = fabric.setup(model.conditioner)
-        
+
+    if hasattr(model, "mark_forward_method"):
+        model.mark_forward_method('generate_samples')
+
     dataloader = fabric.setup_dataloaders(dataloader)
     model._fabric_wrapped = fabric
     return model, dataset, dataloader, optimizer, scheduler
