@@ -257,6 +257,9 @@ class StableDiffusionModel(pl.LightningModule):
         )
         if self.config.advanced.get("v_parameterization", False):
             scheduler_params["prediction_type"] = "v_prediction"
+        
+        if self.config.advanced.get("zero_terminal_snr", False):
+            apply_zero_terminal_snr(self.noise_scheduler)
 
         scheduler_cls = get_class(scheduler_name)
         scheduler = scheduler_cls(**scheduler_params)
