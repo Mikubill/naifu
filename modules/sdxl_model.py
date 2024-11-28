@@ -257,9 +257,13 @@ class StableDiffusionModel(pl.LightningModule):
         )
         if self.config.advanced.get("v_parameterization", False):
             scheduler_params["prediction_type"] = "v_prediction"
+        
+        if self.config.advanced.get("zero_terminal_snr", False):
+            scheduler_params["rescale_betas_zero_snr"] = True
 
         scheduler_cls = get_class(scheduler_name)
         scheduler = scheduler_cls(**scheduler_params)
+        
         prompts_batch = {
             "target_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
             "original_size_as_tuple": torch.stack([torch.asarray(size)]).cuda(),
