@@ -301,4 +301,8 @@ class DirectoryImageStore(StoreBase):
 
         img = self.transforms(img)
         extras = self.get_batch_extras(p)
+        if extras is None:
+            extras = {}
+        
+        extras["path"] = p
         return False, img, prompt, extras

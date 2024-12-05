@@ -134,16 +134,12 @@ class HFEmbedder(nn.Module):
             attention_mask=None,
             output_hidden_states=False,
         )
-        
-        if return_mask:
-            return outputs[self.output_key], batch_encoding["attention_mask"].to(self.hf_module.device)
         return outputs[self.output_key]
-    
     
 
 def load_models(name: str, ckpt_path: str, ae_path: str, device: torch.device = "meta"):
     is_schnell = "schnell" in name
-    t5 = HFEmbedder("google/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16).to(device)
+    t5 = HFEmbedder("DeepFloyd/t5-v1_1-xxl", max_length=256 if is_schnell else 512, torch_dtype=torch.bfloat16).to(device)
     clip = HFEmbedder("openai/clip-vit-large-patch14", max_length=77, torch_dtype=torch.bfloat16).to(device)
 
     with torch.device(device):
@@ -212,13 +208,21 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
     if isinstance(prompt, str):
         prompt = [prompt]
         
-    txt, txtmask = t5(prompt, return_mask=True)
+    if isinstance(t5, HFEmbedder):
+        txt = t5(prompt)
+    else:
+        txt = t5
+
     if txt.shape[0] == 1 and bs > 1:
         txt = repeat(txt, "1 ... -> bs ...", bs=bs)
         txtmask = repeat(txtmask, "1 ... -> bs ...", bs=bs)
     txt_ids = torch.zeros(bs, txt.shape[1], 3)
 
-    vec = clip(prompt)
+    if isinstance(clip, HFEmbedder):
+        vec = clip(prompt)
+    else:
+        vec = clip
+
     if vec.shape[0] == 1 and bs > 1:
         vec = repeat(vec, "1 ... -> bs ...", bs=bs)
 
@@ -227,7 +231,6 @@ def prepare(t5: HFEmbedder, clip: HFEmbedder, img: Tensor, prompt: str | list[st
         "img_ids": img_ids.to(img.device),
         "txt": txt.to(img.device),
         "txt_ids": txt_ids.to(img.device),
-        "txt_attn_mask": txtmask.to(img.device),
         "vec": vec.to(img.device),
     }
 
@@ -270,7 +273,6 @@ def denoise(
     img_ids: Tensor,
     txt: Tensor,
     txt_ids: Tensor,
-    txt_attn_mask: Tensor,
     vec: Tensor,
     # sampling parameters
     timesteps: list[float],
@@ -292,7 +294,6 @@ def denoise(
             img_ids=img_ids,
             txt=txt,
             txt_ids=txt_ids,
-            txt_attn_mask=txt_attn_mask,
             y=vec,
             timesteps=t_vec,
             guidance=guidance_vec,

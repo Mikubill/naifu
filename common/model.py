@@ -11,9 +11,14 @@ import time
 import torch.distributed as dist
 import torch.nn.functional as F
 
+import hashlib
 from common.logging import logger
 from common.model_utils import *
 from common.utils import log_image
+from safetensors.torch import save_file, load_file
+
+def sha1sum(txt):
+    return hashlib.sha1(txt.encode()).hexdigest()
 
 
 class FluxModel(nn.Module):
@@ -36,10 +41,10 @@ class FluxModel(nn.Module):
             ae_path=self.config.get("ae_path", "/storage/dev/nyanko/flux-dev/ae.sft"),
             device=self.target_device,
         )
-        
-        self.use_attention_mask = self.config.get("use_attention_mask", False)
+
         self.ae, self.t5, self.clip = [ae], [t5], [clip]
-        self.vae_encode_bsz = 8
+        self.vae_encode_bsz = 1
+        self.precache = self.config.get("precache", False)
         logger.info("Model initialized in {:.2f}s".format(time.perf_counter() - timer))
 
     @torch.inference_mode()
@@ -55,12 +60,13 @@ class FluxModel(nn.Module):
         ae = self.ae[0] if isinstance(self.ae, list) else self.ae
         
         ae.to(self.target_device)
+        t5.to(self.target_device)
+        clip.to(self.target_device)
+
         height, width = size
         x = get_noise(1, height, width, device=self.target_device, dtype=torch.bfloat16, seed=seed)
         timesteps = get_schedule(steps, (x.shape[-1] * x.shape[-2]) // 4, shift=True)
         inp = prepare(t5=t5, clip=clip, img=x, prompt=prompt)
-        if not self.use_attention_mask:
-            inp["txt_attn_mask"] = None
         
         with torch.autocast("cuda", dtype=torch.bfloat16):
             x = denoise(self.model, **inp, timesteps=timesteps, guidance=3)
@@ -73,7 +79,107 @@ class FluxModel(nn.Module):
         image = [Image.fromarray(im) for im in image]
         return image
 
+    def encode_batch(self, batch):
+        t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
+        clip = self.clip[0] if isinstance(self.clip, list) else self.clip
+        ae = self.ae[0] if isinstance(self.ae, list) else self.ae
+        ae = ae.to(self.target_device)
+        clip = clip.to(self.target_device)
+        t5 = t5.to(self.target_device)
+        
+        with torch.no_grad():
+            to_process = []
+            paths = [t["path"] for t in batch["extras"]]
+            for idx, f in enumerate(paths):
+                p = f"/tmp/{sha1sum(str(f))}.safetensors"
+                if not Path(p).exists():
+                    to_process.append(idx)
+
+            if len(to_process) == 0:
+                return
+
+            x = batch["pixels"][to_process].float()
+            latents = []
+            for i in range(0, x.shape[0], self.vae_encode_bsz):
+                o = x[i : i + self.vae_encode_bsz]
+                latents.append(ae.encode(o))
+                
+            latents = torch.cat(latents, dim=0)
+            noised_latents = torch.randn_like(latents)
+            prompts = [batch["prompts"][i] for i in to_process]
+            forward_args = prepare(t5, clip, noised_latents, prompts)
+            paths_target = [paths[i] for i in to_process]
+
+            txts = forward_args["txt"].to(torch.bfloat16)
+            vecs = forward_args["vec"].to(torch.bfloat16)
+            for path, latent, txt, vec in zip(paths_target, latents, txts, vecs):
+                state_dict = {"latent": latent, "txt": txt, "vec": vec}
+                save_file(state_dict, f"/tmp/{sha1sum(str(path))}.safetensors")
+
+    def forward_cached(self, batch):
+        with torch.no_grad():
+            latents = []
+            txts = []
+            vecs = []
+            paths = [t["path"] for t in batch["extras"]]
+            notexists = [not Path(f"/tmp/{sha1sum(str(p))}.safetensors").exists() for p in paths]
+            if any(notexists):
+                self.encode_batch(batch)
+                self.ae[0].cpu()
+                self.t5[0].cpu()
+                self.clip[0].cpu()
+                torch.cuda.empty_cache()
+
+            for p in paths:
+                state = load_file(f"/tmp/{sha1sum(str(p))}.safetensors", device=str(self.target_device))
+                latents.append(state["latent"])
+                txts.append(state["txt"])
+                vecs.append(state["vec"])
+            
+            latents = torch.stack(latents)
+            txts = torch.stack(txts)
+            vecs = torch.stack(vecs)
+
+            # for fast path
+            clip = vecs
+            t5 = txts
+
+            bsz, c, h, w = latents.shape 
+            model_dtype = torch.bfloat16 #next(self.model.parameters()).dtype 
+        
+            t = torch.sigmoid(torch.randn((bsz,), device=self.target_device))
+            image_seq_len = h * w // 4
+            mu = get_lin_function(y1=0.5, y2=1.15)(image_seq_len)
+            t = time_shift(mu, 1.0, t)
+            # t = torch.rand((bsz,), device=self.target_device)
+
+            # Sample noise that we'll add to the latents
+            noise = torch.randn_like(latents)
+            t_ = t.view(t.size(0), *([1] * (len(latents.size()) - 1)))
+            noised_latents = (1 - t_) * latents + t_ * noise
+            
+            forward_args = prepare(t5, clip, noised_latents, batch["prompts"])
+            forward_args = {
+                "img": forward_args["img"].to(model_dtype),
+                "img_ids": forward_args["img_ids"],
+                "txt": forward_args["txt"],
+                "txt_ids": forward_args["txt_ids"],
+                "y": forward_args["vec"],
+                "guidance": torch.tensor([1.0] * bsz, device=self.target_device, dtype=model_dtype),
+                "timesteps": t.to(model_dtype)
+            }
+        
+        model_pred = self.model(**forward_args)
+        model_pred = unpack(model_pred, h*8, w*8)
+        
+        target = noise - latents # for loss v
+        loss = torch.mean(((model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1), 1)
+        return loss.mean()
+
     def forward(self, batch):
+        if self.precache:
+            return self.forward_cached(batch)
+
         t5 = self.t5[0] if isinstance(self.t5, list) else self.t5
         clip = self.clip[0] if isinstance(self.clip, list) else self.clip
         ae = self.ae[0] if isinstance(self.ae, list) else self.ae
@@ -114,7 +220,6 @@ class FluxModel(nn.Module):
                 "img_ids": forward_args["img_ids"],
                 "txt": forward_args["txt"],
                 "txt_ids": forward_args["txt_ids"],
-                "txt_attn_mask": forward_args["txt_attn_mask"] if self.use_attention_mask else None,
                 "y": forward_args["vec"],
                 "guidance": torch.tensor([1.0] * bsz, device=self.target_device, dtype=model_dtype),
                 "timesteps": t.to(model_dtype)

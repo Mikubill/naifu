@@ -1,7 +1,4 @@
 # python trainer.py --config config/test.yaml
-from collections import defaultdict
-import functools
-import io
 import os
 import time
 import torch.utils
@@ -15,42 +12,14 @@ import lightning as pl
 from pathlib import Path
 from omegaconf import OmegaConf
 from lightning.fabric.wrappers import _unwrap_objects
-from safetensors.torch import save_file
 
 from common.logging import logger
 from common.utils import get_class, parse_args, ProgressBar
 from common.model import FluxModel
-from common.flux_optim import DoubleStreamBlock, SingleStreamBlock, RMSNorm
 from common.dataset import AspectRatioDataset, worker_init_fn
-
-from torch.distributed.fsdp import ShardingStrategy, BackwardPrefetch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy 
-from lightning.fabric.strategies import FSDPStrategy
-from lightning.fabric.plugins.precision import FSDPPrecision
-
-is_layer_moduule = lambda x: isinstance(x, DoubleStreamBlock) or isinstance(x, SingleStreamBlock)
-fsdp_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_layer_moduule)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-
-ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm, RMSNorm]
-def get_parameter_names(model, forbidden_layer_types):
-    """
-    Returns the names of the model parameters that are not inside a forbidden layer.
-    """
-    result = []
-    for name, child in model.named_children():
-        result += [
-            f"{name}.{n}"
-            for n in get_parameter_names(child, forbidden_layer_types)
-            if not isinstance(child, tuple(forbidden_layer_types))
-        ]
-    # Add model specific parameters (defined with nn.Parameter) since they are not in any child.
-    result += list(model._parameters.keys())
-    return result
-
 
 def main():
     """
@@ -62,20 +31,7 @@ def main():
     # ==============================
     # Initialize Distributed Training
     # ==============================
-    fsdp_strategy = FSDPStrategy(
-        sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        auto_wrap_policy=fsdp_policy,
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        # activation_checkpointing_policy=fsdp_policy,
-        state_dict_type="full",
-    )
-    fsdp_precision = FSDPPrecision(precision=config.trainer.precision)
-    fsdp_precision.convert_input = lambda x: x
-    fabric = pl.Fabric(
-        plugins=[fsdp_precision],
-        strategy=fsdp_strategy,
-        num_nodes=os.environ.get("NUM_NODES", 1)
-    )
+    fabric = pl.Fabric(precision="bf16-true")
         
     fabric.launch()
     fabric.seed_everything(config.trainer.seed)
@@ -150,13 +106,12 @@ def main():
         rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state()
 
-        with FSDP.summon_full_params(model, writeback=False):
-            _unwrap_objects(model).generate_samples(
-                world_size=fabric.world_size,
-                rank=fabric.global_rank,
-                current_epoch=current_epoch,
-                global_step=global_step,
-            )
+        _unwrap_objects(model).generate_samples(
+            world_size=fabric.world_size,
+            rank=fabric.global_rank,
+            current_epoch=current_epoch,
+            global_step=global_step,
+        )
         torch.cuda.empty_cache()
         torch.set_rng_state(rng_state)
         torch.cuda.set_rng_state(cuda_rng_state)
@@ -195,11 +150,21 @@ def main():
     # ==============================
     # Training Loop
     # ==============================
-    perform_sampling(forced=True)
+    perform_sampling()
     progress = ProgressBar(
         total=len(dataloader),
         disable=not fabric.is_global_zero,
     )
+    if model.precache:
+        desc = f"Caching"
+        progress.update(desc, 0)
+        for batch_idx, batch in enumerate(dataloader):
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(fabric.device)
+            model.encode_batch(batch)
+            progress.update(desc, batch_idx+1)
+
     for current_epoch in range(max_epoch):
         # here we can use the dataloader directly
         desc = f"Epoch {current_epoch}"

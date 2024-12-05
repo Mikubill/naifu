@@ -1,6 +1,6 @@
 name: test-run
 model_name: flux-dev
-use_attention_mask: True
+precache: true
 
 trainer:
   precision: bf16-true

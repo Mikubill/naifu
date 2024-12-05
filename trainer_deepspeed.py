@@ -22,12 +22,6 @@ from torch.utils.data import get_worker_info, DistributedSampler
 import deepspeed
 from deepspeed import zero
 
-USE_FP8 = False
-if USE_FP8:
-    import transformer_engine.pytorch as te
-    import transformer_engine.common.recipe as te_recipe
-    from transformer_engine.common.recipe import DelayedScaling
-
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
     
@@ -170,11 +164,6 @@ def main():
     # Training Loop
     # ==============================
     
-    # fp8
-    if USE_FP8:
-        FP8_RECIPE_KWARGS = {"fp8_format": te_recipe.Format.HYBRID, "amax_history_len": 32, "amax_compute_algo": "max"}
-        fp8_recipe = DelayedScaling(**FP8_RECIPE_KWARGS)
-    
     progress = ProgressBar(
         total=len(dataloader),
         disable=not global_rank in [0, -1],
@@ -197,12 +186,7 @@ def main():
             optimizer.zero_grad()
 
             # forward pass + backward pass
-            if USE_FP8:
-                with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                    loss = model(batch)
-            else:
-                loss = model(batch)
-                
+            loss = model(batch)    
             model_engine.backward(loss)
             model_engine.step()
 
