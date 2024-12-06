@@ -9,6 +9,7 @@ from tqdm import tqdm
 import torch.distributed as dist
 
 from models.sgm import GeneralConditioner
+from models.sgm.encoder_util import expand_dims_like
 from modules.sdxl_utils import disabled_train, UnetWrapper, AutoencoderKLWrapper
 from modules.scheduler_utils import apply_zero_terminal_snr, cache_snr_values
 from common.utils import get_class, load_torch_file, EmptyInitWrapper, get_world_size
@@ -118,6 +119,19 @@ class StableDiffusionModel(pl.LightningModule):
     def encode_batch(self, batch):
         self.conditioner.to(self.target_device)
         return self.conditioner(batch)
+
+    def dropout_cond(self, conds: dict):
+        bsz = conds['crossattn'].shape[0]
+        device = conds['crossattn'].device
+        dtype = conds['crossattn'].dtype
+
+        p = 1.0 - self.config.advanced.get("condition_dropout_rate")
+        batch_mask = torch.bernoulli(p * torch.ones(bsz, device=device, dtype=dtype))
+
+        for cond_batch in conds.values():
+            cond_batch.mul_(expand_dims_like(batch_mask, cond_batch))
+        
+        return conds
     
     def _denormlize(self, latents):
         if hasattr(self, "latents_mean"):
