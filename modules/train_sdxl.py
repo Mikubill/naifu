@@ -110,7 +110,11 @@ class SupervisedFineTune(StableDiffusionModel):
             self.first_stage_model.cpu()
             latents = self._normliaze(batch["pixels"])
 
-        cond = self.encode_batch(batch)
+        cond = self.encode_batch(batch)      
+
+        if self.config.advanced.get("condition_dropout_rate", 0.0) > 0.0:
+            cond = self.dropout_cond(cond)
+
         model_dtype = next(self.model.parameters()).dtype
         cond = {k: v.to(model_dtype) for k, v in cond.items()}
 
