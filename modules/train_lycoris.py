@@ -146,7 +146,7 @@ class StableDiffusionModel(SupervisedFineTune):
             self.forward_context = fabric.autocast()
             self.model.to(torch.float16)
         elif self.config.lightning.precision == "bf16-true":
-            self.forward_context = fabric.autocast()
+            # self.forward_context = fabric.autocast()
             self.model.to(torch.bfloat16)
     
     def init_model(self):
