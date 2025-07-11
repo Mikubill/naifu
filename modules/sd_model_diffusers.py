@@ -75,7 +75,7 @@ class StableDiffusionModel(pl.LightningModule):
         latents = []
         for i in range(0, feed_pixel_values.shape[0], self.vae_encode_bsz):
             with torch.autocast("cuda", enabled=False):
-                lat = self.vae.encode(feed_pixel_values[i : i + self.vae_encode_bsz]).latent_dist.sample()
+                lat = self.vae.encode(feed_pixel_values.float()[i : i + self.vae_encode_bsz]).latent_dist.sample()
             latents.append(lat)
         latents = torch.cat(latents, dim=0)
         latents = latents * self.vae.config.scaling_factor
